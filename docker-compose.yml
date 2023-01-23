@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+  core:
+    image: dillinger/core
+    build: 
+      context: ./
+      dockerfile: ./docker/images/core/Dockerfile
+    ports:
+      - "${PORT}:${PORT}"
+    network_mode: "host"
+    environment:
+      - PORT=$PORT
