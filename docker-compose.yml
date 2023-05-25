@@ -7,6 +7,5 @@ services:
       dockerfile: ./docker/images/core/Dockerfile
     ports:
       - "${PORT}:${PORT}"
-    network_mode: "host"
     environment:
       - PORT=$PORT
