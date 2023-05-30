@@ -1,3 +1,5 @@
 .DS_Store
 .vscode
+/dist
+/docker/images/core/dist
 # Ignore git subprojects
