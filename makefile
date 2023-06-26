@@ -1,12 +1,22 @@
 .DEFAULT_GOAL := help
 
 .PHONY: clean-all
-clean-all: clean-client clean-daemon 
+clean-all: clean-client-web clean-client-cli clean-dillinger-lib clean-daemon 
 
-.PHONY: clean-client
+.PHONY: clean-client-web
 clean-client: 
-	@cd client && rm -rf dist
-	@echo "client cleaned..."
+	@cd client_web && rm -rf dist
+	@echo "client_web cleaned..."
+
+.PHONY: clean-client-cli
+clean-client-cli: 
+	@cd client_cli && cargo clean
+	@echo "client_cli cleaned..."
+
+.PHONY: clean-dillinger-lib
+clean-dillinger-lib: 
+	@cd dillinger_lib && cargo clean
+	@echo "dillinger_lib cleaned..."
 
 .PHONY: clean-daemon
 clean-daemon:
@@ -18,16 +28,26 @@ build-all-release: RUST_BUILD_FLAGS += --release
 build-all-release: build-all 
 
 .PHONY: build-all
-build-all: build-client copy-client-dist build-daemon
+build-all: build-client-web build-client-cli build-daemon copy-client-dist
 
-.PHONY: build-client
-build-client:
-	@echo "building client..."
-	@cd client && npm run build
-	@echo "client built"
+.PHONY: build-client-web
+build-client-web:
+	@echo "building client_web..."
+	@cd client_web && npm run build
+	@echo "client_web built"
+
+build-dillinger-lib:
+	@echo "building dillinger_lib..."
+	@cd dillinger_lib && cargo build
+	@echo "dullinger_lib built"
+
+build-client-cli: build-dillinger-lib
+	@echo "building client_cli..."
+	@cd client_cli && cargo build
+	@echo "client_cli built"
 
 .PHONY: build-daemon
-build-daemon: clean-daemon
+build-daemon: clean-daemon build-dillinger-lib
 	@echo "building daemon..."
 	@cd daemon && cargo build $(RUST_BUILD_FLAGS)
 	@echo "daemon built"
@@ -48,7 +68,7 @@ package-all: package-daemon prepare-docker-dillinger build-docker-dillinger
 	
 .PHONY: copy-client-dist
 copy-client-dist:
-	@cd client && cp -r dist ../daemon/dist
+	@cd client_web && cp -r dist ../daemon/dist
 
 .PHONY: help
 help:
@@ -90,3 +110,8 @@ build-docker-dillinger: prepare-docker-dillinger
 .PHONY: run-docker-dillinger
 run-docker-dillinger:
 	@cd docker/compose && docker-compose -f core.yml up -d
+
+.PHONY: run-client-cli
+run-client-cli: build-client-cli
+	@echo "Running client_cli"
+	@cd client_cli && cargo run
