@@ -7,7 +7,7 @@ use crate::status_panel::StatusController;
 pub mod theme_default;
 pub mod status_panel;
 
-// create a static variable to hold a date
+// Updated from MBP16 test
 
 fn main() {
     let rt = Runtime::new().unwrap();
