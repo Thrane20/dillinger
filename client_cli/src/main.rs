@@ -1,16 +1,15 @@
 use tokio::runtime::Runtime;
 use cursive::{ view::{ Resizable }, views::{ Panel, ResizedView, TextView, LinearLayout } };
 
-use crate::status_panel::StatusPanel;
+use crate::status_panel::StatusView;
+use crate::status_panel::StatusController;
 
 pub mod theme_default;
 pub mod status_panel;
 
 // create a static variable to hold a date
 
-
 fn main() {
-    
     let rt = Runtime::new().unwrap();
 
     const TITLE: &str = "Dillinger-tui";
@@ -26,8 +25,9 @@ fn main() {
     let primary_layout = LinearLayout::horizontal().child(platform_panel).child(working_panel);
     let primary_panel = Panel::new(primary_layout).title("").full_height();
 
-    let mut status_panel : StatusPanel = StatusPanel::new();
-    let sp = StatusPanel::get_panel(&mut status_panel);
+    let mut status_panel: StatusView = StatusView::new();
+    let sp = StatusView::get_panel(&mut status_panel);
+    let mut status_controller: StatusController = StatusController::new();
 
     let main_screen_layout = LinearLayout::vertical()
         .child(primary_panel)
@@ -48,16 +48,16 @@ fn main() {
     siv.add_layer(root_layout);
 
     rt.block_on(async {
-        StatusPanel::probe_docker_status(&mut status_panel).await;
-        let s = StatusPanel::get_docker_status(&status_panel);
-
-        StatusPanel::update_docker_status(&mut status_panel, &mut siv, &s);
+        status_controller.probe_docker_status().await;
+        StatusController::probe_docker_status(&mut status_controller).await;
+        //StatusController::probe_docker_status(&mut status_controller).await;
     });
 
     siv.run();
 
-    
-
+    rt.block_on(async {
+        status_controller.probe_docker_status().await;
+        StatusController::probe_docker_status(&mut status_controller).await;
+        //StatusController::probe_docker_status(&mut status_controller).await;
+    });
 }
-
-
