@@ -1,5 +1,5 @@
 use tokio::runtime::Runtime;
-use cursive::{ view::{ Resizable }, views::{ Panel, ResizedView, TextView, LinearLayout } };
+use cursive::{ view::Resizable, views::{ Panel, ResizedView, TextView, LinearLayout } };
 
 use crate::status_panel::StatusView;
 use crate::status_panel::StatusController;

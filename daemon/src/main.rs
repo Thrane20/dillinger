@@ -4,6 +4,7 @@ use warp::Filter;
 use config::ConfigMain;
 
 pub mod config;
+pub mod docker_interactor;
 
 #[tokio::main]
 async fn main() {
@@ -32,18 +33,22 @@ async fn main() {
 
     let public_files = warp::fs::dir("./dist/");
 
-    let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
+    // Set up path handlers
+    let docker_status_handler = warp::path!("docker_status").and_then(docker_interactor::get_docker_status);
 
-    // let routes = static_dir.or(hello).or(other);
-    let routes = single_page_app.or(public_files).or(hello);
+    let routes = single_page_app.or(public_files);
     let routes = routes.or(warp::path!("test").map(|| "this is a test"));
+    let routes = routes.or(docker_status_handler);
     let routes = routes.with(warp::log("warp::filters::fs"));
 
-    let p = port.parse::<u16>().unwrap();
+    let port = match port.parse::<u16>() { 
+        Ok(p) => p, 
+        Err(_) => panic!("Invalid port number")
+    };
 
     let socket = std::net::SocketAddr::new(
         std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-        p
+        port
     );
     println!(
         "Dillinger Daemon is running at http://127.0.0.1:{}",
