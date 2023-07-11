@@ -9,8 +9,12 @@ pub struct ConfigMain {
 
 impl ConfigMain {
 
-    pub fn version(&self) -> &Value {
-        return self.get_json_value().get("version").unwrap();
+    pub fn version(&self) -> Result<String, Box<dyn std::error::Error>> {
+        match self.get_json_value().get("version") {
+            Some(value) => Ok(value.to_string()),
+            None => Err("version attribute of main config missing or incorrect"),
+        }
+
     }
 
     pub fn load_from_file(config_dir: &str) -> Self {
