@@ -11,7 +11,7 @@ pub struct DockerStatus {
 
 pub async fn get_docker_status() -> Result<impl warp::Reply, Infallible> {
     let result = docker::ping().await;
-    let mut result = match result {
+    let result = match result {
         true => DockerStatus { is_up: true },
         false => DockerStatus { is_up: false },
     };
