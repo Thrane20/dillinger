@@ -38,6 +38,7 @@ RUN meson build/
 RUN ninja -C build/
 
 FROM apline:latest
+LABEL org.opencontainers.image.description Dillinger support tool - builds Valve Software GameScope for internal distribution
 WORKDIR /opt/gamescope/bin
 COPY --from=gamescopesourcebuilder /home/src/gamescope/build/src/gamescope .
 
