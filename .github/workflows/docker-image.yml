@@ -19,7 +19,7 @@ jobs:
       with:
         registry: ghcr.io
         username: ${{ github.repository_owner }}
-        password: ${{ secrets.GHCR_TOKEN }}
+        password: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Build 
       run: docker build . --file Dockerfile --tag dillinger/builder-gamescope:0.1
