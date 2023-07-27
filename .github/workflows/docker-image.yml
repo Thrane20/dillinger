@@ -6,7 +6,7 @@ on:
   
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: dillinger/builder-gamescope:alpha
+  IMAGE_NAME: dillinger/builder-gamescope
 
 jobs:
   docker-build-gamescope-builder:
