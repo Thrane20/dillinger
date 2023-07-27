@@ -37,4 +37,8 @@ RUN git submodule update --init
 RUN meson build/
 RUN ninja -C build/
 
+FROM apline:latest
+WORKDIR /opt/gamescope/bin
+COPY --from=gamescopesourcebuilder /home/src/gamescope/build/src/gamescope .
+
 CMD ["/bin/bash"]
