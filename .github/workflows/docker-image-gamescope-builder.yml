@@ -29,4 +29,4 @@ jobs:
         context: .
         file: docker/images/gamescope/Dockerfile
         push: true
-        tags: ghcr.io/Thrane20/dillinger/builder-gamescope:3.12.0
+        tags: ghcr.io/thrane20/dillinger/builder-gamescope:3.12.0
