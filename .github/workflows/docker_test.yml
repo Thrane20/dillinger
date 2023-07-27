@@ -35,5 +35,5 @@ jobs:
         context: .
         file: docker/images/test/Dockerfile
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
+        tags: ghcr.io/thrane20/dillinger/test:12.3.0
         labels: ${{ steps.meta.outputs.labels }}
