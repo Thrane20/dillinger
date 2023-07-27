@@ -33,9 +33,6 @@ RUN git clone --depth 1 --branch 3.12.0 https://github.com/ValveSoftware/gamesco
 WORKDIR /home/src/gamescope
 RUN git submodule update --init
 
-RUN apt install -y xwayland
-
-
 # And build via meson and ninja
 RUN meson build/
 RUN ninja -C build/
