@@ -42,4 +42,4 @@ LABEL org.opencontainers.image.description Dillinger support tool - builds Valve
 WORKDIR /opt/gamescope/bin
 COPY --from=gamescopesourcebuilder /home/src/gamescope/build/src/gamescope .
 
-CMD ["/bin/bash"]
+CMD ["/bin/sh"]
