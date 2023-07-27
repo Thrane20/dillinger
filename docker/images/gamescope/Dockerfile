@@ -21,7 +21,7 @@ RUN apt update
 RUN apt install -y vulkan-sdk
 
 WORKDIR /home/src/hwdata
-COPY ./hwdata_0.372-1_all.deb .
+COPY hwdata_0.372-1_all.deb .
 RUN  dpkg -i hwdata_0.372-1_all.deb
 
 FROM gamescopebuilder as gamescopesourcebuilder
