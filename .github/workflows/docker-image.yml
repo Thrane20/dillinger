@@ -3,23 +3,37 @@ name: Docker Image CI GameScope Builder
 on:
   push:
   pull_request:
+  
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: dillinger/builder-gamescope:alpha
 
 jobs:
   docker-build-gamescope-builder:
+    
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: "dillinger/gamescope"
     
     steps:
     - name: Checkout
       uses: actions/checkout@v3
     
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v2
+      uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
       with:
-        registry: ghcr.io
-        username: ${{ github.repository_owner }}
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
         
-    - name: Build 
-      run: docker build . --file Dockerfile --tag dillinger/builder-gamescope:0.1
+    - name: Extract metadata (tags, labels) for Docker
+      id: meta
+      uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v2
+      with:
+        context: docker/images/gamescope
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
