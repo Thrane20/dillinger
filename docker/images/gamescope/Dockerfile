@@ -24,12 +24,12 @@ WORKDIR /home/src/hwdata
 COPY ./docker/images/gamescope/hwdata_0.372-1_all.deb .
 RUN  dpkg -i hwdata_0.372-1_all.deb
 
-FROM gamescopebuilder as gamescopesourcebuilder
+FROM gamescopebuilder as gamescopesourcebuilder 
 
 # Get the gamescope source code
 RUN cd /home/src
 WORKDIR /home/src
-RUN git clone --depth 1 --branch 3.12.0 https://github.com/ValveSoftware/gamescope.git
+RUN git clone --depth 1 --branch 3.11.51 https://github.com/ValveSoftware/gamescope.git
 WORKDIR /home/src/gamescope
 RUN git submodule update --init
 
@@ -37,9 +37,9 @@ RUN git submodule update --init
 RUN meson build/
 RUN ninja -C build/
 
-FROM alpine:latest
-LABEL org.opencontainers.image.description Dillinger support tool - builds Valve Software GameScope for internal distribution
-WORKDIR /opt/gamescope/bin
-COPY --from=gamescopesourcebuilder /home/src/gamescope/build/src/gamescope .
+# FROM alpine:latest
+# LABEL org.opencontainers.image.description Dillinger support tool - builds Valve Software GameScope for internal distribution
+# WORKDIR /opt/gamescope/bin
+# COPY --from=gamescopesourcebuilder /home/src/gamescope/build/gamescope .
 
 CMD ["/bin/sh"]
