@@ -1,6 +1,5 @@
 use reqwest::header::{ HeaderMap, HeaderValue, ACCEPT, USER_AGENT };
-use crate::global_types::Game;
-use crate::scrapers::scrapers::{ AuthToken, GameDatabase };
+use crate::scrapers::scrapers::{ AuthToken, GameDatabase, ScrapeEntry, ScreenshotInfo };
 
 
 pub struct IgdbDatabase {
@@ -44,7 +43,7 @@ impl GameDatabase for IgdbDatabase {
         }
     }
 
-    fn search_game(&mut self, name: &str) -> Vec<Game> {
+    fn search_game(&mut self, name: &str) -> Vec<ScrapeEntry> {
         
         let token = self.authentiate();
 
@@ -76,16 +75,18 @@ impl GameDatabase for IgdbDatabase {
             .json::<serde_json::Value>();
 
         // convert the json response to a vector of game structs
-        let games: Vec<Game> = res
+        let games: Vec<ScrapeEntry> = res
             .unwrap()
             .as_array()
             .unwrap()
             .into_iter()
-            .map(|game| Game {
+            .map(|game| ScrapeEntry {
                 id: game["id"].as_u64().unwrap(),
                 slug: "unknown".to_string(),
                 name: game["name"].as_str().unwrap().to_string(),
                 gamedb: "igdb".to_string(),
+                file: "unknown".to_string(),
+                last_scraped: "".to_string(),
                 json: serde_json::Value::Null,
             })
             .collect();
@@ -93,7 +94,7 @@ impl GameDatabase for IgdbDatabase {
         games
     }
 
-    fn get_game_data(&mut self, id: u64, name: String) -> Game {
+    fn get_game_data(&mut self, id: u64, name: String) -> ScrapeEntry {
         
         println!("Getting game data for id: {}", id);
 
@@ -109,7 +110,7 @@ impl GameDatabase for IgdbDatabase {
             .header("Client-ID", "lpzomulxapy5mrfftuxcnwidw5ob2q")
             .header("Authorization", format!("Bearer {}", self.auth_token.access_token))
             .headers(headers)
-            .body(format!("fields *; where id = {};", id))
+            .body(format!("fields *, screenshots.*; where id = {};", id))
             .send()
             .unwrap()
             .json::<serde_json::Value>();
@@ -118,33 +119,49 @@ impl GameDatabase for IgdbDatabase {
         let game_data_values = match res {
             Ok(json) => {
                 // create a game object from the json response
-                Game {
+                ScrapeEntry {
                     id: id,
                     name: json[0]["name"].as_str().unwrap().to_string(),
                     slug: json[0]["slug"].as_str().unwrap().to_string(),
+                    file: "unknown".to_string(),
                     gamedb: "igdb".to_string(),
+                    last_scraped: "".to_string(),
                     json: json[0].clone(),
                 }
             },
             Err(error) => {
                 println!("Error: {}", error);
-                Game {
+                ScrapeEntry {
                     id: id,
                     name: name,
                     slug: "unknown".to_string(),
                     gamedb: "igdb".to_string(),
+                    file: "unknown".to_string(),
+                    last_scraped: "".to_string(),
                     json: serde_json::Value::Null,
                 }
             }
         };
 
-        // test if the json value in the Game object has at least 1 entry
-        // if not, then the game was not found in the database
-        if game_data_values.json != serde_json::Value::Null {
-            println!("Game data found.");
+        game_data_values
+    }
+
+    fn get_screenshots(&mut self, id: u64, screenshot_info: Vec<ScreenshotInfo>) -> u32 {
+        
+        println!("Getting screenshots for id: {}", id);
+
+        // Iterate through the screenshot info and get the screenshots
+        let mut num_screenshots: u32 = 0;
+        for screenshot in screenshot_info {
+            println!("{:?}", screenshot);
+            let mut file = std::fs::File::create(screenshot.filePath).unwrap();
+            let mut response = reqwest::blocking::get(&screenshot.url).unwrap();
+            response.copy_to(&mut file).unwrap();
+            drop(file);
+            num_screenshots+=1;
         }
 
-        game_data_values
+        num_screenshots
     }
     
 }

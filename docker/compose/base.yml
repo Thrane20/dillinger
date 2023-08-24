@@ -1,0 +1,17 @@
+services:
+  ####################
+  base:
+    image: ${DOCKER_PREFIX}/${NAME_BASE}:${VERSION_BASE}
+    build:
+      context: ../
+      dockerfile: ./images/base/Dockerfile
+    stdin_open: true 
+    tty: true
+    network_mode: host
+    volumes:
+      - dillinger:/dillinger
+
+volumes: 
+  dillinger:
+    # Ensure docker uses an existing volume, not a new or temporary one
+    external: true

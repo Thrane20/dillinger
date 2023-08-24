@@ -29,17 +29,21 @@ FROM gamescopebuilder as gamescopesourcebuilder
 # Get the gamescope source code
 RUN cd /home/src
 WORKDIR /home/src
-RUN git clone --depth 1 --branch 3.11.51 https://github.com/ValveSoftware/gamescope.git
+RUN git clone --depth 1 --branch 3.12.0 https://github.com/ValveSoftware/gamescope.git
 WORKDIR /home/src/gamescope
 RUN git submodule update --init
 
 # And build via meson and ninja
 RUN meson build/
 RUN ninja -C build/
+WORKDIR /home/src/gamescope/build
+RUN meson install
 
-# FROM alpine:latest
-# LABEL org.opencontainers.image.description Dillinger support tool - builds Valve Software GameScope for internal distribution
-# WORKDIR /opt/gamescope/bin
-# COPY --from=gamescopesourcebuilder /home/src/gamescope/build/gamescope .
+FROM alpine:latest
+LABEL org.opencontainers.image.description Dillinger support tool - builds Valve Software GameScope for internal distribution
+WORKDIR /opt/gamescope/
+COPY --from=gamescopesourcebuilder /usr/local/bin .
+COPY --from=gamescopesourcebuilder /usr/local/lib/x86_64-linux-gnu/libVkLayer_FROG_gamescope_wsi.so .
+COPY --from=gamescopesourcebuilder /usr/local/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json .
 
 CMD ["/bin/sh"]

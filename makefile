@@ -79,6 +79,12 @@ gamescope:
 	cd ./gamescope
 	meson build/
 
+.PHONY: build-wine-ge-custom
+build-wine-ge-custom:
+	@echo "Building - dillinger/wine-ge-custom"
+	@cd docker/images/wine-ge-custom && sudo DOCKER_BUILDKIT=1 docker build --no-cache -t dillinger/wine-ge-custom .
+	@echo "Build complete - dillinger/wine-ge-custom"
+
 .PHONY: build-docker-gow-base
 build-docker-gow-base:
 	@echo "Building - dillinger/gow-base"
