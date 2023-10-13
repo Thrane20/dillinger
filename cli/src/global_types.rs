@@ -21,6 +21,15 @@ pub struct SecretsConfig {
 pub struct DillingerConfig {
     pub paths: PathConfig,
     pub secrets: SecretsConfig,
+    pub romsites: Vec<RomSite>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct RomSite {
+    pub name: String,
+    pub platform: String,
+    pub url: String,
+    pub pagespan: String,
 }
 
 

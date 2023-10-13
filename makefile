@@ -79,11 +79,11 @@ gamescope:
 	cd ./gamescope
 	meson build/
 
-.PHONY: build-wine-ge-custom
-build-wine-ge-custom:
-	@echo "Building - dillinger/wine-ge-custom"
-	@cd docker/images/wine-ge-custom && sudo DOCKER_BUILDKIT=1 docker build --no-cache -t dillinger/wine-ge-custom .
-	@echo "Build complete - dillinger/wine-ge-custom"
+.PHONY: build-winerunner
+build-winerunner:
+	@echo "Building - dillinger/winerunner"
+	@cd docker/images/winerunner && sudo DOCKER_BUILDKIT=1 docker build --no-cache -t dillinger/winerunner .
+	@echo "Build complete - dillinger/winerunner"
 
 .PHONY: build-docker-gow-base
 build-docker-gow-base:
@@ -102,6 +102,18 @@ build-docker-gow-retroarch: build-docker-gow-base build-docker-gow-base-app
 	@echo "Building - dillinger/retroarch"
 	@cd gow && sudo ./run-gow --gpu nvidia --app retroarch build
 	@echo "Build complete - dillinger/retroarch"
+
+.PHONY: build-docker-gow-firefox
+build-docker-gow-firefox: build-docker-gow-base build-docker-gow-base-app
+	@echo "Building - dillinger/firefox"
+	@cd gow && sudo ./run-gow --gpu nvidia --app firefox build
+	@echo "Build complete - dillinger/firefox"
+
+.PHONY: build-docker-gow-emulationstationde
+build-docker-gow-emulationstationde: build-docker-gow-base build-docker-gow-base-app
+	@echo "Building - dillinger/emulationstationde"
+	@cd gow && sudo ./run-gow --gpu nvidia --app emulationstationde build
+	@echo "Build complete - dillinger/emulationstationde"
 
 .PHONY: prepare-docker-dillinger
 prepare-docker-dillinger: package-daemon

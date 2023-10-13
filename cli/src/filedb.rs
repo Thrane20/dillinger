@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use serde::{ Serialize, Deserialize };
 
 use crate::files;
-use crate::scrapers::scrapers::{ScrapeEntry};
+use crate::scrapers::scrapers::{ScrapeEntry, PlatformEntry};
 use crate::global_types::{ DillingerConfig };
 
 /// This code file manages all the file based operations for Dillinger
@@ -32,16 +32,33 @@ impl ManifestManager {
     }
 
     /// Returns the path to the games directory
-    pub fn get_games_path(&self) -> PathBuf {
+    pub fn games_get_parent_dir(&self) -> PathBuf {
         let mut path = PathBuf::from(&self.dillinger_config.paths.data_dir);
         path.push("games");
         path
+    }
+
+    pub fn games_list_all(&self) -> Vec<String> {
+        let mut games: Vec<String> = Vec::new();
+        let path = self.games_get_parent_dir();
+        let paths = files::get_dirs_in_dir(&path);
+        for path in paths {
+            let filename = path.file_name().unwrap().to_str().unwrap().to_string();
+            games.push(filename);
+        }
+        games
     }
 
     /// Returns the path to where all scraper data lives
     pub fn get_scraper_data_path(&self) -> PathBuf {
         let mut path = PathBuf::from(&self.dillinger_config.paths.data_dir);
         path.push("scraper_data");
+        path
+    }
+
+    pub fn get_platform_scraper_data_path(&self) -> PathBuf {
+        let mut path = PathBuf::from(&self.dillinger_config.paths.data_dir);
+        path.push("platform_scraper_data");
         path
     }
 
@@ -74,10 +91,26 @@ impl ManifestManager {
         path
     }
 
+    pub fn add_platform_scrape_file(&self, scrape_activity: &mut PlatformEntry) -> PathBuf {
+        // Store the scraped data to the scraper directory
+        let json_serialized = serde_json::to_string_pretty(&scrape_activity).unwrap();
+        let mut path = self.get_platform_scraper_data_path();
+        path.push(format!("{}-{}", scrape_activity.gamedb, scrape_activity.slug));
+        path.push(format!("{}.json", scrape_activity.get_identified_slug()));
+        scrape_activity.file = path.clone().to_string_lossy().to_string();
+        println!("Writing scraped platform data to {:?}", path);
+
+        // write the file out
+        files::write_file(&path, json_serialized, true);
+
+        path
+    }
+
     /// Generates a new scrape activity. Can create a new file, or append data
     /// to an existing file.
     pub fn add_scrape_activity(&self, scrape_activity: &ScrapeEntry) {
-        let mut path = self.get_games_path();
+        let mut path = self.games_get_parent_dir();
+        path.push(format!("{}", scrape_activity.slug));
         path.push(format!("{}.json", scrape_activity.get_readable_name()));
         
         // check if path file exists - use what's there, otherwise, create new

@@ -1,19 +1,6 @@
-use std::{fs, path::PathBuf};
-
-pub fn get_dirs_in_dir(dir_path: &PathBuf) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir_path) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_dir() {
-                    dirs.push(path);
-                }
-            }
-        }
-    }
-    dirs
-}
+use web_view::*;
+use std::path::PathBuf;
+use std::fs;
 
 
 /// Write a file to disk

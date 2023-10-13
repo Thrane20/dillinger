@@ -18,11 +18,22 @@ pub struct ScrapeEntry {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct PlatformEntry {
+    pub id: u64,                // This is the game database ID,
+    pub gamedb: String,         // This is the name of the game database
+    pub slug: String,           // This is the slug of the platform
+    pub name: String,           // This is the name of the platform
+    pub file: String,           // This is the name of the file that contains the platform data
+    pub last_scraped: String,   // This is the last time the game was scraped
+    pub json: Value,            // This is the raw JSON data returned from the game database
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct ScreenshotInfo {
     pub id: String,
     pub url: String,
     pub height: u64,
-    pub filePath: PathBuf
+    pub file_path: PathBuf
 }
 
 impl ScrapeEntry {
@@ -37,6 +48,30 @@ impl ScrapeEntry {
 
     pub fn new() -> ScrapeEntry {
         ScrapeEntry {
+            id: 0,
+            gamedb: "".to_string(),
+            slug: "".to_string(),
+            name: "".to_string(),
+            file: "".to_string(),
+            last_scraped: "".to_string(),
+            json: serde_json::Value::Null,
+        }
+    }
+
+}
+
+impl PlatformEntry {
+
+    pub fn get_identified_slug(&self) -> String {
+        format!("{}-{}", self.gamedb, self.slug)
+    }
+
+    pub fn get_readable_name(&self) -> String {
+        self.name.clone()
+    }   
+
+    pub fn new() -> PlatformEntry {
+        PlatformEntry {
             id: 0,
             gamedb: "".to_string(),
             slug: "".to_string(),
@@ -82,7 +117,9 @@ impl AuthToken {
 pub trait GameDatabase  {
     fn authentiate(&mut self) -> Result<AuthToken, reqwest::Error>;
     fn search_game(&mut self, name: &str) -> Vec<ScrapeEntry>;
+    fn search_platform(&mut self, name: &str) -> Vec<PlatformEntry>;
     fn get_game_data(&mut self, id: u64, name: String) -> ScrapeEntry;
+    fn get_platform_data(&mut self, id: u64, name: String) -> PlatformEntry;
     fn get_screenshots(&mut self, id: u64, screenshot_info: Vec<ScreenshotInfo>) -> u32;
 }
 
@@ -112,6 +149,17 @@ impl Scraper {
             return Some(scraped_entries.to_vec());
         } else {
             None::<Vec<ScrapeEntry>>
+        }
+    }
+
+    pub fn get_matching_platforms(name: String, gamedb : Option<&mut Box<dyn GameDatabase>>) -> Option<Vec<PlatformEntry>> { 
+        
+        if let Some(mut db) = gamedb {
+            // Search the games database for any specific matching platforms
+            let scraped_entries = &db.search_platform(name.as_str());
+            return Some(scraped_entries.to_vec());
+        } else {
+            None::<Vec<PlatformEntry>>
         }
     }
 

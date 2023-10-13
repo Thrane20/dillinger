@@ -16,4 +16,6 @@ console = { version = "0.15.7", features = ["windows-console-colors"] }
 dialoguer = { version = "0.10.4", features = ["completion", "fuzzy-matcher", "fuzzy-select", "history"] }
 indicatif = "0.17.5"
 chrono = "0.4.26"
+web-view = "0.7.3"
+scraper = "0.17.1"
 

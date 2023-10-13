@@ -9,9 +9,7 @@ services:
     tty: true
     network_mode: host
     volumes:
-      - dillinger:/dillinger
+      - dillinger:/home
 
 volumes: 
   dillinger:
-    # Ensure docker uses an existing volume, not a new or temporary one
-    external: true

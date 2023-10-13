@@ -1,0 +1,35 @@
+services:
+  ####################
+  wine-ge-custom:
+    image: dillinger/runner-wine:1.0
+    build:
+      context: ../
+      dockerfile: ./images/winerunner/Dockerfile
+    stdin_open: true 
+    tty: true
+    network_mode: host
+    volumes:
+      - dillinger:/opt/dillinger
+      # Followings are needed in order to get joystick support
+      - /dev/input:/dev/input:ro
+      - udev:/run/udev/:ro
+      # Xorg socket in order to get the screen
+      - ${XORG_SOCKET}:/tmp/.X11-unix
+      # Pulse socket, audio
+      - ${PULSE_SOCKET_HOST}:${PULSE_SOCKET_GUEST}
+      # Home directory: 
+      - ${LOCAL_STATE}/:/home/retro/
+      - type: tmpfs
+        target: /dev/shm
+        tmpfs:
+          size: ${SHM_SIZE}
+    ipc: ${SHARED_IPC}
+    env_file:
+      - ./all.env
+    environment:
+      GOW_REQUIRED_DEVICES: /dev/uinput /dev/input/event* /dev/dri/* /dev/snd/*
+
+volumes:
+  udev:
+  dillinger:
+  
