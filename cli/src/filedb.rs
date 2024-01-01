@@ -8,6 +8,7 @@ use crate::global_types::{ DillingerConfig };
 /// This code file manages all the file based operations for Dillinger
 /// That's correct, no database, just files. Human readability ftw.
 
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Game {
     pub name: String,
@@ -18,6 +19,11 @@ pub struct Game {
 pub struct Manifest {
     pub game: Game,
     pub scrape_activities: Vec<ScrapeEntry>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct MCPManager {
+    pub selected_game: String
 }
 
 pub struct ManifestManager {
@@ -69,12 +75,45 @@ impl ManifestManager {
         path.to_str().unwrap().to_string()
     }
 
-    /// Get the path to a game's manifest file
-    pub fn get_manifest_file_path(&self, filename: String) -> String {
-        let mut path = PathBuf::from(&self.dillinger_config.paths.data_dir);
-        path.push(filename);
-        path.to_str().unwrap().to_string()
+    fn create_default_mcp_file(path: &String) {
+        // create the file
+        let mcp_manager = MCPManager {
+            selected_game: "".to_string()
+        };
+        let json_serialized = serde_json::to_string_pretty(&mcp_manager).unwrap();
+        files::write_file(&PathBuf::from(path.clone()), json_serialized, true);
     }
+
+    /// Load the mcp file from the path provided by the get_mcp_file function
+    pub fn load_mcp_file(&self) -> MCPManager {
+        let path = self.get_mcp_file();
+
+        // test to see if this file exists
+        if !files::file_exists(&PathBuf::from(path.clone())) {
+            self::ManifestManager::create_default_mcp_file(&path);
+        }
+
+        let manifest_content = files::read_file(&PathBuf::from(path));
+
+        let manifest: Result<MCPManager,serde_json::Error> = serde_json::from_str(&manifest_content);
+        match manifest {
+            Ok(manifest) => {
+                manifest
+            },
+            Err(_) => {
+                MCPManager {
+                    selected_game: "".to_string()
+                }
+            }
+        }
+    }  
+
+    // /// Get the path to a game's manifest file
+    // pub fn get_manifest_file_path(&self, filename: String) -> String {
+    //     let mut path = PathBuf::from(&self.dillinger_config.paths.data_dir);
+    //     path.push(filename);
+    //     path.to_str().unwrap().to_string()
+    // }
 
     pub fn add_scrape_file(&self, scrape_activity: &mut ScrapeEntry) -> PathBuf {
         // Store the scraped data to the scraper directory
@@ -146,3 +185,5 @@ impl ManifestManager {
         files::write_file(&path, manifest_content, true);
     }
 }
+
+

@@ -1,4 +1,4 @@
-use reqwest::{header::{ HeaderMap, HeaderValue, ACCEPT, USER_AGENT }, blocking::Body};
+use reqwest::{header::{ HeaderMap, HeaderValue, ACCEPT, USER_AGENT }};
 use crate::scrapers::scrapers::{ AuthToken, GameDatabase, ScrapeEntry, ScreenshotInfo, PlatformEntry };
 
 
@@ -94,7 +94,7 @@ impl GameDatabase for IgdbDatabase {
         games
     }
 
-    fn search_platform(&mut self, name: &str) -> Vec<PlatformEntry> {
+    fn search_platform(&mut self, _name: &str) -> Vec<PlatformEntry> {
         
         let token = self.authentiate();
 

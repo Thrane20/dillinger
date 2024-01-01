@@ -6,8 +6,7 @@ use scrapers::scrapers::{ Scraper, ScrapeEntry, PlatformEntry };
 use std::fs;
 use console::{style, Term};
 use dialoguer::{ theme::ColorfulTheme, Select, Confirm };
-use crate::downloaders::page_parser::{ PageParser, Page };
-use crate::scrapers::{ igdb::IgdbDatabase, scrapers::{ GameDatabase, AuthToken, ScreenshotInfo } };
+use crate::scrapers::scrapers::{ ScreenshotInfo };
 use crate::global_types::{ DillingerConfig, PathConfig, SecretsConfig, RomSite };
 use web_view::*;
 
@@ -98,6 +97,11 @@ fn main() {
         dillinger_config = load_config(&"config.yaml".to_string());
     }
 
+    // Load the mcp file, this will be located at dillinger_config.paths.data_dir/mcp.json
+    let manifest_manager = ManifestManager::new(&dillinger_config);
+    let mcp = manifest_manager.load_mcp_file();
+    println!("Selected game is: {}", mcp.selected_game);
+    
     match matches.subcommand() {
         Some(("gen_config", _)) => {
             println!("generating a new config");
@@ -150,14 +154,14 @@ fn main() {
             .unwrap();
         }
         Some(("testdl", _sub_matches)) => {
-            webparser::find_download_links(webparser::psx_urls);
+            let _ =webparser::find_download_links(webparser::PSX_URLS);
             
             }
         _ => (),
     }
 }
 
-fn test(wv: &mut WebView<usize>, arg: &str) -> WVResult {
+fn test(_wv: &mut WebView<usize>, arg: &str) -> WVResult {
     println!("{}", arg);
     Ok(())
 }

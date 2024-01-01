@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::global_types::DillingerConfig;
 use crate::scrapers::igdb::IgdbDatabase;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -46,17 +45,17 @@ impl ScrapeEntry {
         self.name.clone()
     }   
 
-    pub fn new() -> ScrapeEntry {
-        ScrapeEntry {
-            id: 0,
-            gamedb: "".to_string(),
-            slug: "".to_string(),
-            name: "".to_string(),
-            file: "".to_string(),
-            last_scraped: "".to_string(),
-            json: serde_json::Value::Null,
-        }
-    }
+    // pub fn new() -> ScrapeEntry {
+    //     ScrapeEntry {
+    //         id: 0,
+    //         gamedb: "".to_string(),
+    //         slug: "".to_string(),
+    //         name: "".to_string(),
+    //         file: "".to_string(),
+    //         last_scraped: "".to_string(),
+    //         json: serde_json::Value::Null,
+    //     }
+    // }
 
 }
 
@@ -64,22 +63,6 @@ impl PlatformEntry {
 
     pub fn get_identified_slug(&self) -> String {
         format!("{}-{}", self.gamedb, self.slug)
-    }
-
-    pub fn get_readable_name(&self) -> String {
-        self.name.clone()
-    }   
-
-    pub fn new() -> PlatformEntry {
-        PlatformEntry {
-            id: 0,
-            gamedb: "".to_string(),
-            slug: "".to_string(),
-            name: "".to_string(),
-            file: "".to_string(),
-            last_scraped: "".to_string(),
-            json: serde_json::Value::Null,
-        }
     }
 
 }
@@ -143,7 +126,7 @@ impl Scraper {
 
     pub fn get_matching_titles(name: String, gamedb : Option<&mut Box<dyn GameDatabase>>) -> Option<Vec<ScrapeEntry>> { 
         
-        if let Some(mut db) = gamedb {
+        if let Some(db) = gamedb {
             // Search the games database for any specific matching titles
             let scraped_entries = &db.search_game(name.as_str());
             return Some(scraped_entries.to_vec());
@@ -154,7 +137,7 @@ impl Scraper {
 
     pub fn get_matching_platforms(name: String, gamedb : Option<&mut Box<dyn GameDatabase>>) -> Option<Vec<PlatformEntry>> { 
         
-        if let Some(mut db) = gamedb {
+        if let Some(db) = gamedb {
             // Search the games database for any specific matching platforms
             let scraped_entries = &db.search_platform(name.as_str());
             return Some(scraped_entries.to_vec());

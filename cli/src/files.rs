@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, path::Path};
 
 pub fn get_dirs_in_dir(dir_path: &PathBuf) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -15,6 +15,9 @@ pub fn get_dirs_in_dir(dir_path: &PathBuf) -> Vec<PathBuf> {
     dirs
 }
 
+pub fn file_exists(path: &Path) -> bool {
+    path.exists() && path.is_file()
+}
 
 /// Write a file to disk
 pub fn write_file(path: &PathBuf, contents: String, create_dir: bool) {

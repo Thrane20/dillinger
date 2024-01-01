@@ -2,3 +2,6 @@
 	path = gow
 	url = https://github.com/Thrane20/gow.git
 	branch = nosunshine
+[submodule "wolf"]
+	path = wolf
+	url = git@github.com:Thrane20/wolf.git

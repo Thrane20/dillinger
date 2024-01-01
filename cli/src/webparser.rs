@@ -1,7 +1,7 @@
 use reqwest::blocking::Client;
 use scraper::{Html, Selector};
 
-pub const psx_urls: &str = "https://archive.org/download/redump.psx";
+pub const PSX_URLS: &str = "https://archive.org/download/redump.psx";
 
 pub fn find_download_links(url: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     
