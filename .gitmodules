@@ -5,3 +5,6 @@
 [submodule "wolf"]
 	path = wolf
 	url = git@github.com:Thrane20/wolf.git
+[submodule "thirdparty/wlroots"]
+	path = thirdparty/wlroots
+	url = https://github.com/swaywm/wlroots

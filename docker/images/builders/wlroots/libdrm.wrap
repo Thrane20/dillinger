@@ -1,0 +1,5 @@
+[wrap-file]
+directory = libdrm
+source_url = https://dri.freedesktop.org/libdrm/libdrm-2.4.119.tar.xz
+source_filename = libdrm-2.4.119.tar.xz
+source_hash =  0a49f12f09b5b6e68eaaaff3f02ca7cff9aa926939b212d343161d3e8ac56291
