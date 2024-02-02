@@ -2,4 +2,5 @@
 .vscode
 /dist
 /docker/images/core/dist
+/backup-important
 # Ignore git subprojects
