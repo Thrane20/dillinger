@@ -8,7 +8,7 @@ mod handlers;
 async fn main() {
     println!("Starting server...");
 
-    let port = env::var("PORT").unwrap_or("8080".to_string());
+    let port = env::var("PORT").unwrap_or("5000".to_string());
     let app = build_all_routes();
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();

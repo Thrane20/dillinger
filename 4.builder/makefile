@@ -15,3 +15,8 @@ build-server:
 	@cd ../2.server && cargo build $(RUST_BUILD_FLAGS)
 	@echo "server built"
 
+.PHONY: build-client
+build-client:
+	@echo "building client..."
+	@cd ../1.client && bun run build
+	@echo "client built"
