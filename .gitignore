@@ -1,6 +1,7 @@
 .DS_Store
 .vscode
 /dist
+/gst/target
 /docker/images/core/dist
 /backup-important
 # Ignore git subprojects
