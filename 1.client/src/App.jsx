@@ -1,6 +1,6 @@
 import './App.css'
 import GameSearchBar from './components/game_search_bar'
-import { MyCard } from './baseui/my_card'
+import NodeTree from './components/node_tree'
 
 import { searchLocalEntries } from './logics/game_search'
 
@@ -23,8 +23,11 @@ function App() {
                 Left Section
               </div>
             </div>
-            <div className="flex flex-grow h-full items-start justify-center">
+            <div className="flex flex-col flex-grow h-full items-start justify-center">
               <GameSearchBar onSearchChanged={searchLocalEntries} />
+              <div className="flex flex-row w-full h-full items-start justify-start gap-4">
+                <NodeTree />
+                </div>
             </div>
             <div className="flex w-1/4 h-full items-start justify-center mr-2">
               <div className="flex bg-base-100 rounded-lg w-full items-start justify-center p-2 ">
