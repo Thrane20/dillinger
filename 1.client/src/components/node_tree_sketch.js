@@ -72,20 +72,20 @@ export function forceGraph() {
 	// The passed in nodes are mindmap style "tree", we need to convert to a force graph style
 	// Start with the root
 	let root = new Node(0, "Root Node - All", null, 50, 50, 20);
-	let child1 = new Node(1, "Search", glassIcon, 50, 50, 20);
-	let child2 = new Node(2, "Rom File", romIcon, 70, 70, 25);
-	let grandchild1 = new Node(3, "Runner", engineIcon, 70, 70, 20);
-	let grandchild2 = new Node(4, "Start", gameStartIcon, 70, 70, 20);
-	let grandchild3 = new Node(5, "Screenshots", screenshotIcon, 70, 70, 20);
-	let grandchild4 = new Node(6, "Articles", articleIcon, 70, 70, 20);
-	let grandchild5 = new Node(7, "Instructions", instructionsIcon, 70, 70, 20);
-	let grandchild6 = new Node(8, "Download", downloadIcon, 70, 70, 20);
-	let grandchild7 = new Node(9, "Run Installer", installerIcon, 70, 70, 20);
+	let child1 = new Node(1, "Search", "screenshotIcon", 50, 50, 20);
+	let child2 = new Node(2, "Rom File");
+	let grandchild1 = new Node(3, "Runner");
+	let grandchild2 = new Node(4, "Start");
+	let grandchild3 = new Node(5, "Screenshots");
+	let grandchild4 = new Node(6, "Articles");
+	let grandchild5 = new Node(7, "Instructions");
+	let grandchild6 = new Node(8, "Download");
+	let grandchild7 = new Node(9, "Run Installer");
 	let grandchild8 = new Node(10, "Grandchild 8");
 	let grandchild9 = new Node(11, "Grandchild 9");
 	let grandchild10 = new Node(12, "Grandchild 10");
 
-	let grandchild11 = new Node(13, "Grandchild 11", scraperIcon, 70, 70, 20);
+	let grandchild11 = new Node(13, "Grandchild 11");
 	let grandchild12 = new Node(14, "Grandchild 12");
 	let grandchild13 = new Node(15, "Grandchild 13");
 	let grandchild14 = new Node(16, "Grandchild 14");
@@ -132,6 +132,7 @@ function sketch(p) {
 	var height = 400;
 	var rootNode = null;
 	var nodeArray = [];
+	var icons = {};
 	var font = null;
 	let minX = Infinity,
 		minY = Infinity,
@@ -150,8 +151,23 @@ function sketch(p) {
 	let baseDistance = 150;
 	let clickHandler = null;
 
+
 	p.preload = function () {
 		font = p.loadFont(playFont);
+
+		// List of SVG icon names
+		icons["glassIcon"] = p.loadImage(glassIcon);
+		icons["romIcon"] = p.loadImage(romIcon);
+		icons["engineIcon"] = p.loadImage(engineIcon);
+		icons["gameStartIcon"] = p.loadImage(gameStartIcon);
+		icons["screenshotIcon"] = p.loadImage(screenshotIcon);
+		icons["articleIcon"] = p.loadImage(articleIcon);
+		icons["instructionsIcon"] = p.loadImage(instructionsIcon);
+		icons["downloadIcon"] = p.loadImage(downloadIcon);
+		icons["installerIcon"] = p.loadImage(installerIcon);
+		icons["scraperIcon"] = p.loadImage(scraperIcon);
+		
+		
 	};
 
 	// p is a reference to the p5 instance this sketch is attached to
@@ -189,7 +205,7 @@ function sketch(p) {
 		// your draw code here
 		p.clear();
 		p.translate(origin.x, origin.y);
-
+		
 		// Calculate the difference between the target and current pan values
 		if (panningAnim) {
 			let dx = targetPanX - panX;
@@ -205,7 +221,7 @@ function sketch(p) {
 		}
 		p.translate(panX, panY); // Apply the pan values
 		p.scale(zoom); // Apply the zoom level
-		// p.translate(panX, panY);
+		p.translate(panX, panY);
 
 		if (rootNode) {
 			if (!constructed) {
@@ -265,8 +281,9 @@ function sketch(p) {
 			p.drawPreConstructedTree(node.children[i]);
 		}
 
-		if (node.svg && typeof (node.svg !== "undefined")) {
-			p.image(node.svg, node.x - node.getWidth() / 2, node.y - node.getHeight() / 2, node.svgWidth, node.svgHeight);
+		if (node.svg && typeof (node.svg) !== "undefined") {
+			
+			p.image(icons[node.svg], node.x - node.getWidth() / 2, node.y - node.getHeight() / 2, node.svgWidth, node.svgHeight);
 			let textSize = 18;
 			p.textSize(textSize);
 			let textWidth = p.textWidth(node.content);
@@ -472,12 +489,6 @@ function sketch(p) {
 		if (props.rootNode) {
 			rootNode = props.rootNode;
 			nodeArray = rootNode.getNodeArray();
-			// load any svg icons
-			for (let i = 0; i < nodeArray.length; i++) {
-				if (nodeArray[i].svg) {
-					nodeArray[i].svg = p.loadImage(nodeArray[i].svg);
-				}
-			}
 		}
 
 		if (props.handleClick) {
