@@ -1,9 +1,0 @@
-/Users/iansorbello/Transmit/dev_personal/dillinger/gst/target/debug/deps/libfutures_channel-988cc4628e2b50ad.rmeta: /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/lib.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/lock.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/mpsc/mod.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/mpsc/queue.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/oneshot.rs
-
-/Users/iansorbello/Transmit/dev_personal/dillinger/gst/target/debug/deps/futures_channel-988cc4628e2b50ad.d: /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/lib.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/lock.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/mpsc/mod.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/mpsc/queue.rs /Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/oneshot.rs
-
-/Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/lib.rs:
-/Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/lock.rs:
-/Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/mpsc/mod.rs:
-/Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/mpsc/queue.rs:
-/Users/iansorbello/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-channel-0.3.27/src/oneshot.rs:
