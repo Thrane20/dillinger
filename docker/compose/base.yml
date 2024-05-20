@@ -1,0 +1,15 @@
+services:
+  ####################
+  base:
+    image: ${DOCKER_PREFIX}/${NAME_BASE}:${VERSION_BASE}
+    build:
+      context: ../
+      dockerfile: ./images/base/Dockerfile
+    stdin_open: true 
+    tty: true
+    network_mode: host
+    volumes:
+      - dillinger:/home
+
+volumes: 
+  dillinger:

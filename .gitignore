@@ -1,0 +1,9 @@
+.DS_Store
+.vscode
+/dist
+/gst/target
+/docker/images/core/dist
+/backup-important
+/3.docker/dillinger_builds
+/3.docker/images/core/dist
+# Ignore git subprojects

@@ -1,0 +1,9 @@
+services:
+  ####################
+  dillinger:
+    image: dillinger/core:latest
+    stdin_open: true 
+    tty: true
+    network_mode: host
+    volumes:
+      - /mnt/linuxfast/dillinger:/mnt/linuxfast/dillinger

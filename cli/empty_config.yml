@@ -1,0 +1,2 @@
+paths:
+  docker_volume_dir: /mnt/path_to_docker_volumes

@@ -1,0 +1,32 @@
+name: Docker Image CI GameScope Builder
+
+on:
+  workflow_dispatch
+  
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: dillinger/buildergamescope
+
+jobs:
+  docker-build-gamescope-builder:
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: docker/images/gamescope/Dockerfile
+        push: true
+        tags: ghcr.io/thrane20/dillinger/builder-gamescope:3.12.0

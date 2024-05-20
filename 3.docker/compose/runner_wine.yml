@@ -1,0 +1,17 @@
+services:
+  ####################
+  builder:
+    image: ${NAME_RUNNER_WINE}:${VERSION_RUNNER_WINE}
+    build:
+      context: ../
+      dockerfile: ./images/runners/runner_wine.dockerfile
+      args:
+        BASE_IMAGE: ${NAME_BASE}:${VERSION_BASE}
+    stdin_open: true 
+    tty: true
+    network_mode: host
+    volumes:
+      - dillinger:/builds
+
+volumes: 
+  dillinger:

@@ -1,0 +1,17 @@
+services:
+  ####################
+  builder:
+    image: ${NAME_OPENTRACK}:${VERSION_OPENTRACK}
+    build:
+      context: ../
+      dockerfile: ./images/opentrack/Dockerfile
+      args:
+        BASE_IMAGE: ${NAME_BUILDER}:${VERSION_BUILDER}
+    stdin_open: true 
+    tty: true
+    network_mode: host
+    volumes:
+      - dillinger:/builds
+
+volumes: 
+  dillinger:
