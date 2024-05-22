@@ -2,8 +2,8 @@ use cursive::{
     view::{ Resizable, Nameable, Finder },
     views::{ Panel, NamedView, TextView, ResizedView },
 };
-use cursive::Cursive;
-use dillinger_lib::{ self, docker };
+
+use dillinger_lib::{ self };
 
 trait StatusObserver {
     fn update_docker_status(&mut self, docker_status: &str);

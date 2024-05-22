@@ -1,6 +1,9 @@
 use std::env;
-use axum::{routing::get, Router};
+use env_logger::Env;
+use axum::{routing::get, routing::post, Router};
+use axum::extract::Json;
 use handlers::diagnostics;
+use handlers::game;
 
 mod handlers;
 
@@ -8,7 +11,10 @@ mod handlers;
 async fn main() {
     println!("Starting server...");
 
-    let port = env::var("PORT").unwrap_or("5000".to_string());
+    // Initialize the logger
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+
+    let port = env::var("PORT").unwrap_or("3060".to_string());
     let app = build_all_routes();
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
@@ -19,7 +25,7 @@ async fn main() {
 fn build_all_routes() -> Router {
     Router::new()
         .route("/", get(|| async { "You shouldn't have come back, Flynn." }))
-        .route("/ping", get(crate::diagnostics::ping))
+        .route("/diag/ping", get(crate::diagnostics::ping))
+        .route("/diag/docker_daemon", get(crate::diagnostics::docker_daemon_status))
+        .route("/game/launch", post(handlers::game::game_launch))    
 }
-
-
