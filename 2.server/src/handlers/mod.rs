@@ -1,3 +1,2 @@
 pub mod diagnostics;
-pub mod docker;
-pub mod game;
+pub mod docker_interactor;

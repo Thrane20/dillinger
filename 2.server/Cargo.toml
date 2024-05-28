@@ -1,18 +1,20 @@
 [package]
-name = "dillinger_server"
+name = "dillinger"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = "0.7.4"
+bollard = { version = "0.16.1", features = ["buildkit"]}
 dockworker = "0.5.1"
 env_logger = "0.11.3"
+lazy_static = "1.4.0"
 log = "0.4.21"
-serde = "1.0.197"
+serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
 serde_toml = "0.0.1"
 tokio = { version = "1.35.1", features = ["rt-multi-thread"] }
 tower = "0.4.13"
 tower-http = "0.5.2"
+warp = "0.3.7"
