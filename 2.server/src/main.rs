@@ -2,11 +2,12 @@ use std::convert::Infallible;
 use log::info;
 use warp::http::StatusCode;
 use warp::Filter;
-use crate::handlers::docker_interactor::DockerContainer;
+use crate::handlers::docker_interactor::{self, DockerContainer};
 
 pub mod game;
 pub mod handlers;
 pub mod system;
+pub mod helpers;
 
 #[tokio::main]
 pub async fn main() {
@@ -30,6 +31,14 @@ pub async fn main() {
     // let game_launch = warp::path!("game" / "launch")
     //     .and(warp::post())
     //     .map(game::game_launch);
+
+    // // create a docker volume
+    // docker_interactor::create_volume(
+    //     "dillinger_main".to_string(),
+    //     "local".to_string(),
+    //     "/Users/iansorbello/Documents/docker_volumes/dillinger".to_string(),
+    //     std::collections::HashMap::new(),
+    // ).await;
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }

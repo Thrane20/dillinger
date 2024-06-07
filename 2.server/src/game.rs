@@ -1,7 +1,8 @@
 use std::convert::Infallible;
 use log::info;
 use serde::Serialize;
-use crate::handlers::docker_interactor::{self, DockerRunParams};
+use crate::handlers::docker_interactor::{self};
+use crate::helpers::docker_run_params::DockerRunParams;
 
 #[derive(Serialize, serde::Deserialize)]
 pub struct Game {
@@ -27,9 +28,12 @@ impl Default for Game {
 
 pub async fn game_launch(game: Game) -> Result<impl warp::Reply, Infallible> {
     
-    let run_params = DockerRunParams {
-        image_name: "alpine:latest".to_string()
-    };
+    let run_params = DockerRunParams::new("alpine:latest".to_string())
+    .volumes(vec!["/Users/iansorbello/Documents/docker_volumes/hello_world:/tmp:rw".to_string()])
+    .interactive(true)
+    .tty(true)
+    .remove(true)
+    .build();
         
     let reply = match docker_interactor::docker_run(run_params).await {
         Ok(run_params_out) => {
@@ -48,31 +52,19 @@ pub async fn game_launch(game: Game) -> Result<impl warp::Reply, Infallible> {
 }
 
 
-// test_game_default
 #[cfg(test)]
 mod tests {
-    use warp::{reply::Reply, test::request};
-
     use super::*;
+    use warp::http::StatusCode;
+    use warp::reply::Reply;
 
     #[tokio::test]
     async fn test_game_launch() {
-        // Create a test game
-        let game = Game::default();
-    
-        // Create a test request
-        request()
-            .method("GET")
-            .path("/game_launch")
-            .header("content-type", "application/json")
-            .json(&game);
-    
-        // Call the handler with the test request and get the reply
-        let resp = game_launch(game).await.unwrap();
-        let resp = resp.into_response();
-    
-        // Check the status code and body of the reply
-        assert_eq!(resp.status(), 200);
+        let game = Game::default(); // Replace with your actual Game creation logic
+        let resp: Result<_, Infallible> = game_launch(game).await;
+        let resp = resp.unwrap().into_response();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Add more assertions based on your expected response
     }
-    
 }
