@@ -10,7 +10,6 @@ RUN apt-get install -y build-essential
 RUN apt-get install -y git
 RUN apt-get install -y cmake
 RUN apt-get install -y qttools5-dev
-RUN apt-get install -y qtbase5-dev
 RUN apt-get install -y qtbase5-private-dev
 RUN apt-get install -y libproc2-dev
 RUN apt-get install -y libopencv-dev

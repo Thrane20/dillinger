@@ -1,0 +1,35 @@
+version: '3'
+services:
+  runner_base:
+    image: ${NAME_RUNNER_BASE}:${VERSION_RUNNER_BASE}
+    user: root
+    container_name: dillinger_runner_base
+    build:
+      context: ../
+      dockerfile: ./images/runners/runner_base.dockerfile
+      args:
+        BASE_IMAGE: ${NAME_BASE}:${VERSION_BASE}
+    stdin_open: true 
+    tty: true
+    network_mode: host
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix  # Share the X11 socket with the Docker container
+      - /dev/input:/dev/input:ro
+      - udev:/run/udev/:ro
+      - ${PULSE_SOCKET_HOST}:${PULSE_SOCKET_GUEST}
+      - dillinger:/home/      
+      - type: tmpfs
+        target: /dev/shm
+        tmpfs:
+          size: ${SHM_SIZE}
+    ipc: ${SHARED_IPC}  # Needed for MIT-SHM, removing this should cause a performance hit see https://github.com/jessfraz/dockerfiles/issues/359
+
+    environment:
+      - XORG_SOCKET=/tmp/.X11-unix
+      - DISPLAY=:0  # Set the DISPLAY environment variable
+      - XDG_RUNTIME_DIR=/tmp/.X11-unix
+      - GOW_REQUIRED_DEVICES=/dev/uinput /dev/input/event* /dev/dri/* /dev/snd/*    
+      
+volumes:
+    udev:
+    dillinger:
