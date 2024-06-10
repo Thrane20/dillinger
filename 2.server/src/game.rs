@@ -26,7 +26,7 @@ impl Default for Game {
 }
 
 
-pub async fn game_launch(game: Game) -> Result<impl warp::Reply, Infallible> {
+pub async fn game_launch(_: Game) -> Result<impl warp::Reply, Infallible> {
     
     let run_params = DockerRunParams::new("alpine:latest".to_string())
     .volumes(vec!["/Users/iansorbello/Documents/docker_volumes/hello_world:/tmp:rw".to_string()])

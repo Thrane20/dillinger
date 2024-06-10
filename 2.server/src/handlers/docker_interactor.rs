@@ -76,10 +76,8 @@ pub async fn create_volume(
     };
 
     match docker.create_volume(options).await {
-        Ok(volume) => { println!("{:?}",volume); Ok(()) },
-        Err(e) => {
-            return Err(e);
-        }
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -202,7 +200,6 @@ pub struct DockerContainer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bollard::Docker;
 
     #[tokio::test]
     async fn test_list_named_volumes() {
@@ -213,31 +210,6 @@ mod tests {
                 for volume in volumes {
                     println!("Volume: {}", volume);
                 }
-
-                assert!(true);
-            }
-            Err(e) => {
-                println!("Error: {:?}", e);
-                assert!(false);
-            }
-        }
-    }
-
-    async fn test_create_volume() {
-        let result = create_volume(
-            "dillinger_main".to_string(),
-            "local".to_string(),
-            "/Users/iansorbello/Documents/docker_volumes/dillinger".to_string(),
-            HashMap::new(),
-        )
-        .await;
-
-        println!("Result: {:?}", result);
-
-        // iterate the result and print the volumes
-        match result {
-            Ok(volumes) => {
-                
 
                 assert!(true);
             }

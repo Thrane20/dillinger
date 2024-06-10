@@ -2,7 +2,8 @@ use std::convert::Infallible;
 use log::info;
 use warp::http::StatusCode;
 use warp::Filter;
-use crate::handlers::docker_interactor::{self, DockerContainer};
+use crate::handlers::docker_interactor::DockerContainer;
+use warp::cors;
 
 pub mod game;
 pub mod handlers;
@@ -17,16 +18,21 @@ pub async fn main() {
     // Set up path handlers
     let root = warp::path!().map(|| "You shouldn't have come back, Flynn.");
 
+    // Ping route - used for diagnostics
     let ping_handler = warp::path!("diag" / "ping").and_then(diagnostics_ping_handler);
+
+    // Docker status route - used for diagnostics
     let docker_status_handler =
         warp::path!("diag" / "docker_status").and_then(diagnostics_docker_status_handler);
+
+    // Get a list of running containers
     let docker_list_containers_handler =
         warp::path!("sys" / "list_containers").and_then(handler_list_containers);
    
-
     let routes = root.or(ping_handler)
-    .or(docker_status_handler)
-    .or(docker_list_containers_handler);
+        .or(docker_status_handler)
+        .or(docker_list_containers_handler)
+        .with(cors().allow_any_origin());
 
     // let game_launch = warp::path!("game" / "launch")
     //     .and(warp::post())
@@ -40,6 +46,7 @@ pub async fn main() {
     //     std::collections::HashMap::new(),
     // ).await;
 
+    // Start the engine
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }
 
