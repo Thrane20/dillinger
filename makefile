@@ -11,18 +11,15 @@ export $(shell sed 's/=.*//' 3.docker/compose/.env)
 help:
 	@echo "Take a look inside the makefile for specific make targets..."
 
-export_vars:
-    export $$(sed 's/=.*//' "3.docker/compose/.env")
-
 .PHONY: base
 base: 
 	@echo "Building" $(NAME_BASE):$(VERSION_BASE) "image..."
-	docker build --network=host -t $(NAME_BASE):$(VERSION_BASE) -f ./3.docker/images/base/Dockerfile .
+	docker build --platform linux/amd64 -t $(NAME_BASE):$(VERSION_BASE) -f ./3.docker/images/base/Dockerfile .
 
 .PHONY: builder
 builder: base
 	@echo "Building" $(NAME_BUILDER):$(VERSION_BUILDER) "image..."
-	docker build -t $(NAME_BUILDER):$(VERSION_BUILDER) --build-arg BASE_IMAGE=$(NAME_BASE):$(VERSION_BASE) -f ./3.docker/images/builder/Dockerfile .
+	docker build --platform linux/amd64 -t $(NAME_BUILDER):$(VERSION_BUILDER) --build-arg BASE_IMAGE=$(NAME_BASE):$(VERSION_BASE) -f ./3.docker/images/builder/Dockerfile .
 	
 # Build the docker container that can be used to build the opentrack project
 .PHONY: opentrack
@@ -56,9 +53,8 @@ runner_wine: runner_base
 	@echo "Building" $(NAME_RUNNER_WINE):$(VERSION_RUNNER_WINE) "image..."
 	docker build -t $(NAME_RUNNER_WINE):$(VERSION_RUNNER_WINE) --build-arg BASE_IMAGE=${NAME_RUNNER_BASE}:${VERSION_RUNNER_BASE} -f images/runners/runner_wine.dockerfile .
 
-# The primary dillinger server (core)
-# There is no need to build any base image, this is straight up rust:latest
+# The primary dillinger server (the core engine)
 .PHONY: core
 core: builder
 	@echo "Building" $(NAME_CORE):$(VERSION_CORE) "image..."
-	docker build -t $(NAME_CORE):$(VERSION_CORE) --build-arg BASE_IMAGE=$(NAME_BUILDER):$(VERSION_BUILDER) -f ./3.docker/images/core/Dockerfile .
+	docker build --platform linux/amd64 -t $(NAME_CORE):$(VERSION_CORE) --build-arg BASE_IMAGE=$(NAME_BUILDER):$(VERSION_BUILDER) --build-arg RUN_IMAGE=$(NAME_BASE):$(VERSION_BASE) -f ./3.docker/images/core/Dockerfile .
