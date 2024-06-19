@@ -1,135 +1,64 @@
 .DEFAULT_GOAL := help
+REBUILD ?= 0
+NO_CACHE ?=
+include ./3.docker/compose/.env
+export $(shell sed 's/=.*//' 3.docker/compose/.env)
 
-.PHONY: clean-all
-clean-all: clean-client-web clean-client-cli clean-dillinger-lib clean-daemon 
-
-.PHONY: clean-client-web
-clean-client: 
-	@cd client_web && rm -rf dist
-	@echo "client_web cleaned..."
-
-.PHONY: clean-client-cli
-clean-client-cli: 
-	@cd client_cli && cargo clean
-	@echo "client_cli cleaned..."
-
-.PHONY: clean-dillinger-lib
-clean-dillinger-lib: 
-	@cd dillinger_lib && cargo clean
-	@echo "dillinger_lib cleaned..."
-
-.PHONY: clean-daemon
-clean-daemon:
-	@cd daemon && cargo clean && rm -rf dist
-	@echo "daemon-cleaned.."
-
-.PHONY: build-all-release
-build-all-release: RUST_BUILD_FLAGS += --release
-build-all-release: build-all 
-
-.PHONY: build-all
-build-all: build-client-web build-client-cli build-daemon copy-client-dist
-
-.PHONY: build-client-web
-build-client-web:
-	@echo "building client_web..."
-	@cd client_web && npm run build
-	@echo "client_web built"
-
-build-dillinger-lib:
-	@echo "building dillinger_lib..."
-	@cd dillinger_lib && cargo build
-	@echo "dullinger_lib built"
-
-build-client-cli: build-dillinger-lib
-	@echo "building client_cli..."
-	@cd client_cli && cargo build
-	@echo "client_cli built"
-
-.PHONY: build-daemon
-build-daemon: clean-daemon build-dillinger-lib
-	@echo "building daemon..."
-	@cd daemon && cargo build $(RUST_BUILD_FLAGS)
-	@echo "daemon built"
-
-.PHONY: package-daemon
-package-daemon: build-all-release
-	@echo "packaging daemon..."
-	@rm -rf dist
-	@mkdir dist
-	@cd daemon && cp target/release/dillinger-daemon ../dist/dillinger-daemon
-	@cd daemon && cp .env ../dist/.env
-	@cd client && cp -r dist ../dist
-	@chmod +x dist/dillinger-daemon
-	@echo "daemon packaged"
-
-.PHONY: package-all
-package-all: package-daemon prepare-docker-dillinger build-docker-dillinger
-	
-.PHONY: copy-client-dist
-copy-client-dist:
-	@cd client_web && cp -r dist ../daemon/dist
+# NOTE: This makefile MUST be run from the root of the repository
+# (All files are relative to the root)
 
 .PHONY: help
 help:
 	@echo "Take a look inside the makefile for specific make targets..."
 
-.PHONY: gamescope
-gamescope:
-	cd ./gamescope
-	meson build/
+export_vars:
+    export $$(sed 's/=.*//' "3.docker/compose/.env")
 
-.PHONY: build-winerunner
-build-winerunner:
-	@echo "Building - dillinger/winerunner"
-	@cd docker/images/winerunner && sudo DOCKER_BUILDKIT=1 docker build --no-cache -t dillinger/winerunner .
-	@echo "Build complete - dillinger/winerunner"
+.PHONY: base
+base: 
+	@echo "Building" $(NAME_BASE):$(VERSION_BASE) "image..."
+	docker build --network=host -t $(NAME_BASE):$(VERSION_BASE) -f ./3.docker/images/base/Dockerfile .
 
-.PHONY: build-docker-gow-base
-build-docker-gow-base:
-	@echo "Building - dillinger/gow-base"
-	@cd gow && sudo DOCKER_BUILDKIT=1 docker build -t dillinger/gow-base images/base
-	@echo "Build complete - dillinger/gow-base"
+.PHONY: builder
+builder: base
+	@echo "Building" $(NAME_BUILDER):$(VERSION_BUILDER) "image..."
+	docker build -t $(NAME_BUILDER):$(VERSION_BUILDER) --build-arg BASE_IMAGE=$(NAME_BASE):$(VERSION_BASE) -f ./3.docker/images/builder/Dockerfile .
+	
+# Build the docker container that can be used to build the opentrack project
+.PHONY: opentrack
+opentrack: builder
+	@echo "Building" $(NAME_OPENTRACK):$(VERSION_OPENTRACK) "image..."
+	docker build $(NO_CACHE) -t $(NAME_OPENTRACK):$(VERSION_OPENTRACK) --build-arg BASE_IMAGE=$(NAME_BUILDER):$(VERSION_BUILDER) -f images/opentrack/Dockerfile .
 
-.PHONY: build-docker-gow-base-app
-build-docker-gow-base-app:
-	@echo "Building - dillinger/gow-base-app"
-	@cd gow && sudo DOCKER_BUILDKIT=1 docker build --build-arg BASE_IMAGE=dillinger/gow-base -t dillinger/gow-base-app images/base-app
-	@echo "Build complete - dillinger/gow-base-app"
+# Clobber the open track project
+.PHONY: clobber_opentrack
+clobber_opentrack: 
+	docker rmi -f $(NAME_OPENTRACK):$(VERSION_OPENTRACK)
 
-.PHONY: build-docker-gow-retroarch
-build-docker-gow-retroarch: build-docker-gow-base build-docker-gow-base-app
-	@echo "Building - dillinger/retroarch"
-	@cd gow && sudo ./run-gow --gpu nvidia --app retroarch build
-	@echo "Build complete - dillinger/retroarch"
+# Copy the opentrack build files from the opentrack container to the host
+.PHONY: cp_opentrack
+cp_opentrack: opentrack
+	@echo "Copying" $(NAME_OPENTRACK):$(VERSION_OPENTRACK) "files..."
+	docker run -d --rm --name opentrack $(NAME_OPENTRACK):$(VERSION_OPENTRACK)
+	docker cp opentrack:/builds/opentrack/ $(CURDIR)/dillinger_builds/opentrack
+	docker stop opentrack
+	
+.PHONY: runner_base
+runner_base: opentrack
+	docker build -t ${NAME_RUNNER_BASE}:${VERSION_RUNNER_BASE} --build-arg BASE_IMAGE=$(NAME_BASE):$(VERSION_BASE) -f images/runners/runner_base.dockerfile .
 
-.PHONY: build-docker-gow-firefox
-build-docker-gow-firefox: build-docker-gow-base build-docker-gow-base-app
-	@echo "Building - dillinger/firefox"
-	@cd gow && sudo ./run-gow --gpu nvidia --app firefox build
-	@echo "Build complete - dillinger/firefox"
+.PHONY: clobber_runner_base
+clobber_runner_base: 
+	docker rmi -f $(NAME_RUNNER_BASE):$(VERSION_RUNNER_BASE)
 
-.PHONY: build-docker-gow-emulationstationde
-build-docker-gow-emulationstationde: build-docker-gow-base build-docker-gow-base-app
-	@echo "Building - dillinger/emulationstationde"
-	@cd gow && sudo ./run-gow --gpu nvidia --app emulationstationde build
-	@echo "Build complete - dillinger/emulationstationde"
+.PHONY: runner_wine
+runner_wine: runner_base 
+	@echo "Building" $(NAME_RUNNER_WINE):$(VERSION_RUNNER_WINE) "image..."
+	docker build -t $(NAME_RUNNER_WINE):$(VERSION_RUNNER_WINE) --build-arg BASE_IMAGE=${NAME_RUNNER_BASE}:${VERSION_RUNNER_BASE} -f images/runners/runner_wine.dockerfile .
 
-.PHONY: prepare-docker-dillinger
-prepare-docker-dillinger: package-daemon
-	@echo "preparing docker files for dillinger docker build..."
-	cp -r dist docker/images/core/dist
-	@echo "docker files prepared"
-
-.PHONY: build-docker-dillinger
-build-docker-dillinger: prepare-docker-dillinger
-	@cd docker/images/core && sudo DOCKER_BUILDKIT=1 docker build -t dillinger/core .
-
-.PHONY: run-docker-dillinger
-run-docker-dillinger:
-	@cd docker/compose && docker-compose -f core.yml up -d
-
-.PHONY: run-client-cli
-run-client-cli: build-client-cli
-	@echo "Running client_cli"
-	@cd client_cli && cargo run
+# The primary dillinger server (core)
+# There is no need to build any base image, this is straight up rust:latest
+.PHONY: core
+core: builder
+	@echo "Building" $(NAME_CORE):$(VERSION_CORE) "image..."
+	docker build -t $(NAME_CORE):$(VERSION_CORE) --build-arg BASE_IMAGE=$(NAME_BUILDER):$(VERSION_BUILDER) -f ./3.docker/images/core/Dockerfile .

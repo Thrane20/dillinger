@@ -13,7 +13,7 @@ function EngineBase() {
       interactor_base_engine.getDockerStatus().then((response) => {
         setDockerRunning(response);
       });
-    }, 2000);
+    }, 10000);
   }, []);
 
   return (

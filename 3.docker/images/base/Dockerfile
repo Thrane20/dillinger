@@ -24,10 +24,10 @@ RUN apt-get install -y --no-install-recommends \
 ENV UNAME="root" HOME="/root" 
 
 # Copy base scripts
-COPY images/base/scripts /opt/dillinger/scripts
+COPY 3.docker/images/base/scripts /opt/dillinger/scripts
 
 # Copy pulse audio config
-COPY images/base/pulse_config/default.pa /etc/pulse/default.pa
-COPY images/base/pulse_config/client.conf /etc/pulse/client.conf
-COPY images/base/pulse_config/daemon.conf /etc/pulse/daemon.conf
+COPY 3.docker/images/base/pulse_config/default.pa /etc/pulse/default.pa
+COPY 3.docker/images/base/pulse_config/client.conf /etc/pulse/client.conf
+COPY 3.docker/images/base/pulse_config/daemon.conf /etc/pulse/daemon.conf
 CMD [ "/bin/bash", "-c", "bash" ]

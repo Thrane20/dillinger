@@ -19,6 +19,7 @@ async fn main() {
         Some(v) => v.into_string().unwrap(),
         None => "3031".to_string(),
     };
+    
 
     // Find where to load the config file
     let config_dir = match env::var_os("CONFIG_DIR") {

@@ -9,7 +9,7 @@ pub struct Game {
     pub slug: String,
     pub name: String,
     pub description: String,
-    pub last_played: Option<String>,
+    pub last_played: Option<chrono::DateTime<chrono::Utc>>,
     pub times_played: Option<u32>,
 }
 

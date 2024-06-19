@@ -5,6 +5,7 @@ export const MessageContext = createContext();
 
 // Create a Provider component
 export function MessageProvider({ children }) {
+  
   const [message, setMessage] = useState("");
 
   return (
