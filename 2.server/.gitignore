@@ -19,3 +19,6 @@ Cargo.lock
 
 # Ignore all files in the .env file
 .env
+
+# Ignore the dev_root_dir - this is for build and test only
+/dev_root_dir/

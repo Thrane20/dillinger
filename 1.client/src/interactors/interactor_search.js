@@ -1,5 +1,5 @@
 import axios from "axios";
-import { outcomes } from "./interactor_outcomes";
+import outcomes from "./interactor_outcomes";
 
 var interactor_search = {
   searchLocal: async function (search) {
@@ -14,9 +14,11 @@ var interactor_search = {
       const response = await axios.get(
         "http://localhost:3060/search/local/" + search
       );
+      console.log(response.data);
       return response.data;
+
     } catch (error) {
-      console.error(error);
+      console.log(error);
       return {
         error: error,
       };

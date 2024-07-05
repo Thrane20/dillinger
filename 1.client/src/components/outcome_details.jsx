@@ -41,7 +41,7 @@ function OutcomeDetails(props) {
   return (
     <motion.div
       layout
-      className="flex flex-col w-full bg-base-200 shadow-md rounded-xl p-4 "
+      className="flex flex-col w-full bg-base-300 shadow-md rounded-xl p-4 "
       animate={isOpen ? "open" : "closed"}
       variants={variants}
     >
@@ -94,7 +94,7 @@ function OutcomeDetails(props) {
             </p>
             <hr className="border-t border-base w-3/4 opacity-50" />
             <div className="flex flex-col w-full justify-start items-start gap-2">
-              {outcome?.fixes.map((fix, index) => (
+              {outcome?.fixes?.map((fix, index) => (
                 <p key={index} className="text-md">
                   <strong>Fix {index + 1}:</strong> {fix}
                 </p>

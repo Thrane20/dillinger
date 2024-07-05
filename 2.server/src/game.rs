@@ -1,10 +1,9 @@
 use std::convert::Infallible;
 use log::info;
-use serde::Serialize;
 use crate::handlers::docker_interactor::{self};
 use crate::helpers::docker_run_params::DockerRunParams;
 
-#[derive(Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Game {
     pub slug: String,
     pub name: String,

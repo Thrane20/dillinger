@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useContext } from "react";
+import { LogContext } from "../../hooks/LogProvider";
 import { motion } from "framer-motion";
 
 import GameSearchLocalResults from "./game_search_local_results";
 
-function GameSearchBar({ setSearchTerms }) {
+function GameSearchBar({ setSearchTerms, focusOnResults }) {
+  const { appendLog } = useContext(LogContext);
   const [searchText, setSearchText] = useState("");
 
   function searchChanged(searchText) {
@@ -32,6 +34,12 @@ function GameSearchBar({ setSearchTerms }) {
           placeholder="Search"
           value={searchText}
           onChange={(e) => searchChanged(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              // Assuming you have a reference to your dropdown element as dropdownRef
+              focusOnResults();
+            }
+          }}
         />
         <p
           onClick={() => {

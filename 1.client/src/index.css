@@ -15,6 +15,14 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+.red-filter {
+  filter: invert(50%) sepia(20%) saturate(1500%) hue-rotate(250deg) brightness(105%) contrast(90%);
+}
+
+.gray-filter {
+  filter: brightness(0) saturate(100%) invert(93%) sepia(3%) saturate(12%) hue-rotate(1deg) brightness(30%) contrast(88%);
+}
+
 a {
   font-weight: 500;
   color: #646cff;

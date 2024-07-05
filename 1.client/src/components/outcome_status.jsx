@@ -6,8 +6,7 @@ import icon_critical from "../assets/icons/critical.png";
 import icon_ok from "../assets/icons/check.png";
 
 function OutcomeStatus(props) {
-
-  const [icon, setIcon] = useState();
+  const [icon, setIcon] = useState(icon_warning);
   const { setMessage } = useContext(MessageContext);
   const [shakiness, setShakiness] = useState(2);
 
@@ -37,12 +36,12 @@ function OutcomeStatus(props) {
     // Fire this message off to the context system. Listeners will pick it up.
     // In this case, this is usually the Detailed Help control
     setShakiness(0);
-    setMessage({...props.outcome});
+    setMessage({ ...props.outcome });
   }
 
   return (
     <motion.div
-      className=""
+      className="flex flex-shrink-0"
       animate={{
         x: [0, -shakiness, shakiness, -shakiness, shakiness, 0],
         transition: {
@@ -53,7 +52,12 @@ function OutcomeStatus(props) {
         },
       }}
     >
-      <img src={icon} className="w-8 h-8 flex-shrink-0 cursor-pointer" title={props?.outcome?.tooltip} onClick={()=>click_help_needed()} />
+      <img
+        src={icon}
+        className="w-8 h-8 cursor-pointer"
+        title={props?.outcome?.tooltip}
+        onClick={() => click_help_needed()}
+      />
     </motion.div>
   );
 }

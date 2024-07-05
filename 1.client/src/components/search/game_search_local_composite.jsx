@@ -1,11 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useContext } from "react";
 import { motion } from "framer-motion";
 import GameSearchBar from "./game_search_bar";
 import GameSearchLocalResults from "./game_search_local_results";
-import search from "../logics/game_search";
+import search from "../../logics/game_search";
+import { GlobalStateContext } from "../../hooks/GlobalStateProvider";
 
 // This is a composite class to handle searching for titles locally
 function GameSearchLocal() {
+  const { setGlobalState } = useContext(GlobalStateContext);
+  const gameSearchLocalResultsRef = useRef();
+
   const [searchTerms, setSearchTerms] = useState("");
   const [searchResults, setSearchResults] = useState(null);
   const [resultsOpen, setResultsOpen] = useState(false);
@@ -17,13 +21,28 @@ function GameSearchLocal() {
 
     // And go hunting for results
     search.searchLocalEntries(searchTerms).then((result) => {
-      setSearchResults(result);  
+      setSearchResults(result);
     });
   }, [searchTerms]);
 
   // User has selected a specific game
   function gameSelected(slug) {
-    console.log("Game selected: ", slug);
+    // This will bubble up to the global state
+    // and be picked up by the GameSelectedLocal component
+    setGlobalState((state) => {
+      return {
+        ...state,
+        gameSelectedLocal: searchResults.find((game) => game.slug === slug),
+      };
+    });
+  }
+
+  function focusOnResults() {
+    if (gameSearchLocalResultsRef.current) {
+      if(searchResults.length > 0) {
+        gameSearchLocalResultsRef.current.setFocus();
+      }
+    }
   }
 
   return (
@@ -33,9 +52,16 @@ function GameSearchLocal() {
       style={{ height: resultsOpen ? "15em" : "" }}
     >
       {/* The search bar will hook the setSearchTerms callback with updates */}
-      <GameSearchBar setSearchTerms={setSearchTerms} />
+      <GameSearchBar
+        setSearchTerms={setSearchTerms}
+        focusOnResults={focusOnResults}
+      />
       {/* Any game selected by the user will bubble up through the gameSelected function */}
-      <GameSearchLocalResults searchResults={searchResults} setSelectedGame={gameSelected} />
+      <GameSearchLocalResults
+        ref={gameSearchLocalResultsRef}
+        searchResults={searchResults}
+        setSelectedGame={gameSelected}
+      />
     </motion.div>
   );
 }

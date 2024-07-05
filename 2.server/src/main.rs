@@ -1,25 +1,39 @@
+#[macro_use]
+extern crate lazy_static;
+
+use crate::game_manager::GameCacheEntries;
 use crate::handlers::docker_interactor::DockerContainer;
+use config::MasterConfig;
 use log::info;
 use std::convert::Infallible;
-use std::env;
-use std::option::Option;
+use std::sync::{Arc, Mutex, MutexGuard};
+use tokio::time::{sleep, Duration};
 use warp::cors;
 use warp::http::StatusCode;
-use warp::Filter;
+use warp::Filter; // For global initialization
 
+pub mod config;
 pub mod game;
+pub mod game_manager;
 pub mod handlers;
 pub mod helpers;
+pub mod platform;
 pub mod system;
+
+lazy_static! {
+    // Find, load, and parse the master config file. This will panic if things aren't
+    // correct. Nothing works without it; there is no graceful fallback
+    static ref GLOBAL_CONFIG: Arc<MasterConfig> = config::get_master_config();
+    static ref GAME_CACHE: Arc<Mutex<GameCacheEntries>> = Arc::new(Mutex::new(GameCacheEntries::from(Vec::new())));
+
+}
 
 #[tokio::main]
 pub async fn main() {
-    // Manage what port we are running on
-    let default_port: u16 = 3060;
-    let port: u16 = env::var("PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default_port);
+    match GLOBAL_CONFIG.root_dir.canonicalize() {
+        Ok(absolute_path) => println!("Absolute path is {:?}", absolute_path),
+        Err(e) => println!("Error resolving absolute path: {}", e),
+    }
 
     // Set up path handlers
     let root = warp::path!().map(|| "You shouldn't have come back, Flynn.");
@@ -35,15 +49,56 @@ pub async fn main() {
     let docker_list_containers_handler =
         warp::path!("sys" / "list_containers").and_then(handler_list_containers);
 
+    // Game Management
+    let build_game_cache =
+        warp::path!("mgmt" / "build_game_cache").and_then(handler_build_game_cache);
+
     // Search local entries
     let search_local = warp::path!("search" / "local" / String).and_then(handler_search_local);
+
+    let ws_route = warp::path("ws")
+        .and(warp::ws())
+        .and(handlers::socket_client::clients_filter.clone())
+        .map(|ws: warp::ws::Ws, _clients| {
+            ws.on_upgrade(move |socket| handlers::socket_client::client_connection(socket))
+        });
 
     let routes = root
         .or(ping_handler)
         .or(docker_status_handler)
         .or(docker_list_containers_handler)
         .or(search_local)
+        .or(build_game_cache)
+        .or(ws_route)
         .with(cors().allow_any_origin());
+
+    // Prime the local search cache
+    {
+        let mut cache: MutexGuard<GameCacheEntries> = GAME_CACHE.lock().unwrap();
+        cache.update(
+            game_manager::prime_game_cache(0, GLOBAL_CONFIG.clone())
+                .await
+                .unwrap()
+                .entries,
+        )
+    } // Cache lock will go out of scope and unlock here
+
+    // Function to send a message to all WebSocket clients
+    // async fn send_message_to_clients() {
+    //     //handlers::socket_client::send_message("Hello from server!".to_string()).await;
+    // }
+
+    // Spawn a task to send messages to clients every 1 second
+    // tokio::spawn(async move {
+    //     loop {
+    //         // Send the message to all WebSocket clients
+    //         send_message_to_clients().await;
+    //         // Wait for 1 second before sending the next message
+    //         sleep(Duration::from_secs(1)).await;
+    //     }
+    // });
+
+    // Assuming GameCacheEntries has an update method
 
     // let game_launch = warp::path!("game" / "launch")
     //     .and(warp::post())
@@ -58,8 +113,34 @@ pub async fn main() {
     // ).await;
 
     // Start the engine
-    println!("Dillinger server is running on port: {}", port);
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    println!(
+        "Dillinger server is running on port: {}",
+        GLOBAL_CONFIG.port
+    );
+    warp::serve(routes)
+        .run(([0, 0, 0, 0], GLOBAL_CONFIG.port))
+        .await;
+}
+
+fn with_clients(
+    clients: handlers::socket_client::Clients,
+) -> impl Filter<Extract = (handlers::socket_client::Clients,), Error = Infallible> + Clone {
+    warp::any().map(move || clients.clone())
+}
+
+async fn handler_build_game_cache() -> Result<impl warp::Reply, Infallible> {
+    info!("route requested: handler_build_game_cache");
+    tokio::task::spawn({
+        let config = Arc::clone(&GLOBAL_CONFIG);
+        async move {
+            game_manager::build_game_cache(config).await;
+        }
+    });
+
+    Ok(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({ "result": "build_game_cache requested" })),
+        StatusCode::OK,
+    ))
 }
 
 /// Handler for the diagnostics ping route
@@ -96,49 +177,13 @@ async fn handler_list_containers() -> Result<impl warp::Reply, Infallible> {
 
 async fn handler_search_local(search_term: String) -> Result<impl warp::Reply, Infallible> {
     info!("route requested: search_local");
-
-    // creat an example Game struct
-    let game1 = game::Game {
-        slug: "donkeykong".to_string(),
-        name: "Donkey Kong".to_string(),
-        description: "Classic Original".to_string(),
-        last_played: Some(chrono::Utc::now()),
-        times_played: None,
-    };
-
-    let game2 = game::Game {
-        slug: "donkeykong".to_string(),
-        name: "Donkey Kong".to_string(),
-        description: "Classic Original".to_string(),
-        last_played: Some(chrono::Utc::now()),
-        times_played: None,
-    };
-
-    let game3 = game::Game {
-        slug: "donkeykong".to_string(),
-        name: "Donkey Kong".to_string(),
-        description: "Classic Original".to_string(),
-        last_played: Some(chrono::Utc::now()),
-        times_played: None,
-    };
-
-    let game4 = game::Game {
-        slug: "donkeykong".to_string(),
-        name: "Donkey Kong".to_string(),
-        description: "Classic Original".to_string(),
-        last_played: Some(chrono::Utc::now()),
-        times_played: None,
-    };
-
-    let game5 = game::Game {
-        slug: "donkeykong".to_string(),
-        name: "Donkey Kong".to_string(),
-        description: "Classic Original".to_string(),
-        last_played: Some(chrono::Utc::now()),
-        times_played: None,
-    };
-
-    let results = vec![game1, game2, game3, game4, game5];
+    let cache: MutexGuard<GameCacheEntries> = GAME_CACHE.lock().unwrap();
+    
+    let results = cache
+        .entries
+        .iter()
+        .filter(|entry| entry.slug.contains(&search_term))
+        .collect::<Vec<&game_manager::GameCacheEntry>>();
 
     Ok(warp::reply::with_status(
         warp::reply::json(&results),
