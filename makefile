@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
 REBUILD ?= 0
+RUST_BUILD_FLAGS ?= "--release"
 NO_CACHE ?=
 include ./3.docker/compose/.env
 export $(shell sed 's/=.*//' 3.docker/compose/.env)
@@ -10,6 +11,22 @@ export $(shell sed 's/=.*//' 3.docker/compose/.env)
 .PHONY: help
 help:
 	@echo "Take a look inside the makefile for specific make targets..."
+
+# Dillinger Server Component
+clean-server: 
+	@cd ./2.server && cargo clean
+	@echo "server cleaned..."
+
+build-server:
+	@echo "building server..."
+	@cd ./2.server && cargo build $(RUST_BUILD_FLAGS)
+	@echo "server built"
+
+.PHONY: build-client
+build-client:
+	@echo "building client..."
+	@cd ./1.client && bun run build
+	@echo "client built"
 
 .PHONY: base
 base: 

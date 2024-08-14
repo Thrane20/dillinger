@@ -24,6 +24,30 @@ var interactor_search = {
       };
     }
   },
+
+  searchRemote: async function (searchDb, searchTitle) {
+    // Guard the search for empties
+    if (searchDb?.length < 1) {
+      return [];
+    }
+
+    // Call the backend
+    try {
+      const encodedSearchDb = encodeURIComponent(searchDb);
+      const encodedSearchTitle = encodeURIComponent(searchTitle);
+      const response = await axios.get(
+        "http://localhost:3060/search/remote/" + encodedSearchDb + "/" + encodedSearchTitle
+      );
+      console.log(response.data);
+      return response.data;
+
+    } catch (error) {
+      console.log(error);
+      return {
+        error: error,
+      };
+    }
+  },
 };
 
 export default interactor_search;

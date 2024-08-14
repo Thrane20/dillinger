@@ -1,3 +1,7 @@
+
+const PLATFORM_SLUGS: [&str; 2] = ["arcade", "c64"];
+
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct Platform {
     pub slug: String,

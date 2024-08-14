@@ -9,7 +9,7 @@ root_dir = "./dev_root_dir"
 # Define the supported platform names
 # These are the directory names that dillinger will look for during an audit
 platforms = [
-    {name = "linux", description = "linux on linux"},
-    {name = "wine", description = "windows on linux"},
-    {name = "arcade", description = "mame based arcade roms"}
+    {slug = "linux", name = "linux", description = "Linux on Linux"},
+    {slug = "wine", name = "wine", description = "Windows on Linux"},
+    {slug= " arcade", name = "arcade", description = "MAME based arcade games"},
 ]

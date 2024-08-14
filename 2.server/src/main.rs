@@ -4,32 +4,38 @@ extern crate lazy_static;
 use crate::game_manager::GameCacheEntries;
 use crate::handlers::docker_interactor::DockerContainer;
 use config::MasterConfig;
+use gamedb::gamedb_search;
 use log::info;
+use env_logger;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex, MutexGuard};
-use tokio::time::{sleep, Duration};
+use scrapers::scrapers::{ Scraper, ScrapeEntry, PlatformEntry };
 use warp::cors;
 use warp::http::StatusCode;
 use warp::Filter; // For global initialization
 
 pub mod config;
+pub mod gamedb;
 pub mod game;
 pub mod game_manager;
 pub mod handlers;
+pub mod scrapers;
 pub mod helpers;
 pub mod platform;
 pub mod system;
+pub mod entities;
 
 lazy_static! {
     // Find, load, and parse the master config file. This will panic if things aren't
     // correct. Nothing works without it; there is no graceful fallback
     static ref GLOBAL_CONFIG: Arc<MasterConfig> = config::get_master_config();
     static ref GAME_CACHE: Arc<Mutex<GameCacheEntries>> = Arc::new(Mutex::new(GameCacheEntries::from(Vec::new())));
-
 }
 
 #[tokio::main]
 pub async fn main() {
+    env_logger::init();
+
     match GLOBAL_CONFIG.root_dir.canonicalize() {
         Ok(absolute_path) => println!("Absolute path is {:?}", absolute_path),
         Err(e) => println!("Error resolving absolute path: {}", e),
@@ -56,6 +62,8 @@ pub async fn main() {
     // Search local entries
     let search_local = warp::path!("search" / "local" / String).and_then(handler_search_local);
 
+    let search_remote = warp::path!("search" / "remote" / String / String).and_then(handler_search_remote);
+
     let ws_route = warp::path("ws")
         .and(warp::ws())
         .and(handlers::socket_client::clients_filter.clone())
@@ -68,6 +76,7 @@ pub async fn main() {
         .or(docker_status_handler)
         .or(docker_list_containers_handler)
         .or(search_local)
+        .or(search_remote)
         .or(build_game_cache)
         .or(ws_route)
         .with(cors().allow_any_origin());
@@ -122,18 +131,18 @@ pub async fn main() {
         .await;
 }
 
-fn with_clients(
-    clients: handlers::socket_client::Clients,
-) -> impl Filter<Extract = (handlers::socket_client::Clients,), Error = Infallible> + Clone {
-    warp::any().map(move || clients.clone())
-}
+// fn with_clients(
+//     clients: handlers::socket_client::Clients,
+// ) -> impl Filter<Extract = (handlers::socket_client::Clients,), Error = Infallible> + Clone {
+//     warp::any().map(move || clients.clone())
+// }
 
 async fn handler_build_game_cache() -> Result<impl warp::Reply, Infallible> {
     info!("route requested: handler_build_game_cache");
     tokio::task::spawn({
         let config = Arc::clone(&GLOBAL_CONFIG);
         async move {
-            game_manager::build_game_cache(config).await;
+            let _ = game_manager::build_game_cache(config).await;
         }
     });
 
@@ -178,13 +187,37 @@ async fn handler_list_containers() -> Result<impl warp::Reply, Infallible> {
 async fn handler_search_local(search_term: String) -> Result<impl warp::Reply, Infallible> {
     info!("route requested: search_local");
     let cache: MutexGuard<GameCacheEntries> = GAME_CACHE.lock().unwrap();
-    
+
     let results = cache
         .entries
         .iter()
         .filter(|entry| entry.slug.contains(&search_term))
         .collect::<Vec<&game_manager::GameCacheEntry>>();
 
+    Ok(warp::reply::with_status(
+        warp::reply::json(&results),
+        StatusCode::OK,
+    ))
+}
+
+async fn  handler_search_remote(search_db: String, search_term: String) -> Result<impl warp::Reply, Infallible> {
+    info!("route requested: search_remote");
+    info!("search db: {}", search_db);
+    info!("search term: {}", search_term);
+
+    let mut results = vec![];
+
+    let matching_titles = gamedb_search::search_title(search_term, search_db).await;
+    match matching_titles {
+        Ok(titles) => {
+            results = titles;
+        }
+        Err(e) => {
+            info!("Error searching remote: {}", e.description);
+        }
+    }
+    
+    
     Ok(warp::reply::with_status(
         warp::reply::json(&results),
         StatusCode::OK,

@@ -12,6 +12,18 @@ var search = {
       });
     });
   },
+
+  searchRemoteEntries: function (searchDb, searchText) {
+    return new Promise((resolve, reject) => {
+      interactor_search.searchRemote(searchDb, searchText).then((result) => {
+        if (result.error) {
+          reject(result.error);
+        } else {
+          resolve(result);
+        }
+      });
+    });
+  },
 };
 
 export default search;

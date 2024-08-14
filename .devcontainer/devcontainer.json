@@ -1,0 +1,25 @@
+{
+    "name" : "dillinger",
+    "build" : {
+        "dockerfile" : "Dockerfile"
+    },
+    "mounts": [
+        "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    ],
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "workspaceFolder": "/workspace/",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.makefile-tools",
+                "ms-azuretools.vscode-docker",
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml"
+            ]
+        }
+    },
+    "runArgs": [
+    "--cpus=4.0",
+    "--memory=8g"
+  ]
+}

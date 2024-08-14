@@ -32,6 +32,12 @@ const outcomes = {
     fixes: [],
     icon: "ok",
   },
+  ws_socket_unknown: {
+    title: "WebSocket Unknown",
+    what: "No information currently known about the state of the Dillinger server",
+    fixes: [],
+    icon: "warning",
+  },
   ws_socket_disconnected: {
     title: "WebSocket Disconnected",
     what: "Not connected to Dillinger's web socket.",

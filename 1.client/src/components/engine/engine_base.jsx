@@ -28,7 +28,7 @@ function EngineBase() {
         clearInterval(intervalId); // Clear the retry interval upon success
 
         // Update our global state - note that we're connected to the dillinger web socket
-        setSocketConnected({ status: "Up", outcome: outcomes.ws_socket_connected});
+        setSocketConnected({ status: "Up", outcome: outcomes.ws_socket_connected });
         setGlobalState((prev) => ({
           ...prev,
           socketConnected: { status: "Up" },
@@ -58,7 +58,15 @@ function EngineBase() {
         console.log("Got a message", e);
         let logItem = createLog("WebSocket message: " + e.data);
         appendLog(logItem);
-        
+
+      };
+
+      ws.onclose = (event) => {
+        setSocketConnected({ status: "Down", outcome: outcomes.ws_socket_disconnected });
+        setGlobalState((prev) => ({
+          ...prev,
+          socketConnected: { status: "Down" },
+        }));
       };
     };
 

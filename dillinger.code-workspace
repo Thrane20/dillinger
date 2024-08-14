@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"rust-analyzer.cargo.autoreload": true,
+		"rust-analyzer.files.excludeDirs": [
+			"cli",
+			"client_cli",
+			"daemon",
+			"dillinger_lib"
+		],
+		"makefile.configureOnOpen": false
+	}
+}

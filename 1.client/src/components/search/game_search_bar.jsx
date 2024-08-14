@@ -1,16 +1,24 @@
 import React, { useEffect, useState, useContext } from "react";
+import createLog from "../logging/dillinger_log";
 import { LogContext } from "../../hooks/LogProvider";
+import { MessageContext } from "../../hooks/MessageProvider";
 import { motion } from "framer-motion";
 
 import GameSearchLocalResults from "./game_search_local_results";
 
 function GameSearchBar({ setSearchTerms, focusOnResults }) {
   const { appendLog } = useContext(LogContext);
+  const { setMessage } = useContext(MessageContext);
   const [searchText, setSearchText] = useState("");
 
   function searchChanged(searchText) {
     setSearchText(searchText);
     setSearchTerms(searchText);
+  }
+
+  function searchInternet() {
+    setMessage({action: "open", on: "search_remote_modal", title: searchText});
+    appendLog(createLog("Searching the internet for " + searchText));
   }
 
   return (
@@ -49,7 +57,7 @@ function GameSearchBar({ setSearchTerms, focusOnResults }) {
           CLOSE
         </p>
       </label>
-      <button className="btn btn-primary">Search Internet</button>
+      <button className="btn btn-primary" onClick={()=>searchInternet()}>Search Internet</button>
     </div>
   );
 }
