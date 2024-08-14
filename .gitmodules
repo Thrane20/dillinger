@@ -10,4 +10,4 @@
 	url = https://github.com/swaywm/wlroots
 [submodule "5.thirdparty/opentrack"]
 	path = 5.thirdparty/opentrack
-	url = https://github.com/opentrack/opentrack
+	url = https://github.com/opentrack/opentrack.git
