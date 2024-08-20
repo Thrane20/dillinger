@@ -2,7 +2,7 @@ use std::fmt::Error;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::entities::dillinger_error::DillingerError;
+use crate::entities::{dillinger_error::DillingerError, game::Game};
 use super::gamedbtoken::GameDbToken;
 
 // A GameDB represents a database that can be used to search for games,  
@@ -12,7 +12,7 @@ pub trait GameDb : Send  {
     async fn authenticate(&mut self) -> Result<GameDbToken, DillingerError>;
     async fn search_game(&mut self, name: &str) -> Vec<GameDbGameEntry>;
     async fn search_platform(&mut self, name: &str) -> Vec<String>;
-    async fn get_game_data(&mut self, id: u64, name: String) -> String;
+    async fn get_game_data(&mut self, game_slug: String) -> Option<Game>;
     async fn get_platform_data(&mut self, id: u64, name: String) -> String;
     async fn get_screenshots(&mut self, id: u64, screenshot_info: Vec<String>) -> u32;
 }
@@ -24,6 +24,7 @@ pub struct GameDbGameEntry {
     pub slug_platform: String,
     pub name: String,
     pub description: String,
+    pub release_date: u64
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

@@ -48,6 +48,30 @@ var interactor_search = {
       };
     }
   },
+
+  getRemoteTitle: async function (searchDb, slug) {
+    // Guard the search for empties
+    if (searchDb?.length < 1) {
+      return [];
+    }
+
+    // Call the backend
+    try {
+      const encodedSearchDb = encodeURIComponent(searchDb);
+      const encodedTitleSlug = encodeURIComponent(slug);
+      const response = await axios.get(
+        "http://localhost:3060/game/remote/" + encodedSearchDb + "/" + encodedTitleSlug
+      );
+      console.log(response.data);
+      return response.data;
+
+    } catch (error) {
+      console.log(error);
+      return {
+        error: error,
+      };
+    }
+  },
 };
 
 export default interactor_search;

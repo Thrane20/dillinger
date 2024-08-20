@@ -4,26 +4,27 @@ extern crate lazy_static;
 use crate::game_manager::GameCacheEntries;
 use crate::handlers::docker_interactor::DockerContainer;
 use config::MasterConfig;
+use entities::game::Game;
+use env_logger;
 use gamedb::gamedb_search;
 use log::info;
-use env_logger;
+use scrapers::scrapers::{PlatformEntry, ScrapeEntry, Scraper};
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex, MutexGuard};
-use scrapers::scrapers::{ Scraper, ScrapeEntry, PlatformEntry };
 use warp::cors;
 use warp::http::StatusCode;
 use warp::Filter; // For global initialization
 
 pub mod config;
-pub mod gamedb;
+pub mod entities;
 pub mod game;
 pub mod game_manager;
+pub mod gamedb;
 pub mod handlers;
-pub mod scrapers;
 pub mod helpers;
 pub mod platform;
+pub mod scrapers;
 pub mod system;
-pub mod entities;
 
 lazy_static! {
     // Find, load, and parse the master config file. This will panic if things aren't
@@ -62,7 +63,13 @@ pub async fn main() {
     // Search local entries
     let search_local = warp::path!("search" / "local" / String).and_then(handler_search_local);
 
-    let search_remote = warp::path!("search" / "remote" / String / String).and_then(handler_search_remote);
+    // Search remote entries
+    let search_remote =
+        warp::path!("search" / "remote" / String / String).and_then(handler_search_remote);
+
+    // Get details for a specific title
+    let game_details =
+        warp::path!("game" / "remote" / String / String).and_then(handler_get_game_details);
 
     let ws_route = warp::path("ws")
         .and(warp::ws())
@@ -77,6 +84,7 @@ pub async fn main() {
         .or(docker_list_containers_handler)
         .or(search_local)
         .or(search_remote)
+        .or(game_details)
         .or(build_game_cache)
         .or(ws_route)
         .with(cors().allow_any_origin());
@@ -200,14 +208,17 @@ async fn handler_search_local(search_term: String) -> Result<impl warp::Reply, I
     ))
 }
 
-async fn  handler_search_remote(search_db: String, search_term: String) -> Result<impl warp::Reply, Infallible> {
+async fn handler_search_remote(
+    search_db: String,
+    search_term: String,
+) -> Result<impl warp::Reply, Infallible> {
     info!("route requested: search_remote");
     info!("search db: {}", search_db);
     info!("search term: {}", search_term);
 
     let mut results = vec![];
 
-    let matching_titles = gamedb_search::search_title(search_term, search_db).await;
+    let matching_titles = gamedb_search::search_title(search_db, search_term).await;
     match matching_titles {
         Ok(titles) => {
             results = titles;
@@ -216,10 +227,35 @@ async fn  handler_search_remote(search_db: String, search_term: String) -> Resul
             info!("Error searching remote: {}", e.description);
         }
     }
-    
-    
+
     Ok(warp::reply::with_status(
         warp::reply::json(&results),
+        StatusCode::OK,
+    ))
+}
+
+async fn handler_get_game_details(
+    search_db: String,
+    game_slug: String,
+) -> Result<impl warp::Reply, Infallible> {
+    info!("route requested: get_game_details");
+    info!("search db: {}", search_db);
+    info!("game slug: {}", game_slug);
+
+    let mut game = Game::new();
+
+    let matching_game = gamedb_search::get_game_details(search_db, game_slug).await;
+    match matching_game {
+        Ok(foundGame) => {
+            game = foundGame.clone();
+        }
+        Err(e) => {
+            info!("Error searching remote: {}", e.description);
+        }
+    }
+
+    Ok(warp::reply::with_status(
+        warp::reply::json(&game),
         StatusCode::OK,
     ))
 }

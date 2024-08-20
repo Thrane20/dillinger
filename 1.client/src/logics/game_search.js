@@ -24,6 +24,18 @@ var search = {
       });
     });
   },
+
+  getRemoteEntryDetails: function (searchDb, slug) {
+    return new Promise((resolve, reject) => {
+      interactor_search.getRemoteTitle(searchDb, slug).then((result) => {
+        if (result.error) {
+          reject(result.error);
+        } else {
+          resolve(result);
+        }
+      });
+    });
+  },
 };
 
 export default search;
