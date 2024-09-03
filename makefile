@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 REBUILD ?= 0
 RUST_BUILD_FLAGS ?= "--release"
-NO_CACHE ?=
+CACHE_FLAG ?= 
 include ./3.docker/compose/.env
 export $(shell sed 's/=.*//' 3.docker/compose/.env)
 
@@ -22,11 +22,19 @@ build-server:
 	@cd ./2.server && cargo build $(RUST_BUILD_FLAGS)
 	@echo "server built"
 
+# Dillinger front end component
 .PHONY: build-client
 build-client:
 	@echo "building client..."
 	@cd ./1.client && bun run build
 	@echo "client built"
+
+# Dillinger docker images
+.PHONY: docker-base
+docker-base:
+	@echo "building base docker image..."
+	DOCKER_BUILDKIT=1 docker build $(CACHE_FLAG) -t ghcr.io/dillinger/base-arch-experimental \
+	-f ./3.docker/direct/base.arch.experimental.Dockerfile ./3.docker/direct
 
 .PHONY: base
 base: 

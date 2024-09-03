@@ -315,9 +315,9 @@ impl GameDb for Igdb {
                                 }
                             }),
                         };
-                        println!("---");
-                        println!("finalGame: {:?}", json.as_array());
-                        println!("---");
+                        // println!("---");
+                        // println!("finalGame: {:?}", json.as_array());
+                        // println!("---");
                     }
                     return Some(finalGame);
                 }

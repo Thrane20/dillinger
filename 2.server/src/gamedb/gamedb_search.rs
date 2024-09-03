@@ -1,9 +1,10 @@
+use bollard::secret::PluginConfigInterfaceProtocolSchemeEnum;
 use log::info;
 
 use super::gamedb::GameDbGameEntry;
 use crate::{
     entities::{dillinger_error::DillingerError, game::Game},
-    gamedb::{gamedb::GameDb, igdb::Igdb},
+    gamedb::{gamedb::GameDb, igdb::Igdb}, handlers::cache,
 };
 
 pub async fn search_title(
@@ -49,7 +50,11 @@ pub async fn get_game_details(
 
     // Search for matching titles
     match db.get_game_data(game_slug).await {
-        Some(results) => Ok(results),
+        Some(results) => {
+            // Store the last result in the cache
+            cache::write_cache_last_search(results.clone());
+            Ok(results)
+        },
         None => {
             return Err(DillingerError {
                 description: "Could not find the title with provided slug".to_string(),

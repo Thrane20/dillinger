@@ -9,6 +9,7 @@ function GameSearchDetails({ searchDb, slug }) {
     const MODAL_ID = "details_game_remote_modal";
     const { message } = useContext(MessageContext);
     const [searchResults, setSearchResults] = useState({});
+    const [localRelatedTitle, setLocalRelatedTitle] = useState({});
 
     useEffect(() => {
         console.log("details message changed ", message);
@@ -21,12 +22,22 @@ function GameSearchDetails({ searchDb, slug }) {
         console.log("slug changed ", slug);
         // If the selected index changes, this runs.
         // So go off to the search engine and get detailed information for this title
-
         search.getRemoteEntryDetails(searchDb, slug).then((result) => {
             console.log(result);
             setSearchResults(result);
+
+            // Now that we've got the remote game info, we want to find
+            // any related games in the local database.
+            search.searchLocalEntriesBySlug(slug).then((result) => {
+                console.log("local related title ", result);
+                setLocalRelatedTitle(result);
+            });
         });
     }, [slug]);
+
+    useEffect(() => {
+        console.log("local related title found ", localRelatedTitle);
+    }, [localRelatedTitle]);
 
     useEffect(() => {
         // If the search results change, this runs.

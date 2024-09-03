@@ -46,7 +46,6 @@ pub async fn post(
     // Create a new reqwest client (non-blocking)
     let client = reqwest::Client::new();
     let req_body = body.unwrap_or("".to_string());
-    info!("req_body: {:?}", req_body);
 
     // Setup standard headers for the request
     let mut reqHeaders = HeaderMap::new();

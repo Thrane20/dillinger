@@ -63,6 +63,9 @@ pub async fn main() {
     // Search local entries
     let search_local = warp::path!("search" / "local" / String).and_then(handler_search_local);
 
+    // Get local entry by slug
+    let slug_local = warp::path!("slug" / "local" / String).and_then(handler_slug_local);
+
     // Search remote entries
     let search_remote =
         warp::path!("search" / "remote" / String / String).and_then(handler_search_remote);
@@ -85,6 +88,7 @@ pub async fn main() {
         .or(search_local)
         .or(search_remote)
         .or(game_details)
+        .or(slug_local)
         .or(build_game_cache)
         .or(ws_route)
         .with(cors().allow_any_origin());
@@ -200,6 +204,22 @@ async fn handler_search_local(search_term: String) -> Result<impl warp::Reply, I
         .entries
         .iter()
         .filter(|entry| entry.slug.contains(&search_term))
+        .collect::<Vec<&game_manager::GameCacheEntry>>();
+
+    Ok(warp::reply::with_status(
+        warp::reply::json(&results),
+        StatusCode::OK,
+    ))
+}
+
+async fn handler_slug_local(slug: String) -> Result<impl warp::Reply, Infallible> {
+    info!("route requested: slug_local");
+    let cache: MutexGuard<GameCacheEntries> = GAME_CACHE.lock().unwrap();
+
+    let results = cache
+        .entries
+        .iter()
+        .filter(|entry| entry.slug.contains(&slug))
         .collect::<Vec<&game_manager::GameCacheEntry>>();
 
     Ok(warp::reply::with_status(

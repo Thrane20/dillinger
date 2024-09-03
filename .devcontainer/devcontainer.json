@@ -20,6 +20,7 @@
     },
     "runArgs": [
     "--cpus=4.0",
-    "--memory=8g"
+    "--memory=8g",
+    "--add-host=host.docker.internal:host-gateway"
   ]
 }

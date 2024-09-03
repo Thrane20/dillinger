@@ -1,5 +1,13 @@
 use std::{fs, path::PathBuf};
 
+use log::info;
+
+pub fn get_cache_dir() -> PathBuf {
+    let mut cache_dir = PathBuf::new();
+    cache_dir.push("cache");
+    cache_dir
+}
+
 pub fn get_dirs_in_dir(dir_path: &PathBuf) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Ok(entries) = fs::read_dir(dir_path) {
@@ -33,6 +41,8 @@ pub fn write_file(path: &PathBuf, contents: String, create_dir: bool) {
         // Create the directory if it doesn't exist
         fs::create_dir_all(&path.parent().unwrap()).expect("unable to create directory");
     }
+
+    info!("Writing file to: {:?}", path);
 
     // Write the file
     fs::write(path, contents).expect("unable to write file");

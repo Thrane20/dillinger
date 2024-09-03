@@ -25,6 +25,29 @@ var interactor_search = {
     }
   },
 
+  searchLocalBySlug: async function (slug) {
+    // Guard the search for empties
+    if (slug?.length < 1) {
+      return [];
+    }
+
+    // Call the backend
+    try {
+      const encodedSearch = encodeURIComponent(slug);
+      const response = await axios.get(
+        "http://localhost:3060/slug/local/" + slug
+      );
+      console.log(response.data);
+      return response.data;
+
+    } catch (error) {
+      console.log(error);
+      return {
+        error: error,
+      };
+    }
+  },
+
   searchRemote: async function (searchDb, searchTitle) {
     // Guard the search for empties
     if (searchDb?.length < 1) {
