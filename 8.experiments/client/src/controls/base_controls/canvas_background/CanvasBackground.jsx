@@ -9,7 +9,7 @@ const CanvasBackground = (props) => {
       const context = canvas.getContext('2d');
   
       // Example: Fill the canvas with a color
-      context.fillStyle = 'rgba(173, 216, 230, 0.005)';
+      context.fillStyle = 'rgba(173, 216, 230, 0.01)';
       context.fillRect(0, 0, canvas.width, canvas.height);
   
       // TODO: Add more canvas drawing logic here

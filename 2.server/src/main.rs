@@ -1,30 +1,46 @@
 #[macro_use]
 extern crate lazy_static;
 
+use crate::error_response::ErrorResponse;
+use crate::files::filesystem::DirectoryContents;
 use crate::game_manager::GameCacheEntries;
 use crate::handlers::docker_interactor::DockerContainer;
+
 use config::MasterConfig;
 use entities::game::Game;
 use env_logger;
 use gamedb::gamedb_search;
 use log::info;
+use network::{file_transfer, network_manager};
 use scrapers::scrapers::{PlatformEntry, ScrapeEntry, Scraper};
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+use tokio::time::sleep;
 use warp::cors;
 use warp::http::StatusCode;
+use warp::reply::{json, with_status};
 use warp::Filter; // For global initialization
+use urlencoding::decode;
+
+#[cfg(not(target_os = "macos"))]
+use crate::input::monitor_devices;
 
 pub mod config;
+pub mod docker;
 pub mod entities;
+pub mod error_response;
+pub mod files;
 pub mod game;
 pub mod game_manager;
 pub mod gamedb;
 pub mod handlers;
 pub mod helpers;
+pub mod network;
 pub mod platform;
 pub mod scrapers;
 pub mod system;
+pub mod input;
 
 lazy_static! {
     // Find, load, and parse the master config file. This will panic if things aren't
@@ -56,6 +72,13 @@ pub async fn main() {
     let docker_list_containers_handler =
         warp::path!("sys" / "list_containers").and_then(handler_list_containers);
 
+    // Get a list of docker volumes
+    let docker_list_volumes_handler = warp::path!("sys" / "volumes").and_then(handler_list_volumes);
+
+    // Get the directory contents from the specified path
+    let list_directory_contents =
+        warp::path!("sys" / "ls" / String).and_then(handler_list_directory_contents);
+
     // Game Management
     let build_game_cache =
         warp::path!("mgmt" / "build_game_cache").and_then(handler_build_game_cache);
@@ -85,6 +108,8 @@ pub async fn main() {
         .or(ping_handler)
         .or(docker_status_handler)
         .or(docker_list_containers_handler)
+        .or(docker_list_volumes_handler)
+        .or(list_directory_contents)
         .or(search_local)
         .or(search_remote)
         .or(game_details)
@@ -104,20 +129,27 @@ pub async fn main() {
         )
     } // Cache lock will go out of scope and unlock here
 
-    // Function to send a message to all WebSocket clients
-    // async fn send_message_to_clients() {
-    //     //handlers::socket_client::send_message("Hello from server!".to_string()).await;
-    // }
+    // // Spawn a task to send messages to clients every 1 second
+    tokio::spawn(async move {
+        network_manager::start_file_transfer().await;
 
-    // Spawn a task to send messages to clients every 1 second
-    // tokio::spawn(async move {
-    //     loop {
-    //         // Send the message to all WebSocket clients
-    //         send_message_to_clients().await;
-    //         // Wait for 1 second before sending the next message
-    //         sleep(Duration::from_secs(1)).await;
-    //     }
-    // });
+        loop {
+            let transfers = network_manager::get_file_transfers().await;
+
+            let json_payload = serde_json::to_string(&transfers).unwrap();
+            handlers::socket_client::send_message(json_payload).await;
+
+            // Wait for 1 second before sending the next message
+            sleep(Duration::from_secs(1)).await;
+        }
+    });
+
+    // Monitor events on the input subsystem - if we see changes, we'll inform
+    // the client via a websocket message
+    #[cfg(not(target_os = "macos"))]
+    tokio::spawn(async {
+        monitor_devices().await;
+    });
 
     // Assuming GameCacheEntries has an update method
 
@@ -195,6 +227,58 @@ async fn handler_list_containers() -> Result<impl warp::Reply, Infallible> {
         )),
     }
 }
+
+async fn handler_list_volumes() -> Result<impl warp::Reply, Infallible> {
+    info!("route requested: list_volumes");
+    let volumes = docker::docker_interactor::list_named_volumes().await;
+    info!("volumes: {:?}", volumes);
+    match volumes {
+        Ok(volumes) => Ok(warp::reply::with_status(
+            warp::reply::json(&volumes),
+            StatusCode::OK,
+        )),
+        Err(e) => {
+            let error_response: ErrorResponse = e.into();
+            Ok(with_status(
+                json(&error_response),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+async fn handler_list_directory_contents(path: String) -> Result<impl warp::Reply, Infallible> {
+    info!("route requested: handler_list_directory_contents");
+    let decoded_path = decode(&path).unwrap().into_owned();
+    let contents = files::filesystem::get_directory_contents(decoded_path).await;
+    info!("contents: {:?}", contents);
+    match contents {
+        Ok(contents) => Ok(warp::reply::with_status(
+            warp::reply::json(&contents),
+            StatusCode::OK,
+        )),
+        Err(e) => Ok(
+            with_status(json(&e), 
+            StatusCode::INTERNAL_SERVER_ERROR)
+        ),
+    }
+}
+
+// async fn handler_volume_contents(volume: String, path: String) -> Result<impl warp::Reply, Infallible> {
+//     info!("route requested: handler_volume_contents");
+//     let contents = docker::docker_interactor::get_volume_contents(volume, path).await;
+//     info!("contents: {:?}", contents);
+//     match contents {
+//         Ok(contents) => Ok(warp::reply::with_status(
+//             warp::reply::json(&contents),
+//             StatusCode::OK,
+//         )),
+//         Err(e) => {
+//             let error_response: ErrorResponse = e.into();
+//             Ok(with_status(json(&error_response), StatusCode::INTERNAL_SERVER_ERROR))
+//         }
+//     }
+// }
 
 async fn handler_search_local(search_term: String) -> Result<impl warp::Reply, Infallible> {
     info!("route requested: search_local");

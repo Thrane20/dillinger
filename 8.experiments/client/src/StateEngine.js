@@ -1,0 +1,6 @@
+
+class StateEngine {
+    constructor() {
+
+    }
+}

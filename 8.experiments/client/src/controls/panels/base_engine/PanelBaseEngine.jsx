@@ -1,21 +1,52 @@
 import React, { useEffect, useState } from "react";
+import { useEvent } from "../../../hooks/useEvent";
 import CanvasBackground from "../../base_controls/canvas_background/CanvasBackground";
+import { service_interactor } from "./service_interactor";
 import SvgPlug from "./SvgPlug";
 import SvgDocker from "./SvgDocker";
 
 function PanelBaseEngine() {
 
+    const { event } = useEvent();
     const [uptime, setUpTime] = useState("00:00:00");
     const [serverStatus, setServerStatus] = useState("down");
-    const [dockerStatus, setDockerStatus] = useState("up");
+    const [dockerStatus, setDockerStatus] = useState("down");
 
     function classForServerStatus() {
-        return serverStatus === "up" ? "color-ok" : "color-error";
+        return serverStatus === "OPEN" ? "color-ok" : "color-error";
     }
 
     function classForDockerStatus() {
-        return dockerStatus === "up" ? "color-ok" : "color-error";
+        return dockerStatus === "Up" ? "color-ok" : "color-error";
     }
+
+    useEffect(() => {
+        // Run once on mount
+        service_interactor.get_docker_status().then((status) => {
+            setDockerStatus(status.up_status);
+        }).catch((error) => {
+            console.log("Error getting docker status:", error);
+            setDockerStatus("down");
+        })
+
+    }, []);
+
+    useEffect(() => {
+        if (event) {
+            console.log("New event received:", event);
+            
+            // Handle any updates to the server socket status
+            if(event.component === "WebSocket") {
+                console.log("Server status:", event.status);
+                setServerStatus(event.status);
+            }
+
+            // Handle any updates to the docker status
+            if(event.component === "Docker") {
+                setDockerStatus(event.status);
+            }
+        }
+    }, [event]);
 
     useEffect(() => {
         setInterval(() => {
@@ -50,7 +81,7 @@ function PanelBaseEngine() {
                     </li>
                     <li>
                         <div className="flex flex-row w-full justify-center items-center gap-1">
-                            <SvgDocker className={`flex-shrink-0 ${classForDockerStatus()} icon-xs`} size="icon-base"  />
+                            <SvgDocker className={`flex-shrink-0 ${classForDockerStatus()} icon-xs`} size="icon-base" />
                             <div className="flex flex-grow line-horizontal"></div>
                             <p className="flex flex-shrink-0 w-auto h-full items-center justify-end text-base">Docker Status</p>
                         </div>

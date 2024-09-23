@@ -3,7 +3,7 @@
     "build" : {
         "dockerfile" : "Dockerfile"
     },
-    "mounts": [
+    "mounts": [ 
         "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
     ],
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
@@ -19,8 +19,8 @@
         }
     },
     "runArgs": [
-    "--cpus=4.0",
-    "--memory=8g",
+    "--cpus=6.0",
+    "--memory=12g",
     "--add-host=host.docker.internal:host-gateway"
   ]
 }

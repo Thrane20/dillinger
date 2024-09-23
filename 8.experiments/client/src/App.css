@@ -3,6 +3,8 @@
   --color-alert: #b18446;
   --color-ok: #488a48;
   --color-primary: #00cccc;
+  --color-primary-rgb: 0, 204, 204;
+  --color-neutral: #8dc6c9;
 }
 
 .color-primary {
@@ -21,8 +23,12 @@
   color: var(--color-ok);
 }
 
+.color-neutral {
+  color: var(--color-neutral);
+}
+
 html {
-  font-size: calc(0.5vw + 0.5vh + 0.25vmin); 
+  font-size: calc(0.5vw + 0.5vh + 0.25vmin);
   margin: 0 auto;
   padding: 0.5rem;
   text-align: center;
@@ -34,8 +40,8 @@ p {
 }
 
 .icon-base {
-  width: 3rem;
-  height: 3rem;
+  width: 3em;
+  height: 3em;
 }
 
 .icon-sm {
@@ -59,7 +65,7 @@ p {
   left: 0;
   top: 0;
   right: 0;
-  bottom: 0;    
+  bottom: 0;
 }
 
 #canvas-grid-cells,
@@ -69,10 +75,10 @@ p {
 }
 
 p {
-background-color: transparent;
-color: #00CCCC;
-font-family: monospace;
-margin: .25rem;
+  background-color: transparent;
+  color: var(--color-primary);
+  font-family: monospace;
+  margin: .25rem;
 }
 
 .line-above-below {
@@ -86,8 +92,10 @@ margin: .25rem;
   position: absolute;
   left: 0;
   width: 100%;
-  height: 1px; /* Adjust the thickness of the line here */
-  background-color: #00cccc3e; /* Adjust the color of the line here */
+  height: 1px;
+  /* Adjust the thickness of the line here */
+  background-color: rgba(var(--color-primary-rgb), 0.3);
+  /* Adjust the color of the line here */
 }
 
 .line-above-below::before {
@@ -110,69 +118,188 @@ margin: .25rem;
   top: 50%;
   left: 0;
   width: 100%;
-  border-top: 1px dotted var(--color-primary); /* Adjust the color and thickness as needed */
+  border-top: 1px dotted var(--color-primary);
+  /* Adjust the color and thickness as needed */
   transform: translateY(-50%);
-  filter:opacity(0.5);
+  filter: opacity(0.5);
 }
 
 /* Vertical List Lines */
 
 .vertical-line-list {
   position: relative;
-  padding-left: 20px; /* Adjust to make space for the vertical line */
+  padding-left: 20px;
+  /* Adjust to make space for the vertical line */
 }
 
 .vertical-line-list::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 10px; /* Adjust to position the vertical line */
-  width: 1px; /* Adjust the thickness of the vertical line */
+  left: 10px;
+  /* Adjust to position the vertical line */
+  width: 1px;
+  /* Adjust the thickness of the vertical line */
   height: 100%;
-  background-color: #00cccc33; /* Adjust the color of the vertical line */
+  background-color: #00cccc33;
+  /* Adjust the color of the vertical line */
 }
 
 .vertical-line-list li {
+  color: var(--color-neutral);
   position: relative;
-  margin-bottom: 0.4rem; /* Adjust the spacing between list items */
+  margin-bottom: 0.4rem;
+  /* Adjust the spacing between list items */
 }
 
 .vertical-line-list li::before {
   content: '';
   position: absolute;
-  left: -12px; /* Adjust to position the dot */
+  left: -12px;
+  /* Adjust to position the dot */
   top: 50%;
   transform: translateY(-50%);
-  width: 5px; /* Adjust the size of the dot */
-  height: 5px; /* Adjust the size of the dot */
-  background-color: #00cccc34; /* Adjust the color of the dot */
+  width: 5px;
+  /* Adjust the size of the dot */
+  height: 5px;
+  /* Adjust the size of the dot */
+  background-color: #00cccc34;
+  /* Adjust the color of the dot */
   border-radius: 50%;
 }
 
-.double-lined-border {
-  border: 2px solid #00cccc34; /* Inner line */
-  outline: 1px solid #00cccc34; /* Outer line */
-  outline-offset: -8px; /* Adjust the spacing between the lines */
+.thin-border {
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
 }
 
-/* p:last-child {
-margin-top: 1rem;
-} */
+.thin-border-left {
+  border-left: 1px solid rgba(var(--color-primary-rgb), 0.3);
+}
+
+.double-lined-border {
+  border: 2px solid #00cccc34;
+  /* Inner line */
+  outline: 1px solid #00cccc34;
+  /* Outer line */
+  outline-offset: -8px;
+  /* Adjust the spacing between the lines */
+}
+
+p .animated {
+
+  animation: caret 1s steps(1) infinite;
+}
+
+@keyframes caret {
+  50% {
+    border-color: transparent;
+  }
+}
+
+.btn {
+  background-color: var(--color-primary);
+  color: rgba(0, 0, 0, 1);
+  border: none;
+  padding: 0.1rem 1rem;
+  margin: 0.5rem;
+  cursor: pointer;
+}
+
+.btn-outline{
+  color: var(--color-primary);
+  outline: 1px solid var(--color-primary);
+  outline-offset: -1px;
+  padding: 0;
+  margin-bottom: 1px;
+  cursor: pointer;
+}
+
+.btn-tiny {
+  background-color: rgba(var(--color-primary-rgb), 0.3);
+  color: rgba(0, 0, 0, 1);
+  border: none;
+  margin: 2px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.input {
+  display: "block";
+  width: "90%";
+  padding: '0';
+  background-color: rgba(var(--color-primary-rgb),0.3);
+  color: 'black'
+}
+
+
+.input:focus {
+  border: none;
+  outline: 0px solid rgba(var(--color-primary-rgb, 0.3));
+  background-color: rgba(var(--color-primary-rgb), 0.3);
+  color: black;
+
+}
+
+/* Better scrollbars */
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px; /* Width of the scrollbar */
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: #00000000; /* Background of the scrollbar track */
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-primary); /* Color of the scrollbar thumb */
+  border-radius: 10px; /* Rounded corners for the scrollbar thumb */
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: transparent; /* Color of the scrollbar thumb on hover */
+}
+
+/* Custom scrollbar for Firefox */
+.thin-scrollbar {
+  scrollbar-width: thin; /* Makes the scrollbar thinner */
+  scrollbar-color: rgba(var(--color-primary-rgb),0.3) transparent; /* thumb color track color */
+}
+
 
 /* Todo - use this later */
 .text.caret::after {
-animation: blink-caret 1s step-end infinite;
-color: inherit;
-content: '_';
-font-weight: bolder;
+  animation: blink-caret 1s step-end infinite;
+  color: inherit;
+  content: '_';
+  font-weight: bolder;
 }
 
 @keyframes blink-caret {
-  from, to {
-      opacity: 1;
+
+  from,
+  to {
+    opacity: 1;
   }
 
   50% {
-      opacity: 0;
+    opacity: 0;
   }
+}
+
+/* Folder Explorer Classes */
+
+.folder-icons-grid {
+  padding: 4px;
+  margin-bottom: 5em;
+  display: grid;
+  gap: 1em;
+  row-gap: 0.9em;
+  max-height: 5em;
+}
+
+.folder-text {
+  max-width: 6em;
+  text-align: center;
+  white-space: normal;
+  word-break: break-all;
 }
