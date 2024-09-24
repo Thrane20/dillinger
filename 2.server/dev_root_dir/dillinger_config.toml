@@ -1,0 +1,15 @@
+# The master dillinger config file. The beginning of all things...
+
+# The port the server will listen on
+port = 3060
+
+# The root directory of all files handled by dillinger
+root_dir = "./dev_root_dir"
+
+# Define the supported platform names
+# These are the directory names that dillinger will look for during an audit
+platforms = [
+    {slug = "linux", name = "linux", description = "Linux on Linux"},
+    {slug = "wine", name = "wine", description = "Windows on Linux"},
+    {slug= " arcade", name = "arcade", description = "MAME based arcade games"},
+]
