@@ -5,7 +5,7 @@ use bollard::{
     Docker,
 };
 use lazy_static::lazy_static;
-use log::debug;
+use log::{debug, info};
 use serde::Serialize;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
@@ -20,16 +20,20 @@ lazy_static! {
 }
 
 pub async fn get_docker_daemon_status() -> DockerStatus {
+    info!("checking docker");
     let docker = Arc::clone(&DOCKER);
     let docker = docker.lock().await;
 
     match docker.version().await {
-        Ok(_) => DockerStatus {
+        Ok(_) => { info!("docker is up");
+        DockerStatus {
             up_status: UpStatus::Up,
-        },
-        Err(..) => DockerStatus {
+        }},
+        Err(..) => {
+            info!("got a docker error");
+            DockerStatus {
             up_status: UpStatus::Down,
-        },
+        }},
     }
 }
 

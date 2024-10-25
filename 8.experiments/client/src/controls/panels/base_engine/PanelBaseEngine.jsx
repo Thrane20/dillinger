@@ -83,7 +83,7 @@ function PanelBaseEngine() {
                         <div className="flex flex-row w-full justify-center items-center gap-1">
                             <SvgDocker className={`flex-shrink-0 ${classForDockerStatus()} icon-xs`} size="icon-base" />
                             <div className="flex flex-grow line-horizontal"></div>
-                            <p className="flex flex-shrink-0 w-auto h-full items-center justify-end text-base">Docker Status</p>
+                            <p className="flex flex-shrink-0 w-auto h-full items-center justify-end text-base">Podman Status</p>
                         </div>
                     </li>
                 </ul>

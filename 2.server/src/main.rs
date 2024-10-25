@@ -5,6 +5,7 @@ use crate::error_response::ErrorResponse;
 use crate::files::filesystem::DirectoryContents;
 use crate::game_manager::GameCacheEntries;
 use crate::handlers::docker_interactor::DockerContainer;
+use crate::input::udev;
 
 use config::MasterConfig;
 use entities::game::Game;
@@ -23,8 +24,6 @@ use warp::reply::{json, with_status};
 use warp::Filter; // For global initialization
 use urlencoding::decode;
 
-#[cfg(not(target_os = "macos"))]
-use crate::input::monitor_devices;
 
 pub mod config;
 pub mod docker;
@@ -146,9 +145,8 @@ pub async fn main() {
 
     // Monitor events on the input subsystem - if we see changes, we'll inform
     // the client via a websocket message
-    #[cfg(not(target_os = "macos"))]
     tokio::spawn(async {
-        monitor_devices().await;
+        udev::monitor_devices().await;
     });
 
     // Assuming GameCacheEntries has an update method
@@ -207,6 +205,7 @@ async fn diagnostics_ping_handler() -> Result<impl warp::Reply, Infallible> {
 async fn diagnostics_docker_status_handler() -> Result<impl warp::Reply, Infallible> {
     info!("route requested: diagnostics_docker_status");
     let status = handlers::docker_interactor::get_docker_daemon_status().await;
+    info!("got a status back");
     Ok(warp::reply::with_status(
         warp::reply::json(&status),
         StatusCode::OK,

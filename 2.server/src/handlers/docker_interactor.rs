@@ -2,7 +2,7 @@ use bollard::{
     container::{Config, ListContainersOptions},
     exec::CreateExecOptions,
     volume::CreateVolumeOptions,
-    Docker,
+    Docker, API_DEFAULT_VERSION,
 };
 use lazy_static::lazy_static;
 use serde::Serialize;
@@ -11,20 +11,25 @@ use tokio::sync::Mutex;
 
 use crate::helpers::docker_run_params::DockerRunParams;
 
+const podman_socket_path: &str = "/run/user/1000/podman/podman.sock";
+
 lazy_static! {
     static ref DOCKER: Arc<Mutex<Docker>> =
-        Arc::new(Mutex::new(Docker::connect_with_local_defaults().unwrap()));
+        Arc::new(Mutex::new(Docker::connect_with_unix(podman_socket_path, 120, API_DEFAULT_VERSION).unwrap()));
 }
 
 pub async fn get_docker_daemon_status() -> DockerStatus {
     let docker = Arc::clone(&DOCKER);
     let docker = docker.lock().await;
 
-    match docker.version().await {
+    let version = docker.version().await;
+    log::info!("version is: {:?}", version);
+
+    match version {
         Ok(_) => DockerStatus {
             up_status: UpStatus::Up,
         },
-        Err(..) => DockerStatus {
+        Err(e) => DockerStatus {
             up_status: UpStatus::Down,
         },
     }

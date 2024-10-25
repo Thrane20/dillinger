@@ -33,8 +33,27 @@ build-client:
 .PHONY: docker-base
 docker-base:
 	@echo "building base docker image..."
-	DOCKER_BUILDKIT=1 docker build $(CACHE_FLAG) -t ghcr.io/dillinger/base-arch-experimental \
+	DOCKER_BUILDKIT=1 podman build $(CACHE_FLAG) -t dillinger/base-arch-experimental \
 	-f ./3.docker/direct/base.arch.experimental.Dockerfile ./3.docker/direct
+
+# Dillinger docker images
+.PHONY: run-docker-base-x11
+run-docker-base-x11:
+	@echo "running base docker image..."
+	podman run -it --rm --userns=keep-id \
+	-e DISPLAY=$DISPLAY \
+	-v /tmp/.X11-unix:/tmp/.X11-unix \
+	localhost/dillinger/base-arch-experimental:latest
+
+.PHONY: run-docker-base-wayland
+run-docker-base-wayland:
+	@echo "running base docker image..."
+	podman run -it --rm --userns=keep-id \
+	-e WAYLAND_DISPLAY=$WAYLAND_DISPLAY \
+	-e XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
+	-v $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/run/user/$(id -u)/$WAYLAND_DISPLAY \
+	localhost/dillinger/base-arch-experimental:latest
+
 
 .PHONY: base
 base: 
