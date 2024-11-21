@@ -22,4 +22,25 @@ I'm building it.
 
 ## What's Dillinger Built On?
 
-100% containerised runtime (Docker), and Rust for the backend. I've chosen Rust as its a learning project for me, and I want something closer to the tin than NodeJS etc. A mix of tech for the front (as there's 1000 frameworks for web/js and whatever is cool now will be toast tomorrow) :bread:
+100% containerised runtime (Podman), and Rust for the backend. I've chosen Rust as its a learning project for me, and I want something closer to the tin than NodeJS etc. A mix of tech for the front (as there's 1000 frameworks for web/js and whatever is cool now will be toast tomorrow) :bread:
+
+## Install and Run
+
+1. You need Podman installed.
+
+2. You need to create a root volume where all your game config and launch info is stored.
+
+    1. First, create a directory on your favourite drive. Let's go for ```~/dillinger_root```
+
+    2. In ```~/dillinger_root```, create a filename called ```dillinger.conf```
+
+    3. Now mount a podman volume to the directory you selected. Call the volume "dillinger_root", e.g. 
+
+        ```
+        podman volume create --opt type=none --opt device=~/dillinger_root --opt o=bind dillinger_root
+        ````
+
+3. Run the Dillinger Core container
+
+This runs the backend server and web host.
+

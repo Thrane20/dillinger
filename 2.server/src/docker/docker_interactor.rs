@@ -3,6 +3,7 @@ use bollard::{
     exec::{CreateExecOptions, StartExecResults},
     volume::CreateVolumeOptions,
     Docker,
+    API_DEFAULT_VERSION
 };
 use lazy_static::lazy_static;
 use log::{debug, info};
@@ -14,9 +15,16 @@ use super::volumes::DockerVolume;
 use super::volumes::VolumeContents;
 use crate::helpers::docker_run_params::DockerRunParams;
 
+// lazy_static! {
+//     static ref DOCKER: Arc<Mutex<Docker>> =
+//         Arc::new(Mutex::new(Docker::connect_with_local_defaults().unwrap()));
+// }
+
+const PODMAN_SOCKET:&str = "unix:///run/user/1000/podman/podman.sock";
+
 lazy_static! {
     static ref DOCKER: Arc<Mutex<Docker>> =
-        Arc::new(Mutex::new(Docker::connect_with_local_defaults().unwrap()));
+        Arc::new(Mutex::new(Docker::connect_with_unix(PODMAN_SOCKET, 120, API_DEFAULT_VERSION).unwrap()));
 }
 
 pub async fn get_docker_daemon_status() -> DockerStatus {

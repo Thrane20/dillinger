@@ -11,5 +11,7 @@ root_dir = "./dev_root_dir"
 platforms = [
     {slug = "linux", name = "linux", description = "Linux on Linux"},
     {slug = "wine", name = "wine", description = "Windows on Linux"},
-    {slug= " arcade", name = "arcade", description = "MAME based arcade games"},
+    {slug= "arcade", name = "arcade", description = "Arcades on MAME"},
+    {slug= "ps1", name = "ps1", description = "Play Station 1"},
+    {slug= "ps2", name = "ps2", description = "Play Station 2"},
 ]

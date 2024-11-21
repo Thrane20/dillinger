@@ -81,6 +81,10 @@ p {
   margin: .25rem;
 }
 
+input {
+  font-family: monospace;
+}
+
 .line-above-below {
   position: relative;
   display: block;
@@ -227,17 +231,16 @@ p .animated {
   display: "block";
   width: "90%";
   padding: '0';
+  font-family: monospace;
   background-color: rgba(var(--color-primary-rgb),0.3);
-  color: 'black'
+  color: var(--color-primary)
 }
-
 
 .input:focus {
   border: none;
   outline: 0px solid rgba(var(--color-primary-rgb, 0.3));
   background-color: rgba(var(--color-primary-rgb), 0.3);
-  color: black;
-
+  color: var(--color-primary)
 }
 
 /* Better scrollbars */

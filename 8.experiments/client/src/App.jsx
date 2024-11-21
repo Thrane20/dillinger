@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import Background from "./controls/base_controls/canvas_background/canvas_grid_background.js";
 
 import Test from './controls/Test'
+import DevTest from './controls/panels/devtest/DevTest.jsx';
 import PanelBaseEngine from './controls/panels/base_engine/PanelBaseEngine.jsx';
 import NetworkActivity from './controls/panels/network_activity/NetworkActivity.jsx';
 import Logging from './controls/panels/logging/Logging.jsx';
@@ -16,6 +17,7 @@ import ALVR from './controls/panels/vr/ALVR.jsx';
 import VolumeExplorer from './controls/panels/volumes/VolumeExplorer.jsx';
 import Containers from './controls/panels/containers/Containers.jsx';
 import InputManager from './controls/panels/input_manager/InputManager.jsx';
+import MasterSearch from './controls/panels/search/MasterSearch.jsx';
 
 
 function App() {
@@ -89,7 +91,7 @@ function App() {
           </div>
           <div className="flex flex-col w-1/2 gap-4" >
             <div className="flex w-full h-1/5" >
-              <Test />
+              <MasterSearch />
             </div>
             <div className="flex w-full h-3/5 double-lined-border">
               <Test />
@@ -109,7 +111,7 @@ function App() {
               <Test />
             </div>
             <div className="flex w-full h-1/5">
-              <Test />
+              <DevTest />
             </div>
             <div className="flex w-full h-1/5" >
               <NetworkActivity />
