@@ -6,6 +6,7 @@ use super::gamedbtoken::GameDbToken;
 use crate::entities::dillinger_error::DillingerError;
 use crate::entities::game::{self, Game};
 use crate::handlers::web_request::{self, post};
+use crate::platform::Platform;
 use async_trait::async_trait;
 use log::{error, info};
 
@@ -148,6 +149,7 @@ impl GameDb for Igdb {
     async fn get_game_data(&mut self, game_slug: String) -> Option<Game> {
         // First, authenticate to IGDB.
         // TODO: add caching so we don't authenticate every time
+        info!("get_game_data for igdb: game_slug: {}", game_slug);
         let token = match self.authenticate().await {
             Ok(token) => {
                 info!("token is {:?}", token);
@@ -179,7 +181,7 @@ impl GameDb for Igdb {
             let body = format!(
                 "fields id,slug,name,summary,storyline,url,first_release_date,collections.name,themes.name, \
                 videos.video_id,websites.url,genres.name,screenshots.image_id, screenshots.url, \
-                artworks.image_id,artworks.url,involved_companies.company.name, \
+                artworks.image_id,artworks.url,involved_companies.company.name, platform.name, \
                 involved_companies.developer,involved_companies.publisher; where slug = \"{}\";",
                 game_slug
             )
@@ -216,6 +218,7 @@ impl GameDb for Igdb {
                             name: game["name"].as_str().unwrap_or("").to_string(),
                             slug: game["slug"].as_str().unwrap_or("").to_string(),
                             summary: game["summary"].as_str().unwrap_or("").to_string(),
+                            for_platform: Platform::default(),
                             storyline: game["storyline"].as_str().map(|s| s.to_string()),
                             release_date: game["first_release_date"].as_u64(),
                             play_stats: Some(vec![]),
@@ -323,6 +326,7 @@ impl GameDb for Igdb {
                 }
                 Err(_) => {
                     // Not interested in the error here - just return an empty list
+                    info!("Error getting game data");
                     return None;
                 }
             }

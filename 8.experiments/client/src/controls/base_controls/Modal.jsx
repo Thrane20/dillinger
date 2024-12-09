@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import CanvasBackground from './canvas_background/CanvasBackground';
 
-const Modal = ({ heading, isVisible, children, onClose, transparency = 0.01 }) => {
+const Modal = ({ heading, isVisible, children, onClose = null, transparency = 0.01 }) => {
     const [isAnimating, setIsAnimating] = useState(false);
 
     useEffect(() => {
@@ -10,7 +10,7 @@ const Modal = ({ heading, isVisible, children, onClose, transparency = 0.01 }) =
             setIsAnimating(true);
             setTimeout(() => {
                 setIsAnimating(false);
-                onClose();
+                onClose && onClose();
             }, 500); // Duration of the animation
         }
     }, [isVisible, onClose]);

@@ -2,12 +2,11 @@ use bollard::{
     container::{Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions},
     exec::{CreateExecOptions, StartExecResults},
     volume::CreateVolumeOptions,
-    Docker,
-    API_DEFAULT_VERSION
+    Docker, API_DEFAULT_VERSION,
 };
 use lazy_static::lazy_static;
 use log::{debug, info};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
@@ -20,11 +19,12 @@ use crate::helpers::docker_run_params::DockerRunParams;
 //         Arc::new(Mutex::new(Docker::connect_with_local_defaults().unwrap()));
 // }
 
-const PODMAN_SOCKET:&str = "unix:///run/user/1000/podman/podman.sock";
+const PODMAN_SOCKET: &str = "unix:///run/user/1000/podman/podman.sock";
 
 lazy_static! {
-    static ref DOCKER: Arc<Mutex<Docker>> =
-        Arc::new(Mutex::new(Docker::connect_with_unix(PODMAN_SOCKET, 120, API_DEFAULT_VERSION).unwrap()));
+    static ref DOCKER: Arc<Mutex<Docker>> = Arc::new(Mutex::new(
+        Docker::connect_with_unix(PODMAN_SOCKET, 120, API_DEFAULT_VERSION).unwrap()
+    ));
 }
 
 pub async fn get_docker_daemon_status() -> DockerStatus {
@@ -33,15 +33,18 @@ pub async fn get_docker_daemon_status() -> DockerStatus {
     let docker = docker.lock().await;
 
     match docker.version().await {
-        Ok(_) => { info!("docker is up");
-        DockerStatus {
-            up_status: UpStatus::Up,
-        }},
+        Ok(_) => {
+            info!("docker is up");
+            DockerStatus {
+                up_status: UpStatus::Up,
+            }
+        }
         Err(..) => {
             info!("got a docker error");
             DockerStatus {
-            up_status: UpStatus::Down,
-        }},
+                up_status: UpStatus::Down,
+            }
+        }
     }
 }
 
@@ -123,9 +126,8 @@ pub async fn get_volume_contents(
     Ok(contents)
 }
 
-
 /// Create a volume mount with the given name, driver, host path and labels
-/// This is desribed as a volume mount, as it's a volume that is mounted to a 
+/// This is desribed as a volume mount, as it's a volume that is mounted to a
 /// specific path on the host (not docker managed)
 pub async fn create_volume_mount(
     name: String,
@@ -241,10 +243,31 @@ pub async fn docker_run(run_params: DockerRunParams) -> Result<DockerContainer, 
     }
 }
 
+
+
 #[derive(Serialize)]
 pub enum UpStatus {
     Up,
     Down,
+}
+
+#[derive(Serialize)]
+pub struct DockerVolumeMapping {
+    pub up_status: UpStatus,
+}
+
+// Define a trait with the desired method
+pub trait DockerEnvironmentMappingExt {
+    fn format_entries(&self) -> Vec<String>;
+}
+
+// Implement the trait for HashMap<String, String>
+impl DockerEnvironmentMappingExt for HashMap<String, String> {
+    fn format_entries(&self) -> Vec<String> {
+        self.iter()
+            .map(|(key, value)| format!("{}={}", key, value))
+            .collect()
+    }
 }
 
 #[derive(Serialize)]

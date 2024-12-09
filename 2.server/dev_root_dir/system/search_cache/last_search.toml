@@ -1,9 +1,9 @@
-slug = "undefined"
-name = "Undefined"
-summary = 'An exciting first-person game, which takes place in the near future. You wake up in a strange place "Discovery One" you are hiding from the outside world. You are increasingly starting a casual relationship.'
+slug = ""
+name = ""
+summary = ""
 play_stats = []
-genres = ["Adventure", "Indie"]
-themes = ["Action"]
-screenshots = ["sc5mbx", "sc5mby", "sc5mbz", "sc5mc0", "sc5mc1", "sc5mc2", "sc5mc3", "sc5mc4"]
-websites = ["https://store.steampowered.com/app/661190", "https://www.twitch.tv/directory/game/UNDEFINED"]
-release_date = 1542240000
+
+[for_platform]
+slug = ""
+name = ""
+description = ""

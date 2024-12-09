@@ -1,4 +1,24 @@
 [[entries]]
-slug = "pacman"
-title = "pacman"
-platform_hints = ["arcade", "atari"]
+slug = "test1"
+title = "test1"
+platform_hints = []
+
+[[entries]]
+slug = "test2"
+title = "test2s"
+platform_hints = []
+
+[[entries]]
+slug = "test3"
+title = "test3"
+platform_hints = []
+
+[[entries]]
+slug = "test4"
+title = "test4"
+platform_hints = []
+
+[[entries]]
+slug = "test5"
+title = "test5"
+platform_hints = []

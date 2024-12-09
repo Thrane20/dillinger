@@ -14,7 +14,6 @@ var interactor_search = {
       const response = await axios.get(
         "http://localhost:3060/search/local/" + search
       );
-      console.log(response.data);
       return response.data;
 
     } catch (error) {
@@ -37,7 +36,6 @@ var interactor_search = {
       const response = await axios.get(
         "http://localhost:3060/slug/local/" + slug
       );
-      console.log(response.data);
       return response.data;
 
     } catch (error) {
@@ -61,7 +59,6 @@ var interactor_search = {
       const response = await axios.get(
         "http://localhost:3060/search/remote/" + encodedSearchDb + "/" + encodedSearchTitle
       );
-      console.log(response.data);
       return response.data;
 
     } catch (error) {
@@ -82,6 +79,8 @@ var interactor_search = {
     try {
       const encodedSearchDb = encodeURIComponent(searchDb);
       const encodedTitleSlug = encodeURIComponent(slug);
+      console.log("encodedSearchDb: ", encodedSearchDb);
+      console.log("encodedTitleSlug: ", encodedTitleSlug);
       const response = await axios.get(
         "http://localhost:3060/game/remote/" + encodedSearchDb + "/" + encodedTitleSlug
       );

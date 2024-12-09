@@ -243,6 +243,13 @@ p .animated {
   color: var(--color-primary)
 }
 
+/* Better tables */
+
+.table-hover tbody tr:hover {
+  background-color: rgba(0, 204, 204, 0.06); 
+  cursor: pointer;
+}
+
 /* Better scrollbars */
 
 .thin-scrollbar::-webkit-scrollbar {

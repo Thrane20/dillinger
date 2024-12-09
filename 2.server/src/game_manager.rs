@@ -7,15 +7,57 @@ use crate::{
 };
 use std::{error::Error, path::PathBuf, sync::Arc};
 
-/// Represents a single entry in the game cache.
+/// Represents a single launch target for a game on a platform.
+/// This could be an executable, a video, or some other type of target.
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct LaunchTarget {
+    // A descriptive name of the launch target
+    pub name: String,
+    // Describes the launch target - could be an exe or video for example
+    pub description: String,
+    // The relative path to the executable from the parent
+    pub launch_target: PathBuf,
+}
+
+/// Represents a runnable game on a specific platform.
+/// This could be a game on an emulator, or a native game.
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct GameOnPlatformEntry {
     pub game_slug: String,
     pub game_name: String,
     pub platform_name: String,
-    pub rom_files: Option<Vec<PathBuf>>,
-    pub image_dir: Option<PathBuf>,
-    pub metadata_file: Option<PathBuf>,
+    // The absolute path according to the host filesystem
+    pub root_path: PathBuf,
+    // A list of launch targets for the game on this platform
+    pub launch_target: Vec<LaunchTarget>,
+}
+
+impl GameOnPlatformEntry {
+
+    // default constructor
+    pub fn default() -> Self {
+        GameOnPlatformEntry {
+            game_slug: "".to_string(),
+            game_name: "".to_string(),
+            platform_name: "".to_string(),
+            root_path: PathBuf::new(),
+            launch_target: Vec::new(),
+        }
+    }
+
+    pub fn new(game_slug: String, game_name: String, platform_name: String, root_path: PathBuf, launch_target: Vec<LaunchTarget>) -> Self {
+        GameOnPlatformEntry {
+            game_slug,
+            game_name,
+            platform_name,
+            root_path,
+            launch_target,
+        }
+    }
+
+    pub fn add_launch_target(&mut self, launch_target: LaunchTarget) {
+        self.launch_target.push(launch_target);
+    }
 }
 
 /// Represents a single entry in the game cache.
@@ -94,7 +136,7 @@ pub fn read_game_cache(config: Arc<MasterConfig>) -> Result<GameCacheEntries, Bo
 
 pub async fn build_game_cache(config: Arc<MasterConfig>) -> Result<bool, Box<dyn Error>> {
     // Iterate the top directories from the root - these are all the games
-    let entries = files::get_dirs_in_dir(&config.root_dir);
+    let entries = files::get_dirs_in_dir(&config.entries_dir);
     let mut game_cache: Vec<GameCacheEntry> = Vec::new();
 
     for entry in entries {

@@ -6,6 +6,9 @@ port = 3060
 # The root directory of all files handled by dillinger
 root_dir = "./dev_root_dir"
 
+# The subdirectory where all game entries are parsed
+entries_dir = "entries"
+
 # Define the supported platform names
 # These are the directory names that dillinger will look for during an audit
 platforms = [
