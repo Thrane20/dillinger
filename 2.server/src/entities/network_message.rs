@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct FileTransfer {
     pub file: String,

@@ -1,3 +1,4 @@
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::{env, path::PathBuf, sync::Arc};
 use toml;
@@ -12,7 +13,8 @@ pub struct MasterConfig {
     pub port: u16,
     pub root_dir: PathBuf,
     pub entries_dir: PathBuf,
-    pub platforms: Vec<Platform>
+    pub platforms: Vec<Platform>,
+    pub chunking_interval: u64,
 }
 
 impl MasterConfig {
@@ -24,17 +26,18 @@ impl MasterConfig {
 pub fn get_master_config() -> Arc<MasterConfig> {
     // Start by finding out where to look for the master config
     let config_dir = env::var(DILLINGER_ROOT_DIR).unwrap_or_else(|_| {
-        println!("DILLINGER_ROOT_DIR is not set, trying the current directory");
+        info!("DILLINGER_ROOT_DIR is not set, trying the current directory");
         ".".to_string()
     });
 
     // Second, load the file
     let config_path = format!("{}/dillinger_config.toml", config_dir);
-    println!("Looking for the master config file at: {}", config_path);
+    info!("Looking for the master config file at: {}", config_path);
     let content = std::fs::read_to_string(&config_path)
     .unwrap_or_else(|_| { panic!("Could not load master config file.") });
 
     // Parse the content into a MasterConfig
+    debug!("Parsing master config file: {:?}", content);
     let mut master_config: MasterConfig =
         toml::from_str(&content)
         .unwrap_or_else(|_| { panic!("Could not parse master config file.") });

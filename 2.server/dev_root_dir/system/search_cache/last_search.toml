@@ -1,7 +1,19 @@
-slug = ""
-name = ""
-summary = ""
+slug = "baldur-s-gate-ii-throne-of-bhaal"
+name = "Baldur's Gate II: Throne of Bhaal"
+summary = """
+A storm of chaos and destruction thunders across the Sword Coast. As towns are laid to waste and great cities burn, there are whispered rumors that the Children of Bhaal are responsible.
+Soon the whispered rumors become panicked cries - if the prophecies of the Wise Alaundo are to be believed, there is greater suffering ahead. And should Bhaal somehow rise again, the earth itself will weep blood.
+In the final chapter of the Bhaal saga, return to Baldur's Gate II: Shadows of Amn and unravel the mysteries of a dangerous new dungeon - Watcher's Keep.
+Continue with an exhilarating new adventure when you explore the unseen lands, encounter fierce villains, and gain powerful high-level abilities as you achieve your ultimate destiny in .. Baldur's Gate II: Throne of Bhaal."""
 play_stats = []
+covers = ["co25n2"]
+genres = ["Role-playing (RPG)", "Strategy"]
+themes = ["Fantasy", "Open world"]
+developers = ["BioWare", "Interplay Entertainment", "BioWare Edmonton", "Black Isle Studios", "MumboJumbo", "MacPlay"]
+publishers = ["BioWare", "Interplay Entertainment", "BioWare Edmonton", "Black Isle Studios", "MumboJumbo", "MacPlay"]
+screenshots = ["sc74xk", "sc74xl", "sc74xm", "scpttp", "scpttq", "scpttr", "scptts", "scpttt", "scpttu", "scpttv", "scpttw", "scpttx", "scptty"]
+videos = ["A6i0clyiyes"]
+release_date = 993081600
 
 [for_platform]
 slug = ""

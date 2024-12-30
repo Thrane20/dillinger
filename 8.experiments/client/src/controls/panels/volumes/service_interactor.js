@@ -5,7 +5,7 @@ var service_interactor = {
     get_volumes: async function () {
         // Call the backend - if error propogate the exception
         const response = await axios.get(
-            "http://localhost:3060/sys/volumes"
+            "http://dillingerserver:3060/sys/volumes"
         );
         console.log(response.data);
         return response.data;
@@ -16,7 +16,7 @@ var service_interactor = {
         // Call the backend - if error propogate the exception
         let encoded_path = encodeURIComponent(path);
         const response = await axios.get(
-            `http://localhost:3060/sys/ls/${encoded_path}`
+            `http://dillingerserver:3060/sys/ls/${encoded_path}`
         );
         console.log(response.data);
         return response.data;
@@ -28,7 +28,7 @@ var service_interactor = {
         // Note: the path is the path inside the volume - so needs to be encoded
         let encoded_path = encodeURIComponent(path);
         const response = await axios.get(
-            `http://localhost:3060/sys/volumes/${volume}/contents/${encoded_path}`
+            `http://dillingerserver:3060/sys/volumes/${volume}/contents/${encoded_path}`
         );
         console.log(response.data);
         return response.data;

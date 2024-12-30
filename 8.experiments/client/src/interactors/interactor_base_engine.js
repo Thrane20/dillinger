@@ -1,11 +1,14 @@
 import axios from "axios";
+import dotenv from 'dotenv';
 import outcomes from "./interactor_outcomes";
+
+dotenv.config();
 
 var interactor_base_engine = {
   getDockerStatus: async function () {
     try {
       const response = await axios.get(
-        "http://localhost:3060/diag/docker_status"
+        `http://dillingerserver:${process.env.VITE_SERVER_PORT}/diag/docker_status`
       );
       return {
         status: response.data.up_status,
@@ -26,7 +29,7 @@ var interactor_base_engine = {
   refresh_game_cache: async function () {
     try {
       const response = await axios.get(
-        "http://localhost:3060/mgmt/build_game_cache"
+        `http://dillingerserver:${process.env.VITE_SERVER_PORT}/mgmt/build_game_cache`
       );
       return {
         status: "ok",

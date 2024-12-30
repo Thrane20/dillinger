@@ -12,7 +12,7 @@ var interactor_search = {
     try {
       const encodedSearch = encodeURIComponent(search);
       const response = await axios.get(
-        "http://localhost:3060/search/local/" + search
+        `http://dillingerserver:${process.env.VITE_SERVER_PORT}/search/local/${search}`
       );
       return response.data;
 
@@ -34,7 +34,7 @@ var interactor_search = {
     try {
       const encodedSearch = encodeURIComponent(slug);
       const response = await axios.get(
-        "http://localhost:3060/slug/local/" + slug
+        `http://dillingerserver:${process.env.VITE_SERVER_PORT}/slug/local/${slug}`
       );
       return response.data;
 
@@ -57,7 +57,7 @@ var interactor_search = {
       const encodedSearchDb = encodeURIComponent(searchDb);
       const encodedSearchTitle = encodeURIComponent(searchTitle);
       const response = await axios.get(
-        "http://localhost:3060/search/remote/" + encodedSearchDb + "/" + encodedSearchTitle
+        `http://dillingerserver:${import.meta.env.VITE_SERVER_PORT}/search/remote/${encodedSearchDb}/${encodedSearchTitle}`
       );
       return response.data;
 
@@ -82,7 +82,7 @@ var interactor_search = {
       console.log("encodedSearchDb: ", encodedSearchDb);
       console.log("encodedTitleSlug: ", encodedTitleSlug);
       const response = await axios.get(
-        "http://localhost:3060/game/remote/" + encodedSearchDb + "/" + encodedTitleSlug
+        `http://dillingerserver:${import.meta.env.VITE_SERVER_PORT}/game/remote/${encodedSearchDb}/${encodedTitleSlug}`
       );
       console.log(response.data);
       return response.data;

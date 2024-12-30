@@ -1,13 +1,16 @@
 # The master dillinger config file. The beginning of all things...
 
 # The port the server will listen on
-port = 3060
+port = 5174
 
 # The root directory of all files handled by dillinger
 root_dir = "./dev_root_dir"
 
 # The subdirectory where all game entries are parsed
 entries_dir = "entries"
+
+# How frequently file transfers are checked for chunking updates (1s)
+chunking_interval = 1000
 
 # Define the supported platform names
 # These are the directory names that dillinger will look for during an audit

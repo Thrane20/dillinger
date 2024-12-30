@@ -180,16 +180,19 @@ impl GameDb for Igdb {
             // Here we tell IGDB what we want, and the search term
             let body = format!(
                 "fields id,slug,name,summary,storyline,url,first_release_date,collections.name,themes.name, \
-                videos.video_id,websites.url,genres.name,screenshots.image_id, screenshots.url, \
-                artworks.image_id,artworks.url,involved_companies.company.name, platform.name, \
+                videos.video_id,websites.url,genres.name,screenshots.image_id, cover.image_id, screenshots.image_id, \
+                artworks.image_id,artworks.url,involved_companies.company.name, \
                 involved_companies.developer,involved_companies.publisher; where slug = \"{}\";",
                 game_slug
             )
             .to_string();
 
+            info!("body: {}", body);
+
             // Send the request over the intergalactic airwaves
             match post(url, Some(headers), Some(body)).await {
                 Ok(json) => {
+                    info!("got game data: {:?}", json);
                     let mut finalGame: Game = Game::new();
                     for game in json.as_array().unwrap() {
                         // Extract the platforms - can be multiple
@@ -222,6 +225,9 @@ impl GameDb for Igdb {
                             storyline: game["storyline"].as_str().map(|s| s.to_string()),
                             release_date: game["first_release_date"].as_u64(),
                             play_stats: Some(vec![]),
+                            covers: game["cover"].as_object().and_then(|item| {
+                                item.get("image_id").and_then(|url| url.as_str().map(|s| vec![s.to_string()]))
+                            }),
                             genres: game["genres"].as_array().and_then(|arr| {
                                 if arr.is_empty() {
                                     None
@@ -330,9 +336,10 @@ impl GameDb for Igdb {
                     return None;
                 }
             }
+        } else {
+            info!("Token is None");
+            None
         }
-
-        None
     }
 
     async fn get_platform_data(&mut self, id: u64, name: String) -> String {

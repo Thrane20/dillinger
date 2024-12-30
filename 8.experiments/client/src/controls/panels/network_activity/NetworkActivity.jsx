@@ -15,10 +15,13 @@ function NetworkActivity() {
     const [bandwidthArray, setBandwidthArray] = useState(new Array(max_bandwidth_values).fill(0));
 
     useEffect(() => {
+
         // We only handle results from the server in string format (socket message)
         if (event && typeof event === "string") {
             let eventObj = JSON.parse(event);
             if (eventObj.component === "network") {
+                console.log("New nn event received:", event);
+               // console.log("percent complete:", eventObj.file_transfers[0].transferred / eventObj.file_transfers[0].size);
                 setFilesTransferring(eventObj.file_transfers.length);
                 setTotalBandwidth(eventObj.total_bandwidth);
 
@@ -31,6 +34,7 @@ function NetworkActivity() {
             }
         }
     }, [event]);
+
 
     return (
         <CanvasBackground>

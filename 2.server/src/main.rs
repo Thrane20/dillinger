@@ -2,7 +2,6 @@
 extern crate lazy_static;
 
 use crate::error_response::ErrorResponse;
-use crate::files::filesystem::DirectoryContents;
 use crate::game_manager::GameCacheEntries;
 use crate::handlers::docker_interactor::DockerContainer;
 use crate::input::udev;
@@ -12,18 +11,16 @@ use entities::game::Game;
 use env_logger;
 use gamedb::gamedb_search;
 use log::info;
-use network::{file_transfer, network_manager};
-use scrapers::scrapers::{PlatformEntry, ScrapeEntry, Scraper};
+use network::network_manager;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::time::sleep;
+use urlencoding::decode;
 use warp::cors;
 use warp::http::StatusCode;
 use warp::reply::{json, with_status};
 use warp::Filter; // For global initialization
-use urlencoding::decode;
-
 
 pub mod config;
 pub mod docker;
@@ -35,11 +32,15 @@ pub mod game_manager;
 pub mod gamedb;
 pub mod handlers;
 pub mod helpers;
+pub mod input;
+pub mod lutris;
 pub mod network;
 pub mod platform;
 pub mod scrapers;
 pub mod system;
-pub mod input;
+
+// tests
+pub mod tests;
 
 lazy_static! {
     // Find, load, and parse the master config file. This will panic if things aren't
@@ -130,14 +131,14 @@ pub async fn main() {
 
     // // Spawn a task to send messages to clients every 1 second
     tokio::spawn(async move {
-        network_manager::start_file_transfer().await;
+        network_manager::start_file_transfers().await;
+        info!("Starting file transfer monitoring loop");
 
         loop {
-            let transfers = network_manager::get_file_transfers().await;
+            let transfers = network_manager::get_file_transfers_summary().await;
 
             let json_payload = serde_json::to_string(&transfers).unwrap();
-            handlers::socket_client::send_message(json_payload).await;
-
+            handlers::socket_client::send_message(json_payload.clone()).await;
             // Wait for 1 second before sending the next message
             sleep(Duration::from_secs(1)).await;
         }
@@ -163,6 +164,19 @@ pub async fn main() {
     //     std::collections::HashMap::new(),
     // ).await;
 
+    // tokio::spawn(async {
+    //     let transfer = network::file_transfer::FileTransfer::new();
+    //     info!("Running test_add_file_transfer {:?}", transfer);
+    //     // create a path buf to
+    //     let path = std::path::PathBuf::from("/tmp/testfile.txt");
+    //     network_manager::add_file_transfer(
+    //         "https://releases.ubuntu.com/24.10/ubuntu-24.10-desktop-amd64.iso".to_string(),
+    //         path,
+    //     )
+    //     .await;
+    //     network_manager::start_file_transfers().await;
+    // });
+    
     // Start the engine
     println!(
         "Dillinger server is running on port: {}",
@@ -256,10 +270,7 @@ async fn handler_list_directory_contents(path: String) -> Result<impl warp::Repl
             warp::reply::json(&contents),
             StatusCode::OK,
         )),
-        Err(e) => Ok(
-            with_status(json(&e), 
-            StatusCode::INTERNAL_SERVER_ERROR)
-        ),
+        Err(e) => Ok(with_status(json(&e), StatusCode::INTERNAL_SERVER_ERROR)),
     }
 }
 
@@ -349,8 +360,8 @@ async fn handler_get_game_details(
 
     let matching_game = gamedb_search::get_game_details(search_db, game_slug).await;
     match matching_game {
-        Ok(foundGame) => {
-            game = foundGame.clone();
+        Ok(found_game) => {
+            game = found_game.clone();
         }
         Err(e) => {
             info!("Error searching remote: {}", e.description);

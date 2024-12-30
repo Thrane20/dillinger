@@ -21,7 +21,7 @@ function EngineBase() {
     let intervalId;
 
     const connectWebSocket = () => {
-      const ws = new WebSocket("ws://localhost:3060/ws");
+      const ws = new WebSocket(`ws://dillingerserver:${import.meta.env.VITE_SERVER_PORT}/ws`);
 
       ws.onopen = () => {
         console.log("Connected to the WebSocket server");

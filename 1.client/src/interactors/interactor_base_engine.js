@@ -5,7 +5,7 @@ var interactor_base_engine = {
   getDockerStatus: async function () {
     try {
       const response = await axios.get(
-        "http://localhost:3060/diag/docker_status"
+        "http://dillingerserver:3060/diag/docker_status"
       );
       return {
         status: response.data.up_status,
@@ -26,7 +26,7 @@ var interactor_base_engine = {
   refresh_game_cache: async function () {
     try {
       const response = await axios.get(
-        "http://localhost:3060/mgmt/build_game_cache"
+        "http://dillingerserver:3060/mgmt/build_game_cache"
       );
       return {
         status: "ok",
