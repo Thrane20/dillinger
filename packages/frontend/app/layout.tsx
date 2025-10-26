@@ -9,7 +9,11 @@ export const metadata: Metadata = {
   description: 'Manage and play games across multiple platforms with containerized execution',
   keywords: ['games', 'library', 'manager', 'docker', 'streaming', 'cross-platform'],
   authors: [{ name: 'Dillinger Team' }],
-  viewport: 'width=device-width, initial-scale=1',
+};
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({
