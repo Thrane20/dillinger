@@ -4,69 +4,141 @@
 
 /* Custom styles */
 @layer base {
+  :root {
+    --color-background: #f3f4f6;
+    --color-surface: #ffffff;
+    --color-border: #e2e8f0;
+    --color-muted: #64748b;
+    --color-text: #0f172a;
+    --color-primary: #2563eb;
+    --color-primary-foreground: #f8fafc;
+    --color-primary-soft: rgba(37, 99, 235, 0.1);
+    --color-secondary: #9333ea;
+    --color-secondary-foreground: #f3e8ff;
+    --color-accent: #0ea5e9;
+    --color-accent-foreground: #f0f9ff;
+    --color-neutral: #334155;
+    --color-neutral-foreground: #f8fafc;
+    --color-success: #16a34a;
+    --color-success-foreground: #14532d;
+    --color-success-soft: rgba(22, 163, 74, 0.12);
+    --color-warning: #f59e0b;
+    --color-warning-foreground: #78350f;
+    --color-warning-soft: rgba(245, 158, 11, 0.12);
+    --color-danger: #dc2626;
+    --color-danger-foreground: #7f1d1d;
+    --color-danger-soft: rgba(220, 38, 38, 0.12);
+    --shadow-light: rgba(255, 255, 255, 0.85);
+    --shadow-dark: rgba(15, 23, 42, 0.08);
+  }
+
+  .dark {
+    --color-background: #0f172a;
+    --color-surface: #1e293b;
+    --color-border: #334155;
+    --color-muted: #94a3b8;
+    --color-text: #e2e8f0;
+    --color-primary: #60a5fa;
+    --color-primary-foreground: #0f172a;
+    --color-primary-soft: rgba(96, 165, 250, 0.18);
+    --color-secondary: #c084fc;
+    --color-secondary-foreground: #1e1b4b;
+    --color-accent: #22d3ee;
+    --color-accent-foreground: #0f172a;
+    --color-neutral: #94a3b8;
+    --color-neutral-foreground: #0f172a;
+    --color-success: #34d399;
+    --color-success-foreground: #052e16;
+    --color-success-soft: rgba(52, 211, 153, 0.16);
+    --color-warning: #fbbf24;
+    --color-warning-foreground: #1f2937;
+    --color-warning-soft: rgba(251, 191, 36, 0.18);
+    --color-danger: #f87171;
+    --color-danger-foreground: #7f1d1d;
+    --color-danger-soft: rgba(248, 113, 113, 0.2);
+    --shadow-light: rgba(30, 41, 59, 0.6);
+    --shadow-dark: rgba(2, 6, 23, 0.85);
+  }
+
   html {
     font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+
+  body {
+    @apply bg-background text-text transition-colors duration-300 ease-out;
   }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 border border-transparent text-sm font-medium rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background transition-colors duration-200;
   }
-  
+
   .btn-primary {
-    @apply btn text-white bg-blue-600 hover:bg-blue-700 focus:ring-blue-500;
+    @apply btn text-primary-foreground bg-primary hover:bg-primary/90 focus:ring-primary;
   }
-  
+
   .btn-secondary {
-    @apply btn text-gray-700 bg-white border-gray-300 hover:bg-gray-50 focus:ring-blue-500;
+    @apply btn text-secondary-foreground bg-secondary hover:bg-secondary/90 focus:ring-secondary;
   }
-  
-  .btn-success {
-    @apply btn text-white bg-green-600 hover:bg-green-700 focus:ring-green-500;
+
+  .btn-accent {
+    @apply btn text-accent-foreground bg-accent hover:bg-accent/90 focus:ring-accent;
   }
-  
+
+  .btn-neutral {
+    @apply btn text-neutral-foreground bg-neutral hover:bg-neutral/90 focus:ring-neutral;
+  }
+
   .btn-danger {
-    @apply btn text-white bg-red-600 hover:bg-red-700 focus:ring-red-500;
+    @apply btn text-danger-foreground bg-danger hover:bg-danger/90 focus:ring-danger;
   }
-  
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center rounded-full p-2 text-muted transition-colors duration-200 hover:text-primary hover:bg-primary-soft focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background;
+  }
+
   .card {
-    @apply bg-white overflow-hidden shadow rounded-lg;
+    @apply bg-surface/95 overflow-hidden shadow-neumorphic rounded-3xl border border-border/60 transition-colors duration-300;
   }
-  
+
   .card-header {
-    @apply px-4 py-5 sm:px-6 border-b border-gray-200;
+    @apply px-6 py-5 sm:px-8 border-b border-border/60 text-text;
   }
-  
+
   .card-body {
-    @apply px-4 py-5 sm:p-6;
+    @apply px-6 py-5 sm:px-8 text-muted;
   }
-  
+
   .form-input {
-    @apply shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md;
+    @apply shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-border/80 bg-surface text-text rounded-lg;
   }
-  
+
   .form-label {
-    @apply block text-sm font-medium text-gray-700;
+    @apply block text-sm font-medium text-muted;
   }
-  
+
   .alert {
-    @apply rounded-md p-4 mb-4;
+    @apply rounded-2xl p-4 mb-4 border transition-colors duration-300 backdrop-blur;
   }
-  
+
   .alert-info {
-    @apply alert bg-blue-50 text-blue-700 border border-blue-200;
+    @apply alert bg-accent-foreground/60 text-accent border-accent/30 dark:bg-accent/20 dark:text-accent-foreground;
   }
-  
+
   .alert-success {
-    @apply alert bg-green-50 text-green-700 border border-green-200;
+    @apply alert bg-success-soft text-success-foreground border-success/30 dark:text-success;
   }
-  
+
   .alert-warning {
-    @apply alert bg-yellow-50 text-yellow-700 border border-yellow-200;
+    @apply alert bg-warning-soft text-warning-foreground border-warning/30 dark:text-warning;
   }
-  
+
   .alert-error {
-    @apply alert bg-red-50 text-red-700 border border-red-200;
+    @apply alert bg-danger-soft text-danger-foreground border-danger/30 dark:text-danger;
+  }
+
+  .neumorphic-panel {
+    @apply bg-surface/95 text-text shadow-neumorphic rounded-[2.5rem] border border-border/50 p-10 transition-colors duration-300 backdrop-blur;
   }
 }
