@@ -7,10 +7,15 @@ const nextConfig = {
   
   // API routes rewrite for development
   async rewrites() {
+    // Use environment variable to determine backend URL
+    const backendUrl = process.env.NODE_ENV === 'development' && process.env.DOCKER_ENV
+      ? 'http://backend-dev:3001'  // Docker container name
+      : 'http://localhost:3001';   // Local development
+      
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:3001/api/:path*',
+        destination: `${backendUrl}/api/:path*`,
       },
     ];
   },

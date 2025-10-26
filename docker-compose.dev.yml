@@ -3,14 +3,14 @@ version: '3.8'
 services:
   backend-dev:
     build:
-      context: ./docker/backend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: ./docker/backend/Dockerfile.dev
     container_name: dillinger-backend-dev
     ports:
       - "3001:3001"
     volumes:
-      - ./packages/backend:/app
-      - ./packages/shared:/shared
+      - ./packages/backend/src:/app/packages/backend/src
+      - ./packages/shared/src:/app/packages/shared/src
       - /var/run/docker.sock:/var/run/docker.sock
       - game-library:/opt/games
       - json-data:/data
@@ -25,16 +25,20 @@ services:
 
   frontend-dev:
     build:
-      context: ./docker/frontend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: ./docker/frontend/Dockerfile.dev
     container_name: dillinger-frontend-dev
     ports:
       - "3000:3000"
     volumes:
-      - ./packages/frontend:/app
-      - ./packages/shared:/shared
+      - ./packages/frontend/app:/app/packages/frontend/app
+      - ./packages/frontend/next.config.js:/app/packages/frontend/next.config.js
+      - ./packages/frontend/tailwind.config.js:/app/packages/frontend/tailwind.config.js
+      - ./packages/frontend/postcss.config.js:/app/packages/frontend/postcss.config.js
+      - ./packages/shared/src:/app/packages/shared/src
     environment:
       - NODE_ENV=development
+      - DOCKER_ENV=true
       - NEXT_PUBLIC_API_URL=http://localhost:3001
     restart: unless-stopped
     depends_on:
@@ -42,12 +46,12 @@ services:
 
   shared-build:
     build:
-      context: ./packages/shared
-      dockerfile: Dockerfile.build
+      context: .
+      dockerfile: ./docker/shared/Dockerfile.build
     container_name: dillinger-shared-build
     volumes:
-      - ./packages/shared:/app
-      - shared-dist:/app/dist
+      - ./packages/shared/src:/app/packages/shared/src
+      - shared-dist:/app/packages/shared/dist
     command: pnpm run build
 
 volumes:

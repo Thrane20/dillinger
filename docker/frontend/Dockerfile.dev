@@ -1,19 +1,40 @@
 FROM node:18-alpine
 
-# Install pnpm
+# Install pnpm and curl
+RUN apk add --no-cache curl
 RUN npm install -g pnpm
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json pnpm-lock.yaml* ./
+# Copy workspace configuration files
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+# Copy package.json files for workspace dependencies
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/frontend/package.json ./packages/frontend/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
-# Copy source code
-COPY . .
+# Copy shared package source
+COPY packages/shared/src ./packages/shared/src/
+COPY packages/shared/tsconfig.json ./packages/shared/
+
+# Copy frontend source
+COPY packages/frontend/app ./packages/frontend/app/
+COPY packages/frontend/tailwind.config.js ./packages/frontend/
+COPY packages/frontend/postcss.config.js ./packages/frontend/
+COPY packages/frontend/next.config.js ./packages/frontend/
+COPY packages/frontend/next-env.d.ts ./packages/frontend/
+COPY packages/frontend/tsconfig.json ./packages/frontend/
+
+# Build shared package first
+WORKDIR /app/packages/shared
+RUN pnpm run build
+
+# Switch to frontend directory
+WORKDIR /app/packages/frontend
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs

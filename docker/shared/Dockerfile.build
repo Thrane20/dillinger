@@ -1,0 +1,27 @@
+FROM node:18-alpine
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Create app directory
+WORKDIR /app
+
+# Copy workspace files
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+# Copy shared package
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/shared/src ./packages/shared/src/
+COPY packages/shared/tsconfig.json ./packages/shared/
+
+# Install dependencies for the workspace
+RUN pnpm install --frozen-lockfile
+
+# Build shared package
+WORKDIR /app/packages/shared
+RUN pnpm run build
+
+# Set working directory back to shared for volume mounting
+WORKDIR /app/packages/shared
+
+CMD ["echo", "Shared package built successfully"]
