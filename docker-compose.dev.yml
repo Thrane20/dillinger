@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  backend-dev:
+    build:
+      context: ./docker/backend
+      dockerfile: Dockerfile.dev
+    container_name: dillinger-backend-dev
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./packages/backend:/app
+      - ./packages/shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - game-library:/opt/games
+      - json-data:/data
+    environment:
+      - NODE_ENV=development
+      - DATA_PATH=/data
+      - GAME_LIBRARY_PATH=/opt/games
+      - FRONTEND_URL=http://localhost:3000
+    restart: unless-stopped
+    depends_on:
+      - shared-build
+
+  frontend-dev:
+    build:
+      context: ./docker/frontend
+      dockerfile: Dockerfile.dev
+    container_name: dillinger-frontend-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./packages/frontend:/app
+      - ./packages/shared:/shared
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    restart: unless-stopped
+    depends_on:
+      - shared-build
+
+  shared-build:
+    build:
+      context: ./packages/shared
+      dockerfile: Dockerfile.build
+    container_name: dillinger-shared-build
+    volumes:
+      - ./packages/shared:/app
+      - shared-dist:/app/dist
+    command: pnpm run build
+
+volumes:
+  game-library:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/data/games
+      o: bind
+  json-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/data/storage
+      o: bind
+  shared-dist:
+    driver: local

@@ -31,7 +31,10 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Simplicity First**: Does this feature solve a concrete user problem? Can it be implemented with the simplest approach first?
+- **User-Centered Design**: Are user stories independently testable? Does each story deliver standalone value?
+- **Quality Over Speed**: Are acceptance criteria clearly defined? Is technical debt impact documented?
+- **Development Standards**: Will this follow spec-driven workflow? Are dependencies justified?
 
 ## Project Structure
 

@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Logs
+logs
+*.log
+
+# Coverage
+coverage/
+.nyc_output
+
+# Environment files
+.env*
+
+# Cache files
+.eslintcache
+.stylelintcache
+
+# Test outputs
+test-results/
+playwright-report/
+
+# Temporary files
+tmp/
+temp/

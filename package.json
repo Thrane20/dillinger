@@ -1,0 +1,45 @@
+{
+  "name": "dillinger",
+  "version": "1.0.0",
+  "description": "Game library management platform with cross-platform execution",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "DATA_PATH=/mnt/linuxfast/dev/dillinger/data pnpm --parallel --filter=!shared run dev",
+    "build": "pnpm --recursive run build",
+    "test": "pnpm --recursive run test",
+    "type-check": "pnpm --recursive run type-check",
+    "lint": "pnpm --recursive run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "clean": "pnpm --recursive run clean && rm -rf node_modules",
+    "setup": "pnpm install && pnpm run build:shared && pnpm run type-check",
+    "build:shared": "pnpm --filter=@dillinger/shared run build",
+    "dev:backend": "DATA_PATH=/mnt/linuxfast/dev/dillinger/data pnpm --filter=@dillinger/backend run dev",
+    "dev:frontend": "pnpm --filter=@dillinger/frontend run dev",
+    "docker:dev": "docker-compose -f docker-compose.dev.yml up --build",
+    "docker:down": "docker-compose -f docker-compose.dev.yml down"
+  },
+  "keywords": [
+    "game-library",
+    "game-manager",
+    "docker",
+    "streaming",
+    "cross-platform"
+  ],
+  "author": "Dillinger Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "prettier": "^3.0.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "rimraf": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0"
+}

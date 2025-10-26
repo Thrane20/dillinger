@@ -1,50 +1,41 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report:
+- Version change: Initial → 1.0.0
+- Added principles: I. Simplicity First, II. User-Centered Design, III. Quality Over Speed
+- Added sections: Development Standards, Solo Development Workflow
+- Templates requiring updates: ✅ All aligned (initial setup)
+- Follow-up TODOs: None
+-->
+
+# Dillinger Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Simplicity First
+Start simple and add complexity only when justified by real user needs. Every feature MUST solve a concrete problem before implementation. Prefer readable, maintainable code over clever optimizations. When in doubt, choose the simpler solution that delivers user value.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+**Rationale**: As a solo hobby project, maintainability is critical. Complex solutions increase cognitive load and make future development harder.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. User-Centered Design
+Features MUST be designed from the user's perspective first. Every user story MUST be independently testable and deliver standalone value. Prioritize user experience over technical elegance. Document features from the user's point of view in plain language.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+**Rationale**: Ensures development stays focused on delivering value rather than building for the sake of building.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Quality Over Speed
+Better to ship fewer, well-tested features than many buggy ones. Every feature MUST have clear acceptance criteria and be validated before moving to the next. Technical debt MUST be documented and addressed before it accumulates.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+**Rationale**: In a hobby project, bugs and technical debt can kill motivation and make the project unsustainable.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+## Development Standards
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+All features MUST follow the spec-driven development workflow: specification → plan → implementation → validation. Code MUST be self-documenting with clear variable names and logical organization. Dependencies MUST be justified and documented. Performance requirements MUST be defined upfront for any feature that could impact user experience.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+## Solo Development Workflow
+
+Since this is currently a single-developer project, all principles apply to individual commits and feature branches. Self-review is mandatory before merging features. The constitution serves as a personal accountability framework to maintain project quality and direction. As the project grows and potentially adds collaborators, these principles will scale to team review processes.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes all other development practices. Changes to principles require updating the version number and documenting the rationale. Complexity violations MUST be explicitly justified in implementation plans. All features MUST demonstrate compliance with core principles before completion.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-10-26 | **Last Amended**: 2025-10-26
