@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  dillinger:
+    image: thrane20/dillinger:1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dillinger
+    ports:
+      - "4000:4000"
+    volumes:
+      - dillinger_library:/data
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - BACKEND_PORT=4001
+      - DATA_PATH=/data
+      - FRONTEND_URL=http://localhost:4000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/health', (r) => { if (r.statusCode === 200) process.exit(0); process.exit(1); })"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  dillinger_library:
+    external: true
