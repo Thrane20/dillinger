@@ -75,23 +75,23 @@
   }
 
   .btn-primary {
-    @apply btn text-primary-foreground bg-primary hover:bg-primary/90 focus:ring-primary;
+    @apply btn text-primary-foreground bg-primary hover:bg-primary-soft focus:ring-primary;
   }
 
   .btn-secondary {
-    @apply btn text-secondary-foreground bg-secondary hover:bg-secondary/90 focus:ring-secondary;
+    @apply btn text-secondary-foreground bg-secondary hover:opacity-90 focus:ring-secondary;
   }
 
   .btn-accent {
-    @apply btn text-accent-foreground bg-accent hover:bg-accent/90 focus:ring-accent;
+    @apply btn text-accent-foreground bg-accent hover:opacity-90 focus:ring-accent;
   }
 
   .btn-neutral {
-    @apply btn text-neutral-foreground bg-neutral hover:bg-neutral/90 focus:ring-neutral;
+    @apply btn text-neutral-foreground bg-neutral hover:opacity-90 focus:ring-neutral;
   }
 
   .btn-danger {
-    @apply btn text-danger-foreground bg-danger hover:bg-danger/90 focus:ring-danger;
+    @apply btn text-danger-foreground bg-danger hover:bg-danger-soft focus:ring-danger;
   }
 
   .btn-ghost {

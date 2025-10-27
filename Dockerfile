@@ -3,6 +3,13 @@
 
 FROM node:18-slim AS base
 
+# Install build dependencies for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install pnpm
 RUN npm config set strict-ssl false && npm install -g pnpm@8.15.0 && npm config set strict-ssl true
 
@@ -19,8 +26,12 @@ COPY packages/shared/package.json ./packages/shared/
 COPY packages/backend/package.json ./packages/backend/
 COPY packages/frontend/package.json ./packages/frontend/
 
-# Install all dependencies
-RUN pnpm install --frozen-lockfile
+# Install all dependencies with SSL disabled for CI environments
+RUN npm config set strict-ssl false && \
+    pnpm config set strict-ssl false && \
+    pnpm install --frozen-lockfile && \
+    pnpm config set strict-ssl true && \
+    npm config set strict-ssl true
 
 # Stage 2: Build shared package
 FROM base AS shared-builder
@@ -59,6 +70,7 @@ COPY --from=deps /app/packages/backend/node_modules ./packages/backend/node_modu
 
 # Copy built shared package
 COPY --from=shared-builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=shared-builder /app/packages/shared/tsconfig.json ./packages/shared/tsconfig.json
 COPY packages/shared/package.json ./packages/shared/
 
 # Copy backend source and build
@@ -85,6 +97,7 @@ COPY --from=deps /app/packages/frontend/node_modules ./packages/frontend/node_mo
 
 # Copy built shared package
 COPY --from=shared-builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=shared-builder /app/packages/shared/tsconfig.json ./packages/shared/tsconfig.json
 COPY packages/shared/package.json ./packages/shared/
 
 # Copy frontend source
@@ -96,6 +109,7 @@ WORKDIR /app/packages/frontend
 ENV NODE_ENV=production
 ENV NEXT_PUBLIC_API_URL=http://localhost:4000
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_DISABLE_GOOGLE_FONTS=1
 
 # Build Next.js application
 RUN pnpm run build

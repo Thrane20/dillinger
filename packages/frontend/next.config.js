@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Disable font optimization to avoid network calls during build
+  optimizeFonts: false,
+  
   // Enable experimental features if needed
   experimental: {
     // Add any experimental features here
