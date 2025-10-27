@@ -26,8 +26,8 @@ module.exports = {
     {
       name: 'dillinger-frontend',
       cwd: '/app/packages/frontend',
-      script: 'node_modules/.bin/next',
-      args: 'start -p 4000',
+      script: 'pnpm',
+      args: 'start',
       env: {
         NODE_ENV: 'production',
         PORT: process.env.PORT || '4000',
