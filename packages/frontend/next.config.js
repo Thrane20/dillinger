@@ -1,16 +1,28 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Disable font optimization to avoid network calls during build
+  optimizeFonts: false,
+  
   // Enable experimental features if needed
   experimental: {
     // Add any experimental features here
   },
   
-  // API routes rewrite for development
+  // API routes rewrite for development and production
   async rewrites() {
     // Use environment variable to determine backend URL
-    const backendUrl = process.env.NODE_ENV === 'development' && process.env.DOCKER_ENV
-      ? 'http://backend-dev:3001'  // Docker container name
-      : 'http://localhost:3001';   // Local development
+    let backendUrl;
+    
+    if (process.env.NODE_ENV === 'production') {
+      // Production: Use BACKEND_URL env var or default to localhost:4001
+      backendUrl = process.env.BACKEND_URL || 'http://localhost:4001';
+    } else if (process.env.DOCKER_ENV) {
+      // Docker development: Use container name
+      backendUrl = 'http://backend-dev:3001';
+    } else {
+      // Local development
+      backendUrl = 'http://localhost:3001';
+    }
       
     return [
       {

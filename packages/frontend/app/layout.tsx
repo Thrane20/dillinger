@@ -1,9 +1,6 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 import ThemeToggle from './components/ThemeToggle';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'Dillinger - Game Library Manager',
@@ -24,7 +21,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} antialiased bg-background text-text transition-colors duration-300`}>
+      <body className="font-sans antialiased bg-background text-text transition-colors duration-300">
         <div className="min-h-screen flex flex-col bg-background/90">
           <header className="sticky top-0 z-20 bg-surface/80 border-b border-border/60 backdrop-blur-xl shadow-soft">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

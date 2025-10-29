@@ -75,23 +75,23 @@
   }
 
   .btn-primary {
-    @apply btn text-primary-foreground bg-primary hover:bg-primary/90 focus:ring-primary;
+    @apply btn text-primary-foreground bg-primary hover:bg-primary-soft focus:ring-primary;
   }
 
   .btn-secondary {
-    @apply btn text-secondary-foreground bg-secondary hover:bg-secondary/90 focus:ring-secondary;
+    @apply btn text-secondary-foreground bg-secondary hover:opacity-90 focus:ring-secondary;
   }
 
   .btn-accent {
-    @apply btn text-accent-foreground bg-accent hover:bg-accent/90 focus:ring-accent;
+    @apply btn text-accent-foreground bg-accent hover:opacity-90 focus:ring-accent;
   }
 
   .btn-neutral {
-    @apply btn text-neutral-foreground bg-neutral hover:bg-neutral/90 focus:ring-neutral;
+    @apply btn text-neutral-foreground bg-neutral hover:opacity-90 focus:ring-neutral;
   }
 
   .btn-danger {
-    @apply btn text-danger-foreground bg-danger hover:bg-danger/90 focus:ring-danger;
+    @apply btn text-danger-foreground bg-danger hover:bg-danger-soft focus:ring-danger;
   }
 
   .btn-ghost {
@@ -99,11 +99,11 @@
   }
 
   .card {
-    @apply bg-surface/95 overflow-hidden shadow-neumorphic rounded-3xl border border-border/60 transition-colors duration-300;
+    @apply bg-surface overflow-hidden shadow-neumorphic rounded-3xl border border-border transition-colors duration-300;
   }
 
   .card-header {
-    @apply px-6 py-5 sm:px-8 border-b border-border/60 text-text;
+    @apply px-6 py-5 sm:px-8 border-b border-border text-text;
   }
 
   .card-body {
@@ -111,7 +111,7 @@
   }
 
   .form-input {
-    @apply shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-border/80 bg-surface text-text rounded-lg;
+    @apply shadow-sm focus:ring-primary focus:border-primary block w-full sm:text-sm border-border bg-surface text-text rounded-lg;
   }
 
   .form-label {
@@ -123,22 +123,22 @@
   }
 
   .alert-info {
-    @apply alert bg-accent-foreground/60 text-accent border-accent/30 dark:bg-accent/20 dark:text-accent-foreground;
+    @apply alert bg-primary-soft text-primary border-primary dark:bg-primary-soft dark:text-primary;
   }
 
   .alert-success {
-    @apply alert bg-success-soft text-success-foreground border-success/30 dark:text-success;
+    @apply alert bg-success-soft text-success-foreground border-success dark:text-success;
   }
 
   .alert-warning {
-    @apply alert bg-warning-soft text-warning-foreground border-warning/30 dark:text-warning;
+    @apply alert bg-warning-soft text-warning-foreground border-warning dark:text-warning;
   }
 
   .alert-error {
-    @apply alert bg-danger-soft text-danger-foreground border-danger/30 dark:text-danger;
+    @apply alert bg-danger-soft text-danger-foreground border-danger dark:text-danger;
   }
 
   .neumorphic-panel {
-    @apply bg-surface/95 text-text shadow-neumorphic rounded-[2.5rem] border border-border/50 p-10 transition-colors duration-300 backdrop-blur;
+    @apply bg-surface text-text shadow-neumorphic rounded-[2.5rem] border border-border p-10 transition-colors duration-300 backdrop-blur;
   }
 }
