@@ -137,7 +137,6 @@ COPY --from=backend-builder --chown=dillinger:nodejs /app/packages/backend/packa
 
 # Copy built frontend
 COPY --from=frontend-builder --chown=dillinger:nodejs /app/packages/frontend/.next ./packages/frontend/.next
-COPY --from=frontend-builder --chown=dillinger:nodejs /app/packages/frontend/public ./packages/frontend/public
 COPY --from=frontend-builder --chown=dillinger:nodejs /app/packages/frontend/package.json ./packages/frontend/
 COPY --from=frontend-builder --chown=dillinger:nodejs /app/packages/frontend/next.config.js ./packages/frontend/
 
