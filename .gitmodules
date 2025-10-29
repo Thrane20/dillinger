@@ -1,0 +1,6 @@
+[submodule "third_party/gow"]
+	path = third_party/gow
+	url = https://github.com/Thrane20/gow
+[submodule "third_party/wolf"]
+	path = third_party/wolf
+	url = https://github.com/Thrane20/wolf
