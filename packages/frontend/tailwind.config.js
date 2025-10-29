@@ -9,44 +9,44 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: 'var(--color-background)',
-        surface: 'var(--color-surface)',
-        border: 'var(--color-border)',
-        muted: 'var(--color-muted)',
+        background: 'rgb(var(--color-background) / <alpha-value>)',
+        surface: 'rgb(var(--color-surface) / <alpha-value>)',
+        border: 'rgb(var(--color-border) / <alpha-value>)',
+        muted: 'rgb(var(--color-muted) / <alpha-value>)',
         text: {
-          DEFAULT: 'var(--color-text)',
+          DEFAULT: 'rgb(var(--color-text) / <alpha-value>)',
         },
         primary: {
-          DEFAULT: 'var(--color-primary)',
-          foreground: 'var(--color-primary-foreground)',
-          soft: 'var(--color-primary-soft)',
+          DEFAULT: 'rgb(var(--color-primary) / <alpha-value>)',
+          foreground: 'rgb(var(--color-primary-foreground) / <alpha-value>)',
+          soft: 'rgb(var(--color-primary-soft) / <alpha-value>)',
         },
         secondary: {
-          DEFAULT: 'var(--color-secondary)',
-          foreground: 'var(--color-secondary-foreground)',
+          DEFAULT: 'rgb(var(--color-secondary) / <alpha-value>)',
+          foreground: 'rgb(var(--color-secondary-foreground) / <alpha-value>)',
         },
         accent: {
-          DEFAULT: 'var(--color-accent)',
-          foreground: 'var(--color-accent-foreground)',
+          DEFAULT: 'rgb(var(--color-accent) / <alpha-value>)',
+          foreground: 'rgb(var(--color-accent-foreground) / <alpha-value>)',
         },
         neutral: {
-          DEFAULT: 'var(--color-neutral)',
-          foreground: 'var(--color-neutral-foreground)',
+          DEFAULT: 'rgb(var(--color-neutral) / <alpha-value>)',
+          foreground: 'rgb(var(--color-neutral-foreground) / <alpha-value>)',
         },
         success: {
-          DEFAULT: 'var(--color-success)',
-          foreground: 'var(--color-success-foreground)',
-          soft: 'var(--color-success-soft)',
+          DEFAULT: 'rgb(var(--color-success) / <alpha-value>)',
+          foreground: 'rgb(var(--color-success-foreground) / <alpha-value>)',
+          soft: 'rgb(var(--color-success-soft) / <alpha-value>)',
         },
         warning: {
-          DEFAULT: 'var(--color-warning)',
-          foreground: 'var(--color-warning-foreground)',
-          soft: 'var(--color-warning-soft)',
+          DEFAULT: 'rgb(var(--color-warning) / <alpha-value>)',
+          foreground: 'rgb(var(--color-warning-foreground) / <alpha-value>)',
+          soft: 'rgb(var(--color-warning-soft) / <alpha-value>)',
         },
         danger: {
-          DEFAULT: 'var(--color-danger)',
-          foreground: 'var(--color-danger-foreground)',
-          soft: 'var(--color-danger-soft)',
+          DEFAULT: 'rgb(var(--color-danger) / <alpha-value>)',
+          foreground: 'rgb(var(--color-danger-foreground) / <alpha-value>)',
+          soft: 'rgb(var(--color-danger-soft) / <alpha-value>)',
         },
       },
       fontFamily: {
