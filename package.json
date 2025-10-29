@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "pnpm --parallel --filter=@dillinger/core run dev",
     "dev:all": "pnpm --parallel run dev",
+    "dev:full": "./start-dev.sh",
     "build": "pnpm --recursive run build",
     "test": "pnpm --recursive run test", 
     "type-check": "pnpm --recursive run type-check",
@@ -14,12 +15,13 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
     "setup": "pnpm install && pnpm run build:shared && pnpm run type-check",
-    "build:shared": "pnpm --filter=@dillinger/runner-types --filter=@dillinger/validation run build",
-    "dev:core": "pnpm --filter=@dillinger/core run dev",
+    "build:shared": "pnpm --filter=@dillinger/shared run build",
+    "dev:backend": "DATA_PATH=/mnt/linuxfast/dev/dillinger/data pnpm --filter=@dillinger/backend run dev",
+    "dev:frontend": "pnpm --filter=@dillinger/frontend run dev", 
     "dev:runner": "pnpm --filter=@dillinger/runner run dev",
     "docker:dev": "docker-compose -f docker-compose.dev.yml up --build",
     "docker:down": "docker-compose -f docker-compose.dev.yml down",
-    "docker:runner": "docker-compose -f docker-compose.runner.yml up --build"
+    "docker:runner": "docker-compose -f docker-compose.dev.yml --profile runner up -d runner-dev"
   },
   "keywords": [
     "game-library",

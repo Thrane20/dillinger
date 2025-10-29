@@ -9,10 +9,6 @@ import { JSONStorageService } from './services/storage.js';
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
 
-// Trust proxy - required for rate limiting behind reverse proxies
-// In development, this allows X-Forwarded-For headers
-app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : true);
-
 // Initialize storage service
 const storage = JSONStorageService.getInstance();
 
@@ -86,6 +82,10 @@ app.get('/api/health', async (_req, res) => {
 // TODO: Add platforms routes
 // TODO: Add sessions routes
 // TODO: Add collections routes
+
+// Runner integration routes
+import runnerRoutes from './routes/runner.js';
+app.use('/api/runner', runnerRoutes);
 
 // Basic 404 handler for API routes
 app.use('/api/*', (req, res) => {

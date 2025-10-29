@@ -1,0 +1,55 @@
+FROM node:18-alpine
+
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Create app directory
+WORKDIR /app
+
+# Copy workspace configuration files
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+# Copy package.json files for workspace dependencies
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/runner/package.json ./packages/runner/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy shared package source
+COPY packages/shared/src ./packages/shared/src/
+COPY packages/shared/tsconfig.json ./packages/shared/
+
+# Copy runner source
+COPY packages/runner/src ./packages/runner/src/
+COPY packages/runner/tsconfig.json ./packages/runner/
+
+# Build shared package first
+WORKDIR /app/packages/shared
+RUN pnpm run build
+
+# Switch to runner directory
+WORKDIR /app/packages/runner
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S runner -u 1001
+
+# Change ownership
+RUN chown -R runner:nodejs /app
+
+# Switch to non-root user
+USER runner
+
+# Expose port
+EXPOSE 3002
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3002/health || exit 1
+
+# Start development server
+CMD ["pnpm", "run", "dev"]

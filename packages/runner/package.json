@@ -1,0 +1,43 @@
+{
+  "name": "@dillinger/runner",
+  "version": "1.0.0",
+  "description": "Dillinger game runner service - launches and manages containerized game sessions",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@dillinger/shared": "workspace:*",
+    "axios": "^1.6.0",
+    "cors": "^2.8.0",
+    "dockerode": "^4.0.0",
+    "express": "^4.18.0",
+    "helmet": "^7.0.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.0",
+    "@types/dockerode": "^3.3.45",
+    "@types/express": "^4.17.0",
+    "@types/jest": "^29.5.0",
+    "@types/supertest": "^6.0.0",
+    "@types/uuid": "^9.0.0",
+    "@types/ws": "^8.5.0",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "supertest": "^6.3.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
