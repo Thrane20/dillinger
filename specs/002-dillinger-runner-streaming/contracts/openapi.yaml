@@ -1,0 +1,641 @@
+openapi: 3.0.3
+info:
+  title: Dillinger Runner API
+  description: API for managing game execution containers in the dillinger-runner streaming system
+  version: 1.0.0
+  contact:
+    name: Dillinger Team
+    url: https://github.com/Thrane20/dillinger
+
+servers:
+  - url: http://localhost:4000/api/v1
+    description: Development server
+  - url: http://dillinger-backend:4000/api/v1
+    description: Container network
+
+tags:
+  - name: runner
+    description: Container lifecycle management
+  - name: sessions
+    description: Game session management
+  - name: monitoring
+    description: Resource monitoring and health checks
+
+paths:
+  /runner/launch:
+    post:
+      tags:
+        - runner
+      summary: Launch a game in a new container
+      description: Creates and starts a new dillinger-runner container to execute the specified game
+      operationId: launchGame
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameLaunchRequest'
+            examples:
+              windows_game:
+                summary: Launch Windows game with Wine
+                value:
+                  gameId: "game_diablo_pc_12345"
+                  userId: "user_john_doe"
+                  platform: "windows"
+                  sessionId: "sess_7f9e2b4a-1234-5678-9abc-def012345678"
+                  launchConfig:
+                    winePrefix: "/home/retro/.wine-diablo"
+                    displayMode: "x11"
+                    audioEnabled: true
+                    resources:
+                      cpuLimit: 4.0
+                      memoryLimit: "4G"
+                      gpuAccess: "shared"
+              linux_game:
+                summary: Launch native Linux game
+                value:
+                  gameId: "game_tux_racer_linux_67890"
+                  userId: "user_jane_smith"
+                  platform: "linux"
+                  sessionId: "sess_8a1c3d5e-2345-6789-bcde-f012345678ab"
+                  launchConfig:
+                    displayMode: "x11"
+                    audioEnabled: true
+                    resources:
+                      cpuLimit: 2.0
+                      memoryLimit: "2G"
+                      gpuAccess: "none"
+      responses:
+        '202':
+          description: Launch request accepted, container starting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LaunchResponse'
+        '400':
+          description: Invalid launch request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Session ID already exists or user has too many active sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Insufficient resources to launch container
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /runner/sessions/{sessionId}:
+    get:
+      tags:
+        - sessions
+      summary: Get session status and details
+      description: Retrieve current status and configuration of a game session
+      operationId: getSession
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^sess_[a-f0-9-]{36}$'
+          example: "sess_7f9e2b4a-1234-5678-9abc-def012345678"
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunnerSession'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - sessions
+      summary: Terminate a game session
+      description: Gracefully stop the game and remove the container
+      operationId: terminateSession
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^sess_[a-f0-9-]{36}$'
+        - name: force
+          in: query
+          description: Force immediate termination without graceful shutdown
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '202':
+          description: Termination request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Session termination initiated"
+                  sessionId:
+                    type: string
+                    example: "sess_7f9e2b4a-1234-5678-9abc-def012345678"
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /runner/sessions:
+    get:
+      tags:
+        - sessions
+      summary: List active sessions
+      description: Get all active game sessions, optionally filtered by user
+      operationId: listSessions
+      parameters:
+        - name: userId
+          in: query
+          description: Filter sessions by user ID
+          schema:
+            type: string
+          example: "user_john_doe"
+        - name: status
+          in: query
+          description: Filter sessions by status
+          schema:
+            $ref: '#/components/schemas/SessionStatus'
+        - name: limit
+          in: query
+          description: Maximum number of sessions to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RunnerSession'
+                  total:
+                    type: integer
+                    description: Total number of sessions matching filters
+                  limit:
+                    type: integer
+                    description: Applied limit
+                  offset:
+                    type: integer
+                    description: Applied offset (for pagination)
+
+  /runner/monitoring/sessions/{sessionId}/metrics:
+    get:
+      tags:
+        - monitoring
+      summary: Get session resource usage metrics
+      description: Retrieve current and historical resource usage for a session
+      operationId: getSessionMetrics
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^sess_[a-f0-9-]{36}$'
+        - name: timeRange
+          in: query
+          description: Time range for historical metrics (e.g., '1h', '30m', '5m')
+          schema:
+            type: string
+            default: '1h'
+          example: "1h"
+      responses:
+        '200':
+          description: Resource usage metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  current:
+                    $ref: '#/components/schemas/ResourceUsage'
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ResourceUsage'
+                    description: Historical metrics in chronological order
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /runner/health:
+    get:
+      tags:
+        - monitoring
+      summary: Health check for runner service
+      description: Check if the dillinger-runner service is healthy and ready to accept requests
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded]
+                    example: "healthy"
+                  version:
+                    type: string
+                    example: "1.0.0"
+                  uptime:
+                    type: integer
+                    description: Service uptime in seconds
+                    example: 86400
+                  capabilities:
+                    type: object
+                    properties:
+                      wine:
+                        type: boolean
+                        description: Wine runtime available
+                        example: true
+                      gpu:
+                        type: boolean
+                        description: GPU passthrough available
+                        example: true
+                      display:
+                        type: array
+                        items:
+                          type: string
+                          enum: [x11, wayland]
+                        description: Supported display protocols
+                        example: ["x11"]
+                  resources:
+                    type: object
+                    properties:
+                      maxConcurrentSessions:
+                        type: integer
+                        example: 4
+                      activeSessions:
+                        type: integer
+                        example: 1
+                      availableMemory:
+                        type: string
+                        example: "12G"
+                      availableCpu:
+                        type: number
+                        example: 6.0
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    GameLaunchRequest:
+      type: object
+      required:
+        - gameId
+        - userId
+        - platform
+        - sessionId
+        - launchConfig
+      properties:
+        gameId:
+          type: string
+          pattern: '^game_[a-zA-Z0-9_-]+$'
+          description: UUID of the game from dillinger library
+          example: "game_diablo_pc_12345"
+        userId:
+          type: string
+          pattern: '^user_[a-zA-Z0-9_-]+$'
+          description: ID of the user requesting the launch
+          example: "user_john_doe"
+        platform:
+          type: string
+          enum: [windows, linux]
+          description: Target platform for the game
+        sessionId:
+          type: string
+          pattern: '^sess_[a-f0-9-]{36}$'
+          description: Unique identifier for this launch session
+          example: "sess_7f9e2b4a-1234-5678-9abc-def012345678"
+        launchConfig:
+          $ref: '#/components/schemas/LaunchConfiguration'
+        timestamp:
+          type: string
+          format: date-time
+          description: When the launch was requested
+          example: "2025-10-29T14:29:45Z"
+
+    LaunchConfiguration:
+      type: object
+      required:
+        - displayMode
+        - audioEnabled
+        - resources
+      properties:
+        winePrefix:
+          type: string
+          description: Custom Wine prefix path for Windows games
+          example: "/home/retro/.wine-diablo"
+        displayMode:
+          type: string
+          enum: [x11, wayland]
+          description: Display forwarding method
+        resources:
+          $ref: '#/components/schemas/ResourceLimits'
+        environment:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom environment variables
+          example:
+            WINEDLLOVERRIDES: "d3d11=n;dxgi=n"
+            DXVK_HUD: "fps"
+        volumes:
+          type: array
+          items:
+            $ref: '#/components/schemas/VolumeMount'
+          description: Additional volume mounts beyond dillinger_library
+        audioEnabled:
+          type: boolean
+          description: Whether to enable audio forwarding
+
+    ResourceLimits:
+      type: object
+      properties:
+        cpuLimit:
+          type: number
+          minimum: 0.1
+          maximum: 32.0
+          description: CPU cores (e.g., 2.0 for 2 cores)
+          example: 4.0
+        memoryLimit:
+          type: string
+          pattern: '^[0-9]+[KMGT]?$'
+          description: Memory limit (e.g., "4G", "512M")
+          example: "4G"
+        gpuAccess:
+          type: string
+          enum: [none, shared, dedicated]
+          description: GPU allocation strategy
+        gpuDevices:
+          type: array
+          items:
+            type: string
+          description: Specific GPU device IDs when dedicated
+          example: ["nvidia.com/gpu=0"]
+        diskLimit:
+          type: string
+          pattern: '^[0-9]+[KMGT]?$'
+          description: Temporary storage limit for container
+          example: "10G"
+
+    VolumeMount:
+      type: object
+      required:
+        - hostPath
+        - containerPath
+        - mode
+        - type
+      properties:
+        hostPath:
+          type: string
+          description: Path on host system
+          example: "/home/user/saves"
+        containerPath:
+          type: string
+          description: Mount point in container
+          example: "/saves"
+        mode:
+          type: string
+          enum: [ro, rw]
+          description: Read-only or read-write access
+        type:
+          type: string
+          enum: [bind, volume, tmpfs]
+          description: Mount type
+
+    RunnerSession:
+      type: object
+      required:
+        - sessionId
+        - containerId
+        - gameId
+        - userId
+        - status
+        - startTime
+        - displayInfo
+      properties:
+        sessionId:
+          type: string
+          pattern: '^sess_[a-f0-9-]{36}$'
+          description: Unique session identifier
+        containerId:
+          type: string
+          description: Docker container ID
+          example: "dillinger_runner_sess_7f9e2b4a"
+        gameId:
+          type: string
+          description: Reference to launched game
+        userId:
+          type: string
+          description: User who launched the session
+        status:
+          $ref: '#/components/schemas/SessionStatus'
+        startTime:
+          type: string
+          format: date-time
+          description: When container was started
+        lastActivity:
+          type: string
+          format: date-time
+          description: Last input/output activity
+        displayInfo:
+          $ref: '#/components/schemas/DisplayConfiguration'
+        resourceUsage:
+          $ref: '#/components/schemas/ResourceUsage'
+        processId:
+          type: integer
+          description: Game process ID within container
+          example: 1234
+
+    SessionStatus:
+      type: string
+      enum:
+        - requested
+        - starting
+        - running
+        - stopping
+        - terminated
+        - crashed
+        - failed
+      description: Current session state
+
+    DisplayConfiguration:
+      type: object
+      required:
+        - method
+        - displayId
+      properties:
+        method:
+          type: string
+          enum: [x11, wayland]
+          description: Display forwarding protocol
+        displayId:
+          type: string
+          description: X11 DISPLAY value or Wayland display name
+          example: ":1"
+        resolution:
+          type: string
+          pattern: '^[0-9]+x[0-9]+$'
+          description: Requested resolution
+          example: "1920x1080"
+        refreshRate:
+          type: integer
+          minimum: 30
+          maximum: 240
+          description: Requested refresh rate in Hz
+          example: 60
+        socketPath:
+          type: string
+          description: Path to display socket on host
+          example: "/tmp/.X11-unix/X1"
+        authToken:
+          type: string
+          description: X11 authentication token
+
+    ResourceUsage:
+      type: object
+      required:
+        - cpuPercent
+        - memoryUsed
+        - memoryPercent
+        - diskUsage
+        - timestamp
+      properties:
+        cpuPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: CPU usage percentage
+          example: 45.2
+        memoryUsed:
+          type: integer
+          minimum: 0
+          description: Memory usage in bytes
+          example: 2147483648
+        memoryPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Memory usage percentage of limit
+          example: 53.7
+        gpuUsage:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: GPU utilization percentage
+          example: 78.9
+        gpuMemoryUsed:
+          type: integer
+          minimum: 0
+          description: GPU memory usage in bytes
+          example: 1073741824
+        diskUsage:
+          type: integer
+          minimum: 0
+          description: Temporary disk usage in bytes
+          example: 536870912
+        timestamp:
+          type: string
+          format: date-time
+          description: When metrics were collected
+          example: "2025-10-29T14:45:30Z"
+
+    LaunchResponse:
+      type: object
+      required:
+        - sessionId
+        - status
+        - message
+      properties:
+        sessionId:
+          type: string
+          description: Session identifier for tracking
+        status:
+          type: string
+          enum: [accepted, starting]
+          description: Launch request status
+        message:
+          type: string
+          description: Human-readable status message
+          example: "Container starting, game will launch shortly"
+        estimatedStartTime:
+          type: integer
+          description: Estimated seconds until game is ready
+          example: 30
+        displayInfo:
+          $ref: '#/components/schemas/DisplayConfiguration'
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: "INVALID_GAME_ID"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Game with ID 'game_invalid_123' not found in library"
+        details:
+          type: object
+          description: Additional error context
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          description: When the error occurred
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication between dillinger and dillinger-runner services
+
+security:
+  - ApiKeyAuth: []
