@@ -54,28 +54,6 @@ services:
       - shared-dist:/app/packages/shared/dist
     command: pnpm run build
 
-  runner-dev:
-    build:
-      context: .
-      dockerfile: ./docker/runner/Dockerfile.dev
-    container_name: dillinger-runner-dev
-    ports:
-      - "3002:3002"
-    volumes:
-      - ./packages/runner/src:/app/packages/runner/src
-      - ./packages/shared/src:/app/packages/shared/src
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - NODE_ENV=development
-      - BACKEND_URL=http://backend-dev:3001
-      - PORT=3002
-    restart: unless-stopped
-    depends_on:
-      - shared-build
-    # Don't start automatically - bring up manually when needed
-    profiles:
-      - runner
-
 volumes:
   game-library:
     driver: local

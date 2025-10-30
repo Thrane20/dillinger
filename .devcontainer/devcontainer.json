@@ -1,0 +1,44 @@
+{
+  "name": "Dillinger Dev Environment",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "remoteUser": "node",
+  "runArgs": ["--init"],
+  "mounts": [
+    "source=dillinger-pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume",
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+  "forwardPorts": [3000, 3001, 3002, 3003, 8080],
+  "portsAttributes": {
+    "3000": { "label": "Next.js Frontend" },
+    "3001": { "label": "API Backend" },
+    "3002": { "label": "Runner API (legacy)" },
+    "3003": { "label": "Runner API" },
+    "8080": { "label": "Streaming/WebRTC" }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "files.watcherExclude": {
+          "**/node_modules": true,
+          "**/.pnpm-store": true
+        },
+        "pnpm.enableRunFromMenu": true
+      },
+      "extensions": [
+       
+      ]
+    }
+  },
+  "postCreateCommand": "pnpm install",
+  "postStartCommand": "sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
+  "containerEnv": {
+    "PNPM_HOME": "/home/node/.local/share/pnpm"
+  }
+}

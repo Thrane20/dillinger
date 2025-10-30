@@ -50,14 +50,32 @@ Dillinger is built as a modern monorepo with the following structure:
 
 ```
 dillinger/
+├── apps/
+│   └── dillinger-core/      # Main application
+│       ├── backend/          # Express.js API server
+│       └── frontend/         # Next.js web application
 ├── packages/
-│   ├── shared/          # Shared TypeScript types and utilities
-│   ├── backend/         # Express.js API server
-│   └── frontend/        # Next.js web application
-├── docker/              # Docker configurations and compose files
-├── data/                # JSON-based data storage (development)
-└── docs/                # Documentation and guides
+│   ├── runner-types/        # TypeScript types for game execution
+│   ├── runner-images/       # Docker images for running games
+│   │   ├── linux-native/    # Native Linux game runner
+│   │   └── wine-proton/     # Windows game runner (future)
+│   ├── validation/          # Input validation schemas
+│   └── shared-legacy/       # Legacy shared utilities
+├── docker/                  # Docker configurations
+├── data/                    # JSON-based data storage (development)
+└── specs/                   # Feature specifications and plans
 ```
+
+### Runner Architecture
+
+Dillinger uses a **simplified runner architecture** where each runner is a Docker container image:
+
+- **No API Layer**: Runners are Docker images, not API services
+- **Direct Execution**: Games run directly in containers with mounted volumes
+- **Multiple Runner Types**: Different images for different game platforms
+- **Isolated Sessions**: Each game runs in its own container
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
 
 ### Technology Stack
 

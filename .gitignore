@@ -84,6 +84,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Temporary folders
 tmp/
 temp/
+.pnpm-store/
 
 # Editor directories and files
 .vscode/settings.json
@@ -106,6 +107,11 @@ Thumbs.db
 # Game data (will be in Docker volumes)
 /data/
 /opt/games/
+
+# Backend local data (except README)
+apps/dillinger-core/backend/data/*
+!apps/dillinger-core/backend/data/README.md
+!apps/dillinger-core/backend/data/.gitkeep
 
 # Docker
 docker-compose.override.yml

@@ -5,13 +5,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "DATA_PATH=/mnt/linuxfast/dev/dillinger/data pnpm --parallel run dev",
+    "dev": "pnpm --parallel run dev",
     "build": "pnpm --recursive run build", 
     "test": "pnpm --recursive run test",
     "type-check": "pnpm --recursive run type-check",
     "lint": "pnpm --recursive run lint",
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
-    "dev:backend": "DATA_PATH=/mnt/linuxfast/dev/dillinger/data pnpm --filter=@dillinger/backend run dev",
+    "dev:backend": "pnpm --filter=@dillinger/backend run dev",
     "dev:frontend": "pnpm --filter=@dillinger/frontend run dev"
   },
   "dependencies": {

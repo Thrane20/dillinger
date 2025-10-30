@@ -1,0 +1,77 @@
+# Docker Compose for Dillinger Game Runners
+# This file provides examples of how to launch game containers
+
+version: '3.8'
+
+services:
+  # Example: Linux Native Game Runner
+  # Runs any native Linux game by mounting its directory
+  linux-game-example:
+    build:
+      context: ./packages/runner-images/linux-native
+      dockerfile: Dockerfile
+    image: dillinger/runner-linux-native:latest
+    container_name: example-linux-game
+    environment:
+      # Required: Path to game executable inside the container
+      - GAME_EXECUTABLE=/game/start.sh
+      # Optional: Arguments to pass to the game
+      - GAME_ARGS=--fullscreen --width 1920 --height 1080
+      # X11 Display
+      - DISPLAY=${DISPLAY:-:0}
+      # Save directory location
+      - SAVE_DIR=/saves
+    volumes:
+      # Mount your game installation (read-only recommended)
+      - /path/to/your/game:/game:ro
+      # Mount save directory (read-write)
+      - /path/to/save/directory:/saves:rw
+      # X11 socket for display
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    devices:
+      # GPU access
+      - /dev/dri:/dev/dri
+      # Audio devices
+      - /dev/snd:/dev/snd
+    stdin_open: true
+    tty: true
+    # Network mode - adjust based on game needs
+    network_mode: bridge
+    # Restart policy - typically no restart for game sessions
+    restart: "no"
+
+  # Example: Test the Linux runner with built-in test game
+  linux-runner-test:
+    image: dillinger/runner-linux-native:latest
+    container_name: test-linux-runner
+    environment:
+      - GAME_EXECUTABLE=/usr/local/bin/test-game.sh
+      - SAVE_DIR=/saves
+    volumes:
+      - ./test-saves:/saves:rw
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+  # Future: Wine/Proton Windows Game Runner
+  # wine-game-example:
+  #   build:
+  #     context: ./packages/runner-images/wine-proton
+  #     dockerfile: Dockerfile
+  #   image: dillinger/runner-wine-proton:latest
+  #   environment:
+  #     - GAME_EXECUTABLE=/game/game.exe
+  #     - WINEPREFIX=/wineprefix
+  #     - WINEARCH=win64
+  #   volumes:
+  #     - /path/to/windows/game:/game:ro
+  #     - /path/to/wineprefix:/wineprefix:rw
+  #     - /path/to/saves:/saves:rw
+
+networks:
+  default:
+    name: dillinger-runners
+
+# Note: These services are examples/templates
+# In production, game sessions would be launched dynamically by the
+# dillinger-core backend when a user wants to play a game

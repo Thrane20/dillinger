@@ -1,5 +1,5 @@
 packages:
   - 'apps/*'
-  - 'apps/*/backend'
-  - 'apps/*/frontend'
+  - 'apps/dillinger-core/backend'
+  - 'apps/dillinger-core/frontend'
   - 'packages/*'
