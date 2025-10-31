@@ -6,6 +6,7 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { JSONStorageService } from './services/storage.js';
 import gamesLauncherRouter from './api/games-launcher.js';
+import gamesRouter from './api/games.js';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -86,13 +87,15 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // API routes will be added here as we implement them
-// TODO: Add games routes
 // TODO: Add platforms routes
 // TODO: Add sessions routes
 // TODO: Add collections routes
 
+// Game CRUD routes
+app.use('/api/games', gamesRouter);
+
 // Game launcher routes
-app.use('/api/games', gamesLauncherRouter);
+app.use('/api/games/launch', gamesLauncherRouter);
 
 // Basic 404 handler for API routes
 app.use('/api/*', (req, res) => {

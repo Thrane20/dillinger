@@ -45,8 +45,8 @@ export default function GamesPage() {
       const response = await fetch('/api/games');
       if (response.ok) {
         const data = await response.json();
-        if (data.success && data.games) {
-          setGames(data.games);
+        if (data.success) {
+          setGames(data.data || []);
         }
       } else {
         setError('Failed to load games from API');
@@ -55,6 +55,37 @@ export default function GamesPage() {
       setError('Failed to load games: ' + (err instanceof Error ? err.message : 'Unknown error'));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function deleteGame(gameId: string) {
+    if (!confirm('Are you sure you want to delete this game from your library?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/games/${gameId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // Remove from local state
+          setGames((prev) => prev.filter((g) => g.id !== gameId));
+          // Also remove any active session
+          setSessions((prev) => {
+            const newSessions = { ...prev };
+            delete newSessions[gameId];
+            return newSessions;
+          });
+        }
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to delete game');
+      }
+    } catch (err) {
+      setError('Failed to delete game: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   }
 
@@ -141,9 +172,11 @@ export default function GamesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-text">Games</h1>
-        <a href="/add-game" className="btn-primary">
-          Add Game
-        </a>
+        <div className="flex gap-3">
+          <a href="/games/add" className="btn-primary">
+            + Add Game
+          </a>
+        </div>
       </div>
 
       {error && (
@@ -281,41 +314,52 @@ export default function GamesPage() {
                         )}
                       </button>
                     ) : (
-                      <button
-                        onClick={() => launchGame(game.id)}
-                        disabled={isLaunching}
-                        className="btn-primary flex-1"
-                      >
-                        {isLaunching ? (
-                          <>
-                            <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                            Launching...
-                          </>
-                        ) : (
-                          <>
-                            <svg
-                              className="inline-block h-4 w-4 mr-2"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                              />
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                              />
-                            </svg>
-                            Launch Game
-                          </>
-                        )}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => launchGame(game.id)}
+                          disabled={isLaunching}
+                          className="btn-primary flex-1"
+                        >
+                          {isLaunching ? (
+                            <>
+                              <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                              Launching...
+                            </>
+                          ) : (
+                            <>
+                              <svg
+                                className="inline-block h-4 w-4 mr-2"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                                />
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                              </svg>
+                              Launch Game
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => deleteGame(game.id)}
+                          className="px-3 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition-colors text-sm"
+                          title="Delete game"
+                        >
+                          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
