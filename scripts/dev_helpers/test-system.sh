@@ -108,7 +108,7 @@ fi
 
 if ! lsof -ti :3001 > /dev/null 2>&1; then
     echo "Starting backend in background..."
-    cd apps/dillinger-core/backend
+    cd packages/dillinger-core/backend
     PORT=3001 pnpm run dev > /tmp/dillinger-backend.log 2>&1 &
     BACKEND_PID=$!
     STARTED_BACKEND=true

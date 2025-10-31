@@ -24,6 +24,8 @@ RUN pacman -S --noconfirm --needed \
     xorg-xrandr \
     xorg-xinput \
     xdotool \
+    xterm \
+    xorg-xeyes \
     # Graphics libraries
     mesa \
     mesa-utils \

@@ -1,0 +1,29 @@
+{
+  "id": "test-adventure-game",
+  "title": "Test Adventure Game",
+  "filePath": "games/test-adventure-game",
+  "platformId": "linux-native",
+  "collectionIds": [],
+  "tags": ["test", "adventure", "text-based"],
+  "metadata": {
+    "description": "A simple text-based adventure game for testing the Dillinger runner system",
+    "genre": ["Adventure", "Interactive Fiction"],
+    "developer": "Dillinger Team",
+    "releaseDate": "2025-10-30",
+    "rating": 8
+  },
+  "fileInfo": {
+    "size": 4096,
+    "lastModified": "2025-10-30T00:00:00Z"
+  },
+  "settings": {
+    "launch": {
+      "command": "./start.sh",
+      "arguments": [],
+      "environment": {},
+      "workingDirectory": "."
+    }
+  },
+  "created": "2025-10-30T00:00:00Z",
+  "updated": "2025-10-30T00:00:00Z"
+}

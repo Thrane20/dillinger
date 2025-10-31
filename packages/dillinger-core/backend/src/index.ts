@@ -5,13 +5,16 @@ import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { JSONStorageService } from './services/storage.js';
+import gamesLauncherRouter from './api/games-launcher.js';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
 
 // Trust proxy - required for rate limiting behind reverse proxies
-// In development, this allows X-Forwarded-For headers
-app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : true);
+// In production behind a reverse proxy, set to 1
+// In development, we don't use rate limiting on a per-IP basis
+const trustProxyValue = process.env.NODE_ENV === 'production' ? 1 : false;
+app.set('trust proxy', trustProxyValue);
 
 // Initialize storage service
 const storage = JSONStorageService.getInstance();
@@ -29,6 +32,7 @@ app.use(
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
+  skip: () => process.env.NODE_ENV === 'development', // Skip rate limiting in development
   message: {
     error: 'rate_limit_exceeded',
     message: 'Too many requests from this IP, please try again later.',
@@ -86,6 +90,9 @@ app.get('/api/health', async (_req, res) => {
 // TODO: Add platforms routes
 // TODO: Add sessions routes
 // TODO: Add collections routes
+
+// Game launcher routes
+app.use('/api/games', gamesLauncherRouter);
 
 // Basic 404 handler for API routes
 app.use('/api/*', (req, res) => {

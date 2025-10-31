@@ -8,10 +8,15 @@
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
   "remoteUser": "node",
-  "runArgs": ["--init"],
+  "runArgs": [
+    "--init",
+    "--network=host",
+    "--ipc=host"
+  ],
   "mounts": [
     "source=dillinger-pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume",
-    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
   ],
   "forwardPorts": [3000, 3001, 3002, 3003, 8080],
   "portsAttributes": {
@@ -37,8 +42,9 @@
     }
   },
   "postCreateCommand": "pnpm install",
-  "postStartCommand": "sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
+  "postStartCommand": "sudo chown -R node:node /home/node/.local/share/pnpm/store && sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
   "containerEnv": {
-    "PNPM_HOME": "/home/node/.local/share/pnpm"
+    "PNPM_HOME": "/home/node/.local/share/pnpm",
+    "DISPLAY": "${localEnv:DISPLAY}"
   }
 }

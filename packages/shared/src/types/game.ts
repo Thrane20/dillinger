@@ -34,8 +34,10 @@ export interface Game {
       settings?: Record<string, any>; // Emulator-specific settings
     };
     launch?: {
+      command?: string; // Launch command relative to game directory (e.g., "./start.sh")
       arguments?: string[]; // Launch arguments
       environment?: Record<string, string>; // Environment variables
+      workingDirectory?: string; // Working directory relative to game directory
     };
   };
   created: string; // ISO timestamp

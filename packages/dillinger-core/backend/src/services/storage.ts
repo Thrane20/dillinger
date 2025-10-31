@@ -7,7 +7,11 @@ import type {
   SessionsIndex,
 } from '@dillinger/shared';
 
-const DATA_PATH = process.env.DATA_PATH || '/data';
+// DILLINGER_ROOT is the base directory for all game data and metadata
+// In development: ./packages/dillinger-core/backend/data
+// In production: Configured by deployment (e.g., /opt/dillinger)
+const DILLINGER_ROOT = process.env.DILLINGER_ROOT || path.join(process.cwd(), 'data');
+const DATA_PATH = path.join(DILLINGER_ROOT, 'storage');
 
 export interface EntityCounts {
   games: number;
@@ -27,13 +31,41 @@ export class JSONStorageService {
   }
 
   /**
+   * Get the DILLINGER_ROOT path (base directory for all data)
+   */
+  getDillingerRoot(): string {
+    return DILLINGER_ROOT;
+  }
+
+  /**
+   * Get the storage path (metadata/config storage)
+   */
+  getStoragePath(): string {
+    return DATA_PATH;
+  }
+
+  /**
+   * Get the games directory path (actual game installations)
+   */
+  getGamesPath(): string {
+    return path.join(DILLINGER_ROOT, 'games');
+  }
+
+  /**
    * Ensure all required data directories exist
    */
   async ensureDirectories(): Promise<void> {
-    const dirs = ['games', 'platforms', 'sessions', 'collections', 'metadata'];
+    // Ensure DILLINGER_ROOT exists
+    await fs.ensureDir(DILLINGER_ROOT);
+    
+    // Ensure storage subdirectories exist
+    const storageDirs = ['games', 'platforms', 'sessions', 'collections', 'metadata'];
     await Promise.all(
-      dirs.map((dir) => fs.ensureDir(path.join(DATA_PATH, dir)))
+      storageDirs.map((dir) => fs.ensureDir(path.join(DATA_PATH, dir)))
     );
+    
+    // Ensure games directory exists (for actual game files)
+    await fs.ensureDir(this.getGamesPath());
   }
 
   /**

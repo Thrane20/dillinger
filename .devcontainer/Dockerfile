@@ -3,7 +3,7 @@
 
 FROM mcr.microsoft.com/devcontainers/typescript-node:18
 
-ARG PNPM_VERSION=8.15.0
+ARG PNPM_VERSION=10.20.0
 
 # Ensure common tooling required by Dev Container features is present
 RUN apt-get update \

@@ -1,9 +1,10 @@
 <!--
 Sync Impact Report:
-- Version change: Initial → 1.0.0
-- Added principles: I. Simplicity First, II. User-Centered Design, III. Quality Over Speed
-- Added sections: Development Standards, Solo Development Workflow
-- Templates requiring updates: ✅ All aligned (initial setup)
+- Version change: 1.0.0 → 1.1.0
+- Modified principles: None
+- Added sections: IV. Organization & Documentation Standards
+- Removed sections: None
+- Templates requiring updates: ✅ All templates remain aligned
 - Follow-up TODOs: None
 -->
 
@@ -26,6 +27,11 @@ Better to ship fewer, well-tested features than many buggy ones. Every feature M
 
 **Rationale**: In a hobby project, bugs and technical debt can kill motivation and make the project unsustainable.
 
+### IV. Organization & Documentation Standards
+Helper scripts MUST be generated in the `/scripts/dev_helpers` directory. Documentation outputs, README files, and other Markdown artifacts MUST be placed in the `.specify/memory/chatnotes` directory. This organization ensures clear separation between executable tooling and human-readable documentation.
+
+**Rationale**: Consistent file organization prevents clutter, makes artifacts discoverable, and reduces cognitive load when navigating the project. Scripts in a known location can be easily referenced and executed, while documentation in a dedicated space remains accessible without polluting the repository root or mixing with code.
+
 ## Development Standards
 
 All features MUST follow the spec-driven development workflow: specification → plan → implementation → validation. Code MUST be self-documenting with clear variable names and logical organization. Dependencies MUST be justified and documented. Performance requirements MUST be defined upfront for any feature that could impact user experience.
@@ -38,4 +44,4 @@ Since this is currently a single-developer project, all principles apply to indi
 
 This constitution supersedes all other development practices. Changes to principles require updating the version number and documenting the rationale. Complexity violations MUST be explicitly justified in implementation plans. All features MUST demonstrate compliance with core principles before completion.
 
-**Version**: 1.0.0 | **Ratified**: 2025-10-26 | **Last Amended**: 2025-10-26
+**Version**: 1.1.0 | **Ratified**: 2025-10-26 | **Last Amended**: 2025-10-31
