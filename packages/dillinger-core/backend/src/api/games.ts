@@ -39,7 +39,16 @@ router.get('/', async (_req: Request, res: Response) => {
 // GET /api/games/:id - Get a specific game
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const game = await storage.readEntity('games', req.params.id);
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const game = await storage.readEntity('games', id);
     
     if (!game) {
       res.status(404).json({
@@ -136,7 +145,16 @@ router.put('/:id', createGameValidation, async (req: Request, res: Response) => 
       return;
     }
 
-    const existingGame = await storage.readEntity('games', req.params.id);
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const existingGame = await storage.readEntity<any>('games', id);
     if (!existingGame) {
       res.status(404).json({
         success: false,
@@ -148,12 +166,12 @@ router.put('/:id', createGameValidation, async (req: Request, res: Response) => 
     const updatedGame = {
       ...existingGame,
       ...req.body,
-      id: req.params.id, // Preserve ID
+      id: id, // Preserve ID
       created: existingGame.created, // Preserve creation date
       updated: new Date().toISOString(),
     };
 
-    await storage.writeEntity('games', req.params.id, updatedGame);
+    await storage.writeEntity('games', id, updatedGame);
 
     res.json({
       success: true,
@@ -173,7 +191,16 @@ router.put('/:id', createGameValidation, async (req: Request, res: Response) => 
 // DELETE /api/games/:id - Delete a game
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const game = await storage.readEntity('games', req.params.id);
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const game = await storage.readEntity('games', id);
     if (!game) {
       res.status(404).json({
         success: false,
@@ -182,7 +209,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    await storage.deleteEntity('games', req.params.id);
+    await storage.deleteEntity('games', id);
 
     res.json({
       success: true,
