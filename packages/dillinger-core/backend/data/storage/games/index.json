@@ -1,4 +1,5 @@
 {
+  "$schema": "../../../schema/games-index-v1.0.json",
   "count": 7,
   "lastUpdated": "2025-11-01T07:18:25.277Z",
   "byPlatform": {

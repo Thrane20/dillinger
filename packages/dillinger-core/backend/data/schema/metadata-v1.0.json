@@ -1,0 +1,294 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dillinger.dev/schemas/v1.0/metadata.json",
+  "title": "SavedGameMetadata",
+  "description": "Schema for scraped game metadata in the Dillinger game library",
+  "type": "object",
+  "required": ["id", "slug", "scraperData"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier (slug)"
+    },
+    "slug": {
+      "type": "string",
+      "description": "URL-friendly identifier"
+    },
+    "scraperData": {
+      "type": "object",
+      "description": "Data from the scraper",
+      "required": ["scraperId", "scraperType", "title"],
+      "properties": {
+        "scraperId": {
+          "type": "string",
+          "description": "ID from the scraper service"
+        },
+        "scraperType": {
+          "type": "string",
+          "description": "Type of scraper",
+          "enum": ["igdb", "manual"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Game title"
+        },
+        "alternativeTitles": {
+          "type": "array",
+          "description": "Alternative titles",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "description": "Game summary"
+        },
+        "releaseDate": {
+          "type": "string",
+          "description": "Release date",
+          "format": "date-time"
+        },
+        "platforms": {
+          "type": "array",
+          "description": "Supported platforms",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "abbreviation": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "genres": {
+          "type": "array",
+          "description": "Game genres",
+          "items": {
+            "type": "string"
+          }
+        },
+        "themes": {
+          "type": "array",
+          "description": "Game themes",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gameModes": {
+          "type": "array",
+          "description": "Game modes",
+          "items": {
+            "type": "string"
+          }
+        },
+        "developers": {
+          "type": "array",
+          "description": "Developers",
+          "items": {
+            "type": "string"
+          }
+        },
+        "publishers": {
+          "type": "array",
+          "description": "Publishers",
+          "items": {
+            "type": "string"
+          }
+        },
+        "userRating": {
+          "type": "number",
+          "description": "User rating"
+        },
+        "websites": {
+          "type": "array",
+          "description": "Websites",
+          "items": {
+            "type": "string"
+          }
+        },
+        "videos": {
+          "type": "array",
+          "description": "Videos",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "videoId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          }
+        },
+        "screenshots": {
+          "type": "array",
+          "description": "Screenshots",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              },
+              "imageType": {
+                "type": "string"
+              },
+              "localPath": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "artworks": {
+          "type": "array",
+          "description": "Artworks",
+          "items": {
+            "type": "object"
+          }
+        },
+        "cover": {
+          "type": "object",
+          "description": "Cover image",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            },
+            "imageType": {
+              "type": "string"
+            },
+            "localPath": {
+              "type": "string"
+            }
+          }
+        },
+        "ageRatings": {
+          "type": "array",
+          "description": "Age ratings",
+          "items": {
+            "type": "object"
+          }
+        },
+        "franchises": {
+          "type": "array",
+          "description": "Franchises",
+          "items": {
+            "type": "string"
+          }
+        },
+        "collections": {
+          "type": "array",
+          "description": "Collections",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dlcs": {
+          "type": "array",
+          "description": "DLCs",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expansions": {
+          "type": "array",
+          "description": "Expansions",
+          "items": {
+            "type": "string"
+          }
+        },
+        "standaloneExpansions": {
+          "type": "array",
+          "description": "Standalone expansions",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remakes": {
+          "type": "array",
+          "description": "Remakes",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remasters": {
+          "type": "array",
+          "description": "Remasters",
+          "items": {
+            "type": "string"
+          }
+        },
+        "similarGames": {
+          "type": "array",
+          "description": "Similar games",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "localImages": {
+      "type": "object",
+      "description": "Local image paths",
+      "properties": {
+        "screenshots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artworks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cover": {
+          "type": "string"
+        }
+      }
+    },
+    "savedAt": {
+      "type": "string",
+      "description": "Timestamp when metadata was saved",
+      "format": "date-time"
+    },
+    "lastUpdated": {
+      "type": "string",
+      "description": "Last update timestamp",
+      "format": "date-time"
+    }
+  }
+}

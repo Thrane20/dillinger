@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dillinger.dev/schemas/v1.0/platform.json",
+  "title": "Platform",
+  "description": "Schema for a platform configuration in the Dillinger game library",
+  "type": "object",
+  "required": ["id", "name", "type", "configuration", "isActive"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier (kebab-case slug)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Display name of the platform",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "description": "Platform type",
+      "enum": ["native", "wine", "emulator"]
+    },
+    "description": {
+      "type": "string",
+      "description": "Platform description"
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Platform configuration",
+      "required": ["containerImage"],
+      "properties": {
+        "containerImage": {
+          "type": "string",
+          "description": "Docker container image for this platform"
+        },
+        "supportedExtensions": {
+          "type": "array",
+          "description": "File extensions supported by this platform",
+          "items": {
+            "type": "string"
+          }
+        },
+        "defaultSettings": {
+          "type": "object",
+          "description": "Default settings for games on this platform",
+          "properties": {
+            "environment": {
+              "type": "object",
+              "description": "Default environment variables",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "description": "Validation rules",
+      "properties": {
+        "fileValidation": {
+          "type": "array",
+          "description": "File validation patterns",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "displayStreaming": {
+      "type": "object",
+      "description": "Display streaming configuration",
+      "properties": {
+        "method": {
+          "type": "string",
+          "description": "Streaming method",
+          "enum": ["x11", "wayland", "games-on-whales", "wolf"]
+        }
+      }
+    },
+    "isActive": {
+      "type": "boolean",
+      "description": "Whether the platform is active"
+    },
+    "created": {
+      "type": "string",
+      "description": "Creation timestamp",
+      "format": "date-time"
+    },
+    "updated": {
+      "type": "string",
+      "description": "Last update timestamp",
+      "format": "date-time"
+    }
+  }
+}

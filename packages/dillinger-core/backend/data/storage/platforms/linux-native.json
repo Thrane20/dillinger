@@ -1,4 +1,5 @@
 {
+  "$schema": "../../../schema/platform-v1.0.json",
   "id": "linux-native",
   "name": "Linux Native",
   "type": "native",
