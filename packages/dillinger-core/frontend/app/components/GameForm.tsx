@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 interface GameFormData {
   id?: string;
   title: string;
+  slug?: string;
   filePath: string;
   platformId: string;
   tags: string;
@@ -28,6 +29,8 @@ interface GameFormData {
       workingDirectory?: string;
     };
   };
+  // Store the full original game data to preserve scraper metadata
+  _originalGame?: any;
 }
 
 interface GameFormProps {
@@ -49,11 +52,14 @@ interface SavedGameMetadata {
 export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [showImageSelector, setShowImageSelector] = useState<'primary' | 'backdrop' | null>(null);
   const [formData, setFormData] = useState<GameFormData>({
     title: '',
+    slug: '',
     filePath: '',
     platformId: '',
     tags: '',
@@ -88,6 +94,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             const result = await response.json();
             if (result.success && result.data) {
               const game = result.data;
+              
+              // Store original game data to preserve scraper metadata
               setFormData({
                 id: game.id,
                 title: game.title || '',
@@ -115,6 +123,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     workingDirectory: game.settings?.launch?.workingDirectory || '',
                   },
                 },
+                _originalGame: game, // Store full original data
               });
             }
           }
@@ -166,6 +175,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setSuccessMessage(null);
 
     try {
       // Convert tags and genre strings to arrays
@@ -181,17 +191,36 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             .filter((g) => g.length > 0)
         : [];
 
+      // Preserve scraper metadata when updating
+      const preservedMetadata = formData._originalGame?.metadata || {};
+      
       const payload = {
         title: formData.title,
         filePath: formData.filePath,
         platformId: formData.platformId,
         tags,
-        collectionIds: [],
+        collectionIds: formData._originalGame?.collectionIds || [],
         metadata: {
-          ...formData.metadata,
+          // Start with user-editable fields
+          description: formData.metadata.description,
           genre,
+          developer: formData.metadata.developer,
+          publisher: formData.metadata.publisher,
+          releaseDate: formData.metadata.releaseDate,
+          rating: formData.metadata.rating,
+          igdbId: formData.metadata.igdbId,
+          primaryImage: formData.metadata.primaryImage,
+          backdropImage: formData.metadata.backdropImage,
+          // Preserve scraper-only metadata
+          similarGames: preservedMetadata.similarGames,
+          coverArt: preservedMetadata.coverArt,
+          screenshots: preservedMetadata.screenshots,
+          playTime: preservedMetadata.playTime,
+          lastPlayed: preservedMetadata.lastPlayed,
         },
         settings: formData.settings,
+        fileInfo: formData._originalGame?.fileInfo,
+        created: formData._originalGame?.created,
       };
 
       const url = mode === 'edit' ? `/api/games/${gameId}` : '/api/games';
@@ -212,6 +241,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       }
 
       // Success!
+      setSuccessMessage('Game saved successfully!');
+      
       if (onSuccess) {
         onSuccess();
       } else {
@@ -280,16 +311,123 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     setShowImageSelector(null);
   };
 
+  const handleRefreshFromScraper = async () => {
+    if (!gameId || !formData._originalGame?.metadata?.igdbId) {
+      setError('Cannot refresh: No scraper ID found for this game');
+      return;
+    }
+
+    setIsRefreshing(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      // Get latest data from scraper
+      const scraperType = 'igdb'; // Default to IGDB
+      const scraperId = formData._originalGame.metadata.igdbId.toString();
+      
+      const response = await fetch(`/api/scrapers/game/${scraperType}/${scraperId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch latest scraper data');
+      }
+
+      const result = await response.json();
+      const latestData = result.game;
+
+      // Merge with current form data, preserving user edits but updating scraper fields
+      setFormData((prev) => ({
+        ...prev,
+        metadata: {
+          // Preserve user-edited fields (keep current values)
+          description: prev.metadata.description,
+          genre: prev.metadata.genre,
+          developer: prev.metadata.developer,
+          publisher: prev.metadata.publisher,
+          releaseDate: prev.metadata.releaseDate,
+          rating: prev.metadata.rating,
+          igdbId: prev.metadata.igdbId,
+          primaryImage: prev.metadata.primaryImage,
+          backdropImage: prev.metadata.backdropImage,
+        },
+        _originalGame: {
+          ...prev._originalGame,
+          metadata: {
+            ...prev._originalGame?.metadata,
+            // Update scraper-only fields from latest data
+            similarGames: latestData.similarGames?.map((sg: any) => ({
+              title: typeof sg === 'string' ? sg : sg.title || sg,
+              slug: typeof sg === 'string' ? sg.toLowerCase().replace(/[^a-z0-9]+/g, '-') : sg.slug,
+              scraperId: typeof sg === 'object' && sg.scraperId ? sg.scraperId : undefined,
+              scraperType: scraperType,
+            })),
+          },
+        },
+      }));
+
+      setSuccessMessage('Successfully refreshed metadata from scraper!');
+      
+      // Reload available images
+      if (gameId) {
+        await loadAvailableImages(gameId);
+      }
+    } catch (err) {
+      console.error('Failed to refresh from scraper:', err);
+      setError(err instanceof Error ? err.message : 'Failed to refresh from scraper');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-6">
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-        <h2 className="text-2xl font-bold mb-6 text-text">
-          {mode === 'edit' ? 'Edit Game' : 'Add New Game'}
-        </h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-text">
+            {mode === 'edit' ? 'Edit Game' : 'Add New Game'}
+          </h2>
+          
+          {/* Refresh from Scraper Button */}
+          {mode === 'edit' && formData._originalGame?.metadata?.igdbId && (
+            <button
+              type="button"
+              onClick={handleRefreshFromScraper}
+              disabled={isRefreshing}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {isRefreshing ? 'Refreshing...' : 'Refresh from Scraper'}
+            </button>
+          )}
+        </div>
 
         {error && (
           <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md">
             <p className="text-red-800 dark:text-red-200 text-sm">{error}</p>
+          </div>
+        )}
+
+        {successMessage && (
+          <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-md">
+            <p className="text-green-800 dark:text-green-200 text-sm">{successMessage}</p>
+          </div>
+        )}
+
+        {/* Info about preserved scraper data */}
+        {mode === 'edit' && formData._originalGame?.metadata?.similarGames && (
+          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-md">
+            <div className="flex items-start gap-2">
+              <svg className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-blue-800 dark:text-blue-200 text-sm font-medium">Scraper Data Preserved</p>
+                <p className="text-blue-700 dark:text-blue-300 text-xs mt-1">
+                  This game has {formData._originalGame.metadata.similarGames.length} similar titles and other scraper metadata that will be automatically preserved when saving your changes.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -311,6 +449,22 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               onChange={handleChange}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
               placeholder="Enter game title"
+            />
+          </div>
+
+          {/* Slug */}
+          <div>
+            <label htmlFor="slug" className="block text-sm font-medium text-muted mb-2">
+              Slug <span className="text-xs text-gray-500">(URL-friendly identifier, auto-generated if empty)</span>
+            </label>
+            <input
+              type="text"
+              id="slug"
+              name="slug"
+              value={formData.slug}
+              onChange={handleChange}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+              placeholder="e.g., my-game-title"
             />
           </div>
 

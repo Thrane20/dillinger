@@ -1,5 +1,6 @@
 export interface Game {
   id: string; // UUID v4
+  slug?: string; // URL-friendly identifier (auto-generated from title or manually set)
   title: string; // Display name
   filePath: string; // Absolute path to executable/ROM
   platformId: string; // Reference to Platform entity
@@ -7,18 +8,27 @@ export interface Game {
   tags: string[]; // User-defined tags
   metadata?: {
     igdbId?: number; // IGDB API ID for metadata linking
+    metadataId?: string; // Reference to SavedGameMetadata ID
     description?: string; // Game description
     genre?: string[]; // Game genres
     developer?: string; // Developer name
     publisher?: string; // Publisher name
     releaseDate?: string; // ISO date string
     rating?: number; // User rating 1-10
-    playTime?: number; // Hours played
-    lastPlayed?: string; // ISO timestamp
+    playTime?: number; // Total hours played (calculated from session durations)
+    playCount?: number; // Number of times the game has been launched
+    lastPlayed?: string; // ISO timestamp of last launch
     coverArt?: string; // Local file path to cover image
     screenshots?: string[]; // Array of local screenshot paths
     primaryImage?: string; // Primary display image (from scraped metadata or coverArt)
     backdropImage?: string; // Background image for hover effects
+    similarGames?: Array<{
+      title: string;
+      slug?: string;
+      gameId?: string;
+      scraperId?: string;
+      scraperType?: string;
+    }>;
   };
   fileInfo: {
     size: number; // File size in bytes

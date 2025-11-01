@@ -1,7 +1,10 @@
 {
-  "count": 3,
-  "lastUpdated": "2025-10-31T07:36:13.058Z",
+  "count": 7,
+  "lastUpdated": "2025-11-01T07:18:25.277Z",
   "byPlatform": {
+    "wine": [
+      "diablo"
+    ],
     "linux-native": [
       "test-adventure-game",
       "test-gui-game"
@@ -10,13 +13,21 @@
   "byCollection": {},
   "byGenre": {
     "role-playing (rpg)": [
-      "baldurs-gate-ii-throne-of-bhaal"
+      "baldurs-gate-ii-throne-of-bhaal",
+      "diablo"
     ],
     "strategy": [
-      "baldurs-gate-ii-throne-of-bhaal"
+      "baldurs-gate-ii-throne-of-bhaal",
+      "diablo"
+    ],
+    "shooter": [
+      "battlefield-2",
+      "call-of-duty",
+      "wolfenstein-the-new-order"
     ],
     "adventure": [
-      "test-adventure-game"
+      "test-adventure-game",
+      "wolfenstein-the-new-order"
     ],
     "interactive fiction": [
       "test-adventure-game"
@@ -30,16 +41,24 @@
   },
   "byTag": {
     "role-playing (rpg)": [
-      "baldurs-gate-ii-throne-of-bhaal"
+      "baldurs-gate-ii-throne-of-bhaal",
+      "diablo"
     ],
     "strategy": [
-      "baldurs-gate-ii-throne-of-bhaal"
+      "baldurs-gate-ii-throne-of-bhaal",
+      "diablo"
+    ],
+    "shooter": [
+      "battlefield-2",
+      "call-of-duty",
+      "wolfenstein-the-new-order"
     ],
     "test": [
       "test-adventure-game"
     ],
     "adventure": [
-      "test-adventure-game"
+      "test-adventure-game",
+      "wolfenstein-the-new-order"
     ],
     "text-based": [
       "test-adventure-game"
@@ -62,6 +81,18 @@
       "bhaal": [
         "baldurs-gate-ii-throne-of-bhaal"
       ],
+      "battlefield": [
+        "battlefield-2"
+      ],
+      "call": [
+        "call-of-duty"
+      ],
+      "duty": [
+        "call-of-duty"
+      ],
+      "diablo": [
+        "diablo"
+      ],
       "test": [
         "test-adventure-game",
         "test-gui-game"
@@ -75,6 +106,18 @@
       ],
       "gui": [
         "test-gui-game"
+      ],
+      "wolfenstein:": [
+        "wolfenstein-the-new-order"
+      ],
+      "the": [
+        "wolfenstein-the-new-order"
+      ],
+      "new": [
+        "wolfenstein-the-new-order"
+      ],
+      "order": [
+        "wolfenstein-the-new-order"
       ]
     },
     "fuzzy": {
@@ -93,6 +136,18 @@
       "bhaal": [
         "baldurs-gate-ii-throne-of-bhaal"
       ],
+      "battlefield": [
+        "battlefield-2"
+      ],
+      "call": [
+        "call-of-duty"
+      ],
+      "duty": [
+        "call-of-duty"
+      ],
+      "diablo": [
+        "diablo"
+      ],
       "test": [
         "test-adventure-game",
         "test-gui-game"
@@ -106,13 +161,31 @@
       ],
       "gui": [
         "test-gui-game"
+      ],
+      "wolfenstein:": [
+        "wolfenstein-the-new-order"
+      ],
+      "the": [
+        "wolfenstein-the-new-order"
+      ],
+      "new": [
+        "wolfenstein-the-new-order"
+      ],
+      "order": [
+        "wolfenstein-the-new-order"
       ]
     }
   },
   "recent": [
+    "wolfenstein-the-new-order",
+    "call-of-duty",
+    "battlefield-2",
+    "diablo",
     "baldurs-gate-ii-throne-of-bhaal",
     "test-adventure-game",
     "test-gui-game"
   ],
-  "popular": []
+  "popular": [
+    "test-adventure-game"
+  ]
 }

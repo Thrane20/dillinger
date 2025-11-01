@@ -27,6 +27,7 @@ export default function GameDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedGameId, setSavedGameId] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
@@ -78,15 +79,13 @@ export default function GameDetailPage({ params }: PageProps) {
       }
 
       const data: SaveGameMetadataResponse = await response.json();
+      setSavedGameId(data.gameId);
       setSaveMessage({
         type: 'success',
-        text: `Game saved successfully! Local ID: ${data.gameId}`,
+        text: `Game saved successfully!`,
       });
 
-      // Redirect to saved games after a delay
-      setTimeout(() => {
-        router.push('/scrapers/saved');
-      }, 2000);
+      // Don't auto-redirect anymore, let user click the button
     } catch (err) {
       console.error('Failed to save game:', err);
       setSaveMessage({
@@ -95,6 +94,12 @@ export default function GameDetailPage({ params }: PageProps) {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleGoToGame = () => {
+    if (savedGameId) {
+      router.push(`/games?scrollTo=${savedGameId}`);
     }
   };
 
@@ -157,7 +162,15 @@ export default function GameDetailPage({ params }: PageProps) {
               : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100'
           }`}
         >
-          {saveMessage.text}
+          <p className="font-medium">{saveMessage.text}</p>
+          {saveMessage.type === 'success' && savedGameId && (
+            <button
+              onClick={handleGoToGame}
+              className="mt-3 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors font-medium"
+            >
+              Go to Game Entry →
+            </button>
+          )}
         </div>
       )}
 

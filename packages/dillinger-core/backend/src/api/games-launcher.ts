@@ -30,7 +30,7 @@ router.get('/', async (_req: Request, res: Response) => {
 
 /**
  * GET /api/games/:id
- * Get a specific game
+ * Get a specific game by ID or slug
  */
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -39,7 +39,14 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Game ID required' });
     }
     
-    const game = await storage.readEntity<Game>('games', gameId);
+    // Try direct lookup first
+    let game = await storage.readEntity<Game>('games', gameId);
+    
+    // If not found, search by slug
+    if (!game) {
+      const allGames = await storage.listEntities<Game>('games');
+      game = allGames.find(g => g.slug === gameId) || null;
+    }
     
     if (!game) {
       return res.status(404).json({ error: 'Game not found' });
@@ -60,7 +67,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 /**
  * POST /api/games/:id/launch
- * Launch a game in a Docker container
+ * Launch a game in a Docker container by ID or slug
  */
 router.post('/:id/launch', async (req: Request, res: Response) => {
   try {
@@ -69,8 +76,13 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Game ID required' });
     }
 
-    // Get game from storage
-    const game = await storage.readEntity<Game>('games', gameId);
+    // Get game from storage (try direct lookup first, then by slug)
+    let game = await storage.readEntity<Game>('games', gameId);
+    if (!game) {
+      const allGames = await storage.listEntities<Game>('games');
+      game = allGames.find(g => g.slug === gameId) || null;
+    }
+    
     if (!game) {
       return res.status(404).json({ error: 'Game not found' });
     }
@@ -125,6 +137,36 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
       session.containerId = containerInfo.containerId;
       session.updated = new Date().toISOString();
       await storage.writeEntity('sessions', sessionId, session);
+
+      // Update game metadata with play tracking
+      // Re-read the game to get the latest playCount (avoid race conditions)
+      let currentGame = await storage.readEntity<Game>('games', gameId);
+      if (!currentGame && game.slug) {
+        currentGame = await storage.readEntity<Game>('games', game.slug);
+      }
+      
+      if (currentGame) {
+        const updatedGame = {
+          ...currentGame,
+          metadata: {
+            ...currentGame.metadata,
+            lastPlayed: now,
+            playCount: (currentGame.metadata?.playCount || 0) + 1,
+          },
+        };
+        
+        // Determine the storage file key (could be slug or id)
+        let storageKey = currentGame.id;
+        if (currentGame.slug) {
+          // Check if file exists with slug as key
+          const slugFile = await storage.readEntity<Game>('games', currentGame.slug);
+          if (slugFile && slugFile.id === currentGame.id) {
+            storageKey = currentGame.slug;
+          }
+        }
+        
+        await storage.writeEntity('games', storageKey, updatedGame);
+      }
 
       return res.status(200).json({
         success: true,
@@ -193,7 +235,7 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
     try {
       await docker.stopGame(session.containerId);
 
-      // Update session
+      // Update session with end time and duration
       session.status = 'stopped';
       session.performance.endTime = new Date().toISOString();
       session.performance.duration = Math.floor(
@@ -202,6 +244,39 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
       );
       session.updated = new Date().toISOString();
       await storage.writeEntity('sessions', sessionId, session);
+
+      // Update game's total play time (convert seconds to hours)
+      const durationHours = session.performance.duration / 3600;
+      
+      // Re-read game from storage right before updating to avoid race conditions
+      // (try direct lookup first, then by slug)
+      let currentGame = await storage.readEntity<Game>('games', gameId);
+      if (!currentGame) {
+        const allGames = await storage.listEntities<Game>('games');
+        currentGame = allGames.find(g => g.slug === gameId) || null;
+      }
+      
+      if (currentGame) {
+        const updatedGame = {
+          ...currentGame,
+          metadata: {
+            ...currentGame.metadata,
+            playTime: (currentGame.metadata?.playTime || 0) + durationHours,
+          },
+        };
+        
+        // Determine the storage file key (could be slug or id)
+        let storageKey = currentGame.id;
+        if (currentGame.slug) {
+          // Check if file exists with slug as key
+          const slugFile = await storage.readEntity<Game>('games', currentGame.slug);
+          if (slugFile && slugFile.id === currentGame.id) {
+            storageKey = currentGame.slug;
+          }
+        }
+        
+        await storage.writeEntity('games', storageKey, updatedGame);
+      }
 
       return res.status(200).json({
         success: true,

@@ -63,7 +63,7 @@ export interface GameDetailData {
   standaloneExpansions?: string[];
   remakes?: string[];
   remasters?: string[];
-  similarGames?: string[];
+  similarGames?: string[] | SimilarGameInfo[]; // Support both legacy string array and new rich format
 }
 
 export interface GamePlatformInfo {
@@ -96,6 +96,14 @@ export interface GameImage {
 export interface AgeRating {
   category: string; // e.g., "ESRB", "PEGI"
   rating: string; // e.g., "M", "18+"
+}
+
+export interface SimilarGameInfo {
+  title: string; // Game title
+  slug?: string; // Slug for local game lookup
+  gameId?: string; // Local game ID if already in library
+  scraperId?: string; // ID from the scraper source
+  scraperType?: ScraperType; // Where this similar game came from
 }
 
 export interface SavedGameMetadata {

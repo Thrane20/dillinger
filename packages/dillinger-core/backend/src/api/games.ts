@@ -8,6 +8,18 @@ const router = Router();
 const storage = JSONStorageService.getInstance();
 
 /**
+ * Generate a URL-friendly slug from a title
+ */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '') // Remove special characters
+    .replace(/[\s_-]+/g, '-') // Replace spaces, underscores with hyphens
+    .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+}
+
+/**
  * Helper to find a game and its storage filename
  * Returns { game, fileKey } or { game: null, fileKey: null }
  */
@@ -20,8 +32,9 @@ async function findGameAndFileKey(id: string): Promise<{ game: any | null; fileK
   
   // Not found by direct lookup - search through all games
   // This handles the case where filename doesn't match the game's ID field
+  // Also check for slug matches
   const allGames = await storage.listEntities<any>('games');
-  const foundGame = allGames.find((g: any) => g.id === id);
+  const foundGame = allGames.find((g: any) => g.id === id || g.slug === id);
   
   if (!foundGame) {
     return { game: null, fileKey: null };
@@ -114,6 +127,7 @@ router.post('/', gameValidation, async (req: Request, res: Response) => {
 
     const {
       title,
+      slug,
       filePath,
       platformId,
       collectionIds = [],
@@ -122,9 +136,13 @@ router.post('/', gameValidation, async (req: Request, res: Response) => {
       settings = {},
     } = req.body;
 
+    // Generate slug if not provided
+    const gameSlug = slug || slugify(title);
+
     // Create new game object
     const game = {
       id: uuidv4(),
+      slug: gameSlug,
       title,
       filePath,
       platformId,
@@ -190,9 +208,16 @@ router.put('/:id', gameValidation, async (req: Request, res: Response) => {
       return;
     }
 
+    // If title changed and slug wasn't explicitly provided, regenerate slug
+    let newSlug = req.body.slug;
+    if (req.body.title && req.body.title !== existingGame.title && !req.body.slug) {
+      newSlug = slugify(req.body.title);
+    }
+
     const updatedGame = {
       ...existingGame,
       ...req.body,
+      ...(newSlug ? { slug: newSlug } : {}),
       id: existingGame.id, // Preserve original ID
       created: existingGame.created, // Preserve creation date
       updated: new Date().toISOString(),

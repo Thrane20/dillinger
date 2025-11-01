@@ -19,6 +19,14 @@ export default function SettingsPage() {
 
   const [igdbClientId, setIgdbClientId] = useState('');
   const [igdbClientSecret, setIgdbClientSecret] = useState('');
+  
+  // UI Settings
+  const [backdropFadeDuration, setBackdropFadeDuration] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return parseFloat(localStorage.getItem('backdropFadeDuration') || '0.5');
+    }
+    return 0.5;
+  });
 
   useEffect(() => {
     loadSettings();
@@ -85,6 +93,14 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const saveUISettings = () => {
+    localStorage.setItem('backdropFadeDuration', backdropFadeDuration.toString());
+    setMessage({ type: 'success', text: 'UI settings saved successfully!' });
+    
+    // Dispatch custom event to notify games page
+    window.dispatchEvent(new CustomEvent('backdropSettingsChanged'));
   };
 
   if (loading) {
@@ -190,6 +206,48 @@ export default function SettingsPage() {
             Additional scraper integrations (SteamGridDB, Giant Bomb, etc.) will be available in
             future updates.
           </p>
+        </div>
+
+        {/* UI Settings */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">UI Settings</h2>
+          
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="backdropFade" className="block text-sm font-medium mb-2">
+                Backdrop Fade Duration
+              </label>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Controls how quickly the background image transitions when hovering over game tiles.
+              </p>
+              <div className="flex items-center gap-4">
+                <input
+                  type="range"
+                  id="backdropFade"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={backdropFadeDuration}
+                  onChange={(e) => setBackdropFadeDuration(parseFloat(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="text-sm font-medium w-16 text-right">
+                  {backdropFadeDuration.toFixed(1)}s
+                </span>
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+                <span>Instant (0s)</span>
+                <span>Slow (2s)</span>
+              </div>
+            </div>
+
+            <button
+              onClick={saveUISettings}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+            >
+              Save UI Settings
+            </button>
+          </div>
         </div>
       </div>
     </div>

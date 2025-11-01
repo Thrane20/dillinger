@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type {
   GetScraperSettingsResponse,
@@ -13,6 +14,7 @@ import type {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export default function ScrapersPage() {
+  const searchParams = useSearchParams();
   const [availableScrapers, setAvailableScrapers] = useState<
     GetScraperSettingsResponse['availableScrapers']
   >([]);
@@ -22,10 +24,31 @@ export default function ScrapersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [similarTitles, setSimilarTitles] = useState<string[]>([]);
 
   useEffect(() => {
     loadScrapers();
-  }, []);
+    
+    // Check if we have similarTitles in query params
+    const similarParam = searchParams.get('similar');
+    if (similarParam) {
+      try {
+        const titles = JSON.parse(decodeURIComponent(similarParam));
+        if (Array.isArray(titles) && titles.length > 0) {
+          setSimilarTitles(titles);
+        }
+      } catch (err) {
+        console.error('Failed to parse similar titles:', err);
+      }
+    }
+  }, [searchParams]);
+
+  // Auto-search when similarTitles are loaded
+  useEffect(() => {
+    if (similarTitles.length > 0 && selectedScraper && !hasSearched) {
+      handleBatchSearch(similarTitles);
+    }
+  }, [similarTitles, selectedScraper]);
 
   const loadScrapers = async () => {
     try {
@@ -88,17 +111,73 @@ export default function ScrapersPage() {
     }
   };
 
+  const handleBatchSearch = async (titles: string[]) => {
+    if (titles.length === 0 || !selectedScraper) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setHasSearched(true);
+
+      const payload = {
+        titles,
+        scraperType: selectedScraper as ScraperType,
+        limit: 5,
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/scrapers/search-batch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error('Batch search failed');
+      }
+
+      const data: SearchGamesResponse = await response.json();
+      setSearchResults(data.results);
+    } catch (err) {
+      console.error('Batch search failed:', err);
+      setError('Batch search failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const enabledScrapers = availableScrapers.filter((s) => s.enabled);
   const hasNoScrapers = enabledScrapers.length === 0;
 
   return (
     <div className="container mx-auto p-8 max-w-6xl">
       <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2">Game Metadata Scraper</h1>
+        <h1 className="text-4xl font-bold mb-2">
+          {similarTitles.length > 0 ? 'Similar Games' : 'Game Metadata Scraper'}
+        </h1>
         <p className="text-gray-600 dark:text-gray-400">
-          Search for games and fetch detailed metadata including screenshots, descriptions, and more
+          {similarTitles.length > 0 
+            ? `Searching for ${similarTitles.length} similar titles`
+            : 'Search for games and fetch detailed metadata including screenshots, descriptions, and more'
+          }
         </p>
       </div>
+
+      {similarTitles.length > 0 && (
+        <div className="bg-blue-100 dark:bg-blue-900 p-4 rounded-lg mb-6">
+          <h3 className="font-semibold mb-2">Similar Titles:</h3>
+          <div className="flex flex-wrap gap-2">
+            {similarTitles.map((title, idx) => (
+              <span key={idx} className="bg-blue-200 dark:bg-blue-800 px-3 py-1 rounded-full text-sm">
+                {title}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {hasNoScrapers ? (
         <div className="bg-yellow-100 dark:bg-yellow-900 p-6 rounded-lg">

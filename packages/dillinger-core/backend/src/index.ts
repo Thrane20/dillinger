@@ -110,8 +110,8 @@ app.get('/api/health', async (_req, res) => {
 // Game CRUD routes
 app.use('/api/games', gamesRouter);
 
-// Game launcher routes
-app.use('/api/games/launch', gamesLauncherRouter);
+// Game launcher routes (separate from /api/games to avoid route conflicts)
+app.use('/api/launch', gamesLauncherRouter);
 
 // Settings routes
 app.use('/api/settings', settingsRouter);

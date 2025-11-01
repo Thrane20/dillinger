@@ -59,6 +59,47 @@ router.post('/search', async (req, res) => {
 });
 
 /**
+ * POST /api/scrapers/search-batch
+ * Search for multiple games by title array using a specific scraper
+ */
+router.post('/search-batch', async (req, res) => {
+  try {
+    const { titles, scraperType, limit = 5 } = req.body as { titles: string[]; scraperType: ScraperType; limit?: number };
+
+    if (!titles || !Array.isArray(titles) || titles.length === 0 || !scraperType) {
+      res.status(400).json({
+        error: 'Missing required fields: titles (array), scraperType',
+      });
+      return;
+    }
+
+    // Search for each title and collect results
+    const allResults = [];
+    for (const title of titles) {
+      try {
+        const results = await scraperManager.search(scraperType, title, limit);
+        allResults.push(...results);
+      } catch (err) {
+        console.error(`Failed to search for "${title}":`, err);
+      }
+    }
+
+    const response: SearchGamesResponse = {
+      results: allResults,
+      total: allResults.length,
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error('Failed to batch search games:', error);
+    res.status(500).json({
+      error: 'Failed to batch search games',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
  * GET /api/scrapers/game/:scraperType/:scraperId
  * Get detailed game information
  */
@@ -220,6 +261,48 @@ router.post('/save', async (req, res) => {
       backdropImage = `/api/images/${slug}/${localImages.artworks[0]}`;
     }
     
+    // Enrich similarGames data with local references
+    const similarGames = [];
+    if (gameData.similarGames && Array.isArray(gameData.similarGames)) {
+      // Get all existing games to check for matches
+      const existingGames = await storage.listEntities<Game>('games');
+      
+      for (const similarGameEntry of gameData.similarGames) {
+        let similarGameTitle = '';
+        
+        if (typeof similarGameEntry === 'string') {
+          similarGameTitle = similarGameEntry;
+        } else if (typeof similarGameEntry === 'object' && similarGameEntry !== null) {
+          similarGameTitle = (similarGameEntry as any).title || '';
+        }
+        
+        if (!similarGameTitle) continue;
+        
+        const similarGameSlug = generateSlug(similarGameTitle);
+        
+        // Check if we have this game in our library
+        const localMatch = existingGames.find(
+          (g: Game) => 
+            g.title.toLowerCase() === similarGameTitle.toLowerCase() ||
+            g.id === similarGameSlug
+        );
+        
+        const enrichedSimilarGame: any = {
+          title: similarGameTitle,
+          slug: similarGameSlug,
+          gameId: localMatch?.id,
+          scraperType: scraperType,
+        };
+        
+        // Add scraperId if available from object format
+        if (typeof similarGameEntry === 'object' && similarGameEntry !== null && 'scraperId' in similarGameEntry) {
+          enrichedSimilarGame.scraperId = (similarGameEntry as any).scraperId;
+        }
+        
+        similarGames.push(enrichedSimilarGame);
+      }
+    }
+    
     const game: Game = {
       id: slug,
       title: gameData.title,
@@ -239,6 +322,7 @@ router.post('/save', async (req, res) => {
         screenshots: localImages.screenshots.map((s) => path.join(METADATA_PATH, slug, 'images', s)),
         primaryImage,
         backdropImage,
+        similarGames: similarGames.length > 0 ? similarGames : undefined,
       },
       fileInfo: {
         size: 0,
