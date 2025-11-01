@@ -6,12 +6,10 @@ import path from 'path';
 import type {
   SearchGamesRequest,
   SearchGamesResponse,
-  GetGameDetailRequest,
   GetGameDetailResponse,
   SaveGameMetadataRequest,
   SaveGameMetadataResponse,
   SavedGameMetadata,
-  GameImage,
   ScraperType,
   Game,
 } from '@dillinger/shared';
