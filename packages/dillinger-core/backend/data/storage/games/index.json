@@ -1,0 +1,118 @@
+{
+  "count": 3,
+  "lastUpdated": "2025-10-31T07:36:13.058Z",
+  "byPlatform": {
+    "linux-native": [
+      "test-adventure-game",
+      "test-gui-game"
+    ]
+  },
+  "byCollection": {},
+  "byGenre": {
+    "role-playing (rpg)": [
+      "baldurs-gate-ii-throne-of-bhaal"
+    ],
+    "strategy": [
+      "baldurs-gate-ii-throne-of-bhaal"
+    ],
+    "adventure": [
+      "test-adventure-game"
+    ],
+    "interactive fiction": [
+      "test-adventure-game"
+    ],
+    "test": [
+      "test-gui-game"
+    ],
+    "utility": [
+      "test-gui-game"
+    ]
+  },
+  "byTag": {
+    "role-playing (rpg)": [
+      "baldurs-gate-ii-throne-of-bhaal"
+    ],
+    "strategy": [
+      "baldurs-gate-ii-throne-of-bhaal"
+    ],
+    "test": [
+      "test-adventure-game"
+    ],
+    "adventure": [
+      "test-adventure-game"
+    ],
+    "text-based": [
+      "test-adventure-game"
+    ]
+  },
+  "search": {
+    "titles": {
+      "baldur's": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "gate": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "ii:": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "throne": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "bhaal": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "test": [
+        "test-adventure-game",
+        "test-gui-game"
+      ],
+      "adventure": [
+        "test-adventure-game"
+      ],
+      "game": [
+        "test-adventure-game",
+        "test-gui-game"
+      ],
+      "gui": [
+        "test-gui-game"
+      ]
+    },
+    "fuzzy": {
+      "baldur's": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "gate": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "ii:": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "throne": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "bhaal": [
+        "baldurs-gate-ii-throne-of-bhaal"
+      ],
+      "test": [
+        "test-adventure-game",
+        "test-gui-game"
+      ],
+      "adventure": [
+        "test-adventure-game"
+      ],
+      "game": [
+        "test-adventure-game",
+        "test-gui-game"
+      ],
+      "gui": [
+        "test-gui-game"
+      ]
+    }
+  },
+  "recent": [
+    "baldurs-gate-ii-throne-of-bhaal",
+    "test-adventure-game",
+    "test-gui-game"
+  ],
+  "popular": []
+}

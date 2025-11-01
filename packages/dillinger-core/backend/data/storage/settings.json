@@ -1,0 +1,8 @@
+{
+  "scrapers": {
+    "igdb": {
+      "clientId": "lpzomulxapy5mrfftuxcnwidw5ob2q",
+      "clientSecret": "5zmwqdvqka380bwqifwldsri8m0ahr"
+    }
+  }
+}

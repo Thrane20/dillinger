@@ -13,6 +13,8 @@ interface Game {
     genre?: string[];
     developer?: string;
     rating?: number;
+    primaryImage?: string;
+    backdropImage?: string;
   };
   settings?: {
     launch?: {
@@ -35,6 +37,10 @@ export default function GamesPage() {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [hoveredGameId, setHoveredGameId] = useState<string | null>(null);
+
+  const hoveredGame = hoveredGameId ? games.find(g => g.id === hoveredGameId) : null;
+  const backdropImage = hoveredGame?.metadata?.backdropImage;
 
   useEffect(() => {
     loadGames();
@@ -169,7 +175,21 @@ export default function GamesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="relative min-h-screen">
+      {/* Background Backdrop with Transition */}
+      <div 
+        className="fixed inset-0 z-0 transition-all duration-500 ease-in-out"
+        style={{
+          backgroundImage: backdropImage ? `url(${backdropImage})` : 'none',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          opacity: backdropImage ? 0.4 : 0,
+          filter: 'blur(2px)',
+        }}
+      />
+      
+      {/* Content Layer */}
+      <div className="relative z-10 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-text">Games</h1>
         <div className="flex gap-3">
@@ -229,12 +249,37 @@ export default function GamesPage() {
             const session = sessions[game.id];
             const isLaunching = launching[game.id];
             const isRunning = session && session.status === 'running';
+            const isConfigured = game.filePath && game.platformId; // Game is configured if it has filePath and platform
+            const primaryImage = game.metadata?.primaryImage;
 
             return (
-              <div key={game.id} className="card">
+              <div 
+                key={game.id} 
+                className="card transition-transform duration-200 hover:scale-[1.02]"
+                onMouseEnter={() => setHoveredGameId(game.id)}
+                onMouseLeave={() => setHoveredGameId(null)}
+              >
+                {/* Primary Image */}
+                {primaryImage && (
+                  <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <img 
+                      src={primaryImage} 
+                      alt={game.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+                
                 <div className="card-body space-y-4">
                   <div>
-                    <h3 className="text-xl font-semibold text-text">{game.title}</h3>
+                    <div className="flex items-start justify-between">
+                      <h3 className="text-xl font-semibold text-text">{game.title}</h3>
+                      {!isConfigured && (
+                        <span className="inline-flex items-center rounded-full bg-yellow-100 dark:bg-yellow-900 px-2.5 py-0.5 text-xs font-medium text-yellow-800 dark:text-yellow-100">
+                          Not Configured
+                        </span>
+                      )}
+                    </div>
                     {game.metadata?.developer && (
                       <p className="text-sm text-muted">{game.metadata.developer}</p>
                     )}
@@ -274,12 +319,20 @@ export default function GamesPage() {
                     <dl className="text-xs space-y-1">
                       <div className="flex justify-between">
                         <dt className="text-muted">Platform:</dt>
-                        <dd className="font-medium text-text">{game.platformId}</dd>
+                        <dd className="font-medium text-text">{game.platformId || 'Not set'}</dd>
                       </div>
                       {game.metadata?.rating && (
                         <div className="flex justify-between">
                           <dt className="text-muted">Rating:</dt>
                           <dd className="font-medium text-text">{game.metadata.rating}/10</dd>
+                        </div>
+                      )}
+                      {!isConfigured && (
+                        <div className="flex justify-between">
+                          <dt className="text-muted">Status:</dt>
+                          <dd className="font-medium text-yellow-600 dark:text-yellow-400">
+                            Needs configuration
+                          </dd>
                         </div>
                       )}
                     </dl>
@@ -298,7 +351,45 @@ export default function GamesPage() {
                   )}
 
                   <div className="flex gap-2">
-                    {isRunning ? (
+                    {!isConfigured ? (
+                      // Show prominent configure button for unconfigured games
+                      <>
+                        <a
+                          href={`/games/${game.id}/edit`}
+                          className="btn-primary flex-1 text-center"
+                        >
+                          <svg
+                            className="inline-block h-4 w-4 mr-2"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                          </svg>
+                          Configure Game
+                        </a>
+                        <button
+                          onClick={() => deleteGame(game.id)}
+                          className="px-3 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition-colors text-sm"
+                          title="Delete game"
+                        >
+                          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </>
+                    ) : isRunning ? (
                       <button
                         onClick={() => stopGame(game.id)}
                         disabled={isLaunching}
@@ -350,13 +441,22 @@ export default function GamesPage() {
                             </>
                           )}
                         </button>
+                        <a
+                          href={`/games/${game.id}/edit`}
+                          className="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm"
+                          title="Manage game"
+                        >
+                          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                          </svg>
+                        </a>
                         <button
                           onClick={() => deleteGame(game.id)}
                           className="px-3 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition-colors text-sm"
                           title="Delete game"
                         >
                           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1v3M4 7h16" />
                           </svg>
                         </button>
                       </>
@@ -368,6 +468,7 @@ export default function GamesPage() {
           })}
         </div>
       )}
+      </div>
     </div>
   );
 }

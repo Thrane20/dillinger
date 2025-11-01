@@ -7,11 +7,37 @@ import { JSONStorageService } from '../services/storage.js';
 const router = Router();
 const storage = JSONStorageService.getInstance();
 
-// Validation rules for game creation
-const createGameValidation = [
+/**
+ * Helper to find a game and its storage filename
+ * Returns { game, fileKey } or { game: null, fileKey: null }
+ */
+async function findGameAndFileKey(id: string): Promise<{ game: any | null; fileKey: string | null }> {
+  // Try to read directly first (for slug-based or direct ID match)
+  const directGame = await storage.readEntity<any>('games', id);
+  if (directGame) {
+    return { game: directGame, fileKey: id };
+  }
+  
+  // Not found by direct lookup - search through all games
+  // This handles the case where filename doesn't match the game's ID field
+  const allGames = await storage.listEntities<any>('games');
+  const foundGame = allGames.find((g: any) => g.id === id);
+  
+  if (!foundGame) {
+    return { game: null, fileKey: null };
+  }
+  
+  // Found the game - now we need to determine its filename
+  // For now, games are stored with their ID as the filename
+  // So if we found it, the fileKey is the game's ID
+  return { game: foundGame, fileKey: foundGame.id };
+}
+
+// Validation rules for game creation/update
+const gameValidation = [
   body('title').trim().notEmpty().withMessage('Title is required'),
-  body('filePath').trim().notEmpty().withMessage('File path is required'),
-  body('platformId').trim().notEmpty().withMessage('Platform ID is required'),
+  body('filePath').optional().trim(),
+  body('platformId').optional().trim(),
   body('collectionIds').optional().isArray().withMessage('Collection IDs must be an array'),
   body('tags').optional().isArray().withMessage('Tags must be an array'),
   body('metadata').optional().isObject().withMessage('Metadata must be an object'),
@@ -48,7 +74,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    const game = await storage.readEntity('games', id);
+    const { game } = await findGameAndFileKey(id);
     
     if (!game) {
       res.status(404).json({
@@ -73,7 +99,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/games - Create a new game
-router.post('/', createGameValidation, async (req: Request, res: Response) => {
+router.post('/', gameValidation, async (req: Request, res: Response) => {
   try {
     // Check for validation errors
     const errors = validationResult(req);
@@ -133,7 +159,7 @@ router.post('/', createGameValidation, async (req: Request, res: Response) => {
 });
 
 // PUT /api/games/:id - Update a game
-router.put('/:id', createGameValidation, async (req: Request, res: Response) => {
+router.put('/:id', gameValidation, async (req: Request, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -154,8 +180,9 @@ router.put('/:id', createGameValidation, async (req: Request, res: Response) => 
       return;
     }
 
-    const existingGame = await storage.readEntity<any>('games', id);
-    if (!existingGame) {
+    const { game: existingGame, fileKey } = await findGameAndFileKey(id);
+    
+    if (!existingGame || !fileKey) {
       res.status(404).json({
         success: false,
         error: 'Game not found',
@@ -166,12 +193,12 @@ router.put('/:id', createGameValidation, async (req: Request, res: Response) => 
     const updatedGame = {
       ...existingGame,
       ...req.body,
-      id: id, // Preserve ID
+      id: existingGame.id, // Preserve original ID
       created: existingGame.created, // Preserve creation date
       updated: new Date().toISOString(),
     };
 
-    await storage.writeEntity('games', id, updatedGame);
+    await storage.writeEntity('games', fileKey, updatedGame);
 
     res.json({
       success: true,
@@ -200,8 +227,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    const game = await storage.readEntity('games', id);
-    if (!game) {
+    const { game, fileKey } = await findGameAndFileKey(id);
+    
+    if (!game || !fileKey) {
       res.status(404).json({
         success: false,
         error: 'Game not found',
@@ -209,7 +237,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    await storage.deleteEntity('games', id);
+    await storage.deleteEntity('games', fileKey);
 
     res.json({
       success: true,

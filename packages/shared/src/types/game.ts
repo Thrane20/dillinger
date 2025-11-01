@@ -17,6 +17,8 @@ export interface Game {
     lastPlayed?: string; // ISO timestamp
     coverArt?: string; // Local file path to cover image
     screenshots?: string[]; // Array of local screenshot paths
+    primaryImage?: string; // Primary display image (from scraped metadata or coverArt)
+    backdropImage?: string; // Background image for hover effects
   };
   fileInfo: {
     size: number; // File size in bytes

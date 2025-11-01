@@ -1,0 +1,220 @@
+{
+  "id": "baldurs-gate-ii-throne-of-bhaal",
+  "slug": "baldurs-gate-ii-throne-of-bhaal",
+  "scraperData": {
+    "scraperId": "82",
+    "scraperType": "igdb",
+    "title": "Baldur's Gate II: Throne of Bhaal",
+    "alternativeTitles": [
+      "Baldur's Gate 2: Throne of Bhaal ",
+      "Throne of Bhaal",
+      "Baldur's Gate II: Tron Bhaala",
+      "BG2:ToB",
+      "Baldur's Gate II: Thron des Bhaal"
+    ],
+    "summary": "A storm of chaos and destruction thunders across the Sword Coast. As towns are laid to waste and great cities burn, there are whispered rumors that the Children of Bhaal are responsible.\nSoon the whispered rumors become panicked cries - if the prophecies of the Wise Alaundo are to be believed, there is greater suffering ahead. And should Bhaal somehow rise again, the earth itself will weep blood.\nIn the final chapter of the Bhaal saga, return to Baldur's Gate II: Shadows of Amn and unravel the mysteries of a dangerous new dungeon - Watcher's Keep.\nContinue with an exhilarating new adventure when you explore the unseen lands, encounter fierce villains, and gain powerful high-level abilities as you achieve your ultimate destiny in .. Baldur's Gate II: Throne of Bhaal.",
+    "releaseDate": "2001-06-21T00:00:00.000Z",
+    "platforms": [
+      {
+        "id": "6",
+        "name": "PC (Microsoft Windows)",
+        "abbreviation": "PC",
+        "category": "unknown"
+      },
+      {
+        "id": "14",
+        "name": "Mac",
+        "abbreviation": "Mac",
+        "category": "unknown"
+      }
+    ],
+    "genres": [
+      "Role-playing (RPG)",
+      "Strategy"
+    ],
+    "themes": [
+      "Fantasy",
+      "Open world"
+    ],
+    "gameModes": [
+      "Single player"
+    ],
+    "developers": [
+      "BioWare",
+      "BioWare Edmonton",
+      "MumboJumbo"
+    ],
+    "publishers": [
+      "Interplay Entertainment",
+      "Black Isle Studios",
+      "MacPlay"
+    ],
+    "userRating": 83.84784245652654,
+    "websites": [],
+    "videos": [
+      {
+        "name": "Trailer",
+        "videoId": "A6i0clyiyes",
+        "url": "https://www.youtube.com/watch?v=A6i0clyiyes"
+      }
+    ],
+    "screenshots": [
+      {
+        "id": "332984",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/sc74xk.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_0.jpg"
+      },
+      {
+        "id": "332986",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/sc74xm.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_1.jpg"
+      },
+      {
+        "id": "332985",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/sc74xl.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_2.jpg"
+      },
+      {
+        "id": "1205062",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scptty.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_3.jpg"
+      },
+      {
+        "id": "1205057",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttt.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_4.jpg"
+      },
+      {
+        "id": "1205059",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttv.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_5.jpg"
+      },
+      {
+        "id": "1205061",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttx.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_6.jpg"
+      },
+      {
+        "id": "1205053",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttp.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_7.jpg"
+      },
+      {
+        "id": "1205058",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttu.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_8.jpg"
+      },
+      {
+        "id": "1205060",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttw.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_9.jpg"
+      },
+      {
+        "id": "1205054",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttq.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_10.jpg"
+      },
+      {
+        "id": "1205055",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scpttr.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_11.jpg"
+      },
+      {
+        "id": "1205056",
+        "url": "https://images.igdb.com/igdb/image/upload/t_screenshot_big/scptts.jpg",
+        "width": 800,
+        "height": 600,
+        "imageType": "screenshot",
+        "localPath": "screenshot_12.jpg"
+      }
+    ],
+    "artworks": [],
+    "cover": {
+      "id": "100622",
+      "url": "https://images.igdb.com/igdb/image/upload/t_cover_big/co25n2.jpg",
+      "width": 800,
+      "height": 1066,
+      "imageType": "cover",
+      "localPath": "cover.jpg"
+    },
+    "ageRatings": [],
+    "franchises": [
+      "Dungeons & Dragons"
+    ],
+    "collections": [],
+    "dlcs": [],
+    "expansions": [],
+    "standaloneExpansions": [],
+    "remakes": [],
+    "remasters": [],
+    "similarGames": [
+      "Baldur's Gate II: Shadows of Amn",
+      "Pillars of Eternity",
+      "Planescape: Torment",
+      "Icewind Dale",
+      "Arcanum: of Steamworks and Magick Obscura",
+      "Icewind Dale II",
+      "Perfect World",
+      "Fire Emblem: Three Houses",
+      "Atelier Totori: The Adventurer of Arland",
+      "Neverwinter Nights"
+    ]
+  },
+  "localImages": {
+    "screenshots": [
+      "screenshot_0.jpg",
+      "screenshot_1.jpg",
+      "screenshot_2.jpg",
+      "screenshot_3.jpg",
+      "screenshot_4.jpg",
+      "screenshot_5.jpg",
+      "screenshot_6.jpg",
+      "screenshot_7.jpg",
+      "screenshot_8.jpg",
+      "screenshot_9.jpg",
+      "screenshot_10.jpg",
+      "screenshot_11.jpg",
+      "screenshot_12.jpg"
+    ],
+    "artworks": [],
+    "cover": "cover.jpg"
+  },
+  "savedAt": "2025-10-31T07:35:52.952Z",
+  "lastUpdated": "2025-10-31T07:35:52.952Z"
+}

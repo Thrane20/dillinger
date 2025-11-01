@@ -46,6 +46,12 @@ export default function RootLayout({
                       Library
                     </a>
                     <a
+                      href="/scrapers"
+                      className="px-3 py-2 rounded-xl transition-colors hover:text-primary hover:bg-primary-soft"
+                    >
+                      Scrapers
+                    </a>
+                    <a
                       href="/add-game"
                       className="px-3 py-2 rounded-xl transition-colors hover:text-primary hover:bg-primary-soft"
                     >
@@ -68,6 +74,12 @@ export default function RootLayout({
                       className="px-3 py-2 rounded-xl transition-colors hover:text-primary hover:bg-primary-soft"
                     >
                       Platforms
+                    </a>
+                    <a
+                      href="/settings"
+                      className="px-3 py-2 rounded-xl transition-colors hover:text-primary hover:bg-primary-soft"
+                    >
+                      Settings
                     </a>
                   </nav>
                   <div className="hidden lg:block ml-4">

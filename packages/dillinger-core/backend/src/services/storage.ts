@@ -120,12 +120,19 @@ export class JSONStorageService {
         (file) => file.endsWith('.json') && file !== 'index.json'
       );
 
-      const entities = await Promise.all(
-        jsonFiles.map(async (file) => {
+      const entities: T[] = [];
+      
+      // Read each file individually and skip if it doesn't exist or errors
+      for (const file of jsonFiles) {
+        try {
           const filePath = path.join(dirPath, file);
-          return fs.readJson(filePath);
-        })
-      );
+          const entity = await fs.readJson(filePath);
+          entities.push(entity);
+        } catch (error) {
+          // Skip files that can't be read (deleted, corrupted, etc.)
+          console.warn(`Skipping ${type}/${file}:`, (error as Error).message);
+        }
+      }
 
       return entities;
     } catch (error) {
@@ -276,18 +283,22 @@ export class JSONStorageService {
 
     games.forEach((game) => {
       // Platform index
-      if (!byPlatform[game.platformId]) {
-        byPlatform[game.platformId] = [];
+      if (game.platformId) {
+        if (!byPlatform[game.platformId]) {
+          byPlatform[game.platformId] = [];
+        }
+        byPlatform[game.platformId]!.push(game.id);
       }
-      byPlatform[game.platformId]!.push(game.id);
 
       // Collection index
-      game.collectionIds.forEach((collectionId) => {
-        if (!byCollection[collectionId]) {
-          byCollection[collectionId] = [];
-        }
-        byCollection[collectionId]!.push(game.id);
-      });
+      if (game.collectionIds && Array.isArray(game.collectionIds)) {
+        game.collectionIds.forEach((collectionId) => {
+          if (!byCollection[collectionId]) {
+            byCollection[collectionId] = [];
+          }
+          byCollection[collectionId]!.push(game.id);
+        });
+      }
 
       // Genre index
       game.metadata?.genre?.forEach((genre) => {
@@ -299,13 +310,15 @@ export class JSONStorageService {
       });
 
       // Tag index
-      game.tags.forEach((tag) => {
-        const tagKey = tag.toLowerCase();
-        if (!byTag[tagKey]) {
-          byTag[tagKey] = [];
-        }
-        byTag[tagKey]!.push(game.id);
-      });
+      if (game.tags && Array.isArray(game.tags)) {
+        game.tags.forEach((tag) => {
+          const tagKey = tag.toLowerCase();
+          if (!byTag[tagKey]) {
+            byTag[tagKey] = [];
+          }
+          byTag[tagKey]!.push(game.id);
+        });
+      }
 
       // Title search index
       const words = game.title.toLowerCase().split(/\s+/);

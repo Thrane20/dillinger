@@ -5,8 +5,13 @@ import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { JSONStorageService } from './services/storage.js';
+import { SettingsService } from './services/settings.js';
+import { getScraperManager } from './services/scrapers/index.js';
 import gamesLauncherRouter from './api/games-launcher.js';
 import gamesRouter from './api/games.js';
+import settingsRouter from './api/settings.js';
+import scrapersRouter from './api/scrapers.js';
+import imagesRouter from './api/images.js';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -19,9 +24,20 @@ app.set('trust proxy', trustProxyValue);
 
 // Initialize storage service
 const storage = JSONStorageService.getInstance();
+const settingsService = SettingsService.getInstance();
+const scraperManager = getScraperManager();
 
 // Security middleware
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        'img-src': ["'self'", 'data:', 'https:', 'http://localhost:3001'],
+      },
+    },
+  })
+);
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -97,6 +113,15 @@ app.use('/api/games', gamesRouter);
 // Game launcher routes
 app.use('/api/games/launch', gamesLauncherRouter);
 
+// Settings routes
+app.use('/api/settings', settingsRouter);
+
+// Scraper routes
+app.use('/api/scrapers', scrapersRouter);
+
+// Image serving routes
+app.use('/api/images', imagesRouter);
+
 // Basic 404 handler for API routes
 app.use('/api/*', (req, res) => {
   res.status(404).json({
@@ -129,6 +154,12 @@ async function startServer() {
   try {
     await storage.ensureDirectories();
     console.log('📁 Storage directories initialized');
+
+    // Initialize settings and scrapers
+    await settingsService.initialize();
+    const scraperSettings = await settingsService.getScraperSettings();
+    await scraperManager.initialize(scraperSettings);
+    console.log('⚙️  Settings and scrapers initialized');
 
     app.listen(PORT, () => {
       console.log(`🚀 Dillinger API server running on port ${PORT}`);
