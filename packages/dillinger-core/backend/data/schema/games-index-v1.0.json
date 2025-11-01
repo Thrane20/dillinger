@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dillinger.dev/schemas/v1.0/games-index.json",
+  "title": "GamesIndex",
+  "description": "Schema for the games index in the Dillinger game library",
+  "type": "object",
+  "required": ["count", "lastUpdated"],
+  "properties": {
+    "count": {
+      "type": "integer",
+      "description": "Total number of games",
+      "minimum": 0
+    },
+    "lastUpdated": {
+      "type": "string",
+      "description": "Last update timestamp",
+      "format": "date-time"
+    },
+    "byPlatform": {
+      "type": "object",
+      "description": "Games indexed by platform ID",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": "Game slug"
+        }
+      }
+    },
+    "byCollection": {
+      "type": "object",
+      "description": "Games indexed by collection ID",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": "Game slug"
+        }
+      }
+    },
+    "byGenre": {
+      "type": "object",
+      "description": "Games indexed by genre",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": "Game slug"
+        }
+      }
+    },
+    "byTag": {
+      "type": "object",
+      "description": "Games indexed by tag",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": "Game slug"
+        }
+      }
+    },
+    "search": {
+      "type": "object",
+      "description": "Search indexes",
+      "properties": {
+        "titles": {
+          "type": "object",
+          "description": "Title search index",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Game slug"
+            }
+          }
+        },
+        "fuzzy": {
+          "type": "object",
+          "description": "Fuzzy search index",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Game slug"
+            }
+          }
+        }
+      }
+    },
+    "recent": {
+      "type": "array",
+      "description": "Recently added games (newest first)",
+      "items": {
+        "type": "string",
+        "description": "Game slug"
+      }
+    },
+    "popular": {
+      "type": "array",
+      "description": "Most played games",
+      "items": {
+        "type": "string",
+        "description": "Game slug"
+      }
+    }
+  }
+}

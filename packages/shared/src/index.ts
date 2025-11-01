@@ -6,3 +6,4 @@ export * from './types/scraper.js';
 // Export utilities
 export * from './utils/validation.js';
 export * from './utils/slug.js';
+export * from './utils/time.js';

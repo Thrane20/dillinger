@@ -5,7 +5,6 @@ import type {
   GetScraperSettingsResponse,
   UpdateScraperSettingsRequest,
   UpdateScraperSettingsResponse,
-  ScraperType,
 } from '@dillinger/shared';
 import { SettingsService } from '../services/settings.js';
 import { getScraperManager } from '../services/scrapers/index.js';

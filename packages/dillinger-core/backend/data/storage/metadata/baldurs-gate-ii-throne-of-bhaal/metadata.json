@@ -1,4 +1,5 @@
 {
+  "$schema": "../../../../schema/metadata-v1.0.json",
   "id": "baldurs-gate-ii-throne-of-bhaal",
   "slug": "baldurs-gate-ii-throne-of-bhaal",
   "scraperData": {

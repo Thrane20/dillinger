@@ -1,0 +1,249 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dillinger.dev/schemas/v1.0/game.json",
+  "title": "Game",
+  "description": "Schema for a game entry in the Dillinger game library",
+  "type": "object",
+  "required": ["id", "title", "filePath", "platformId", "fileInfo"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier (UUID v4). Pattern validates UUID v4 format: 8-4-4-4-12 hexadecimal characters with version 4 indicator and variant bits.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "slug": {
+      "type": "string",
+      "description": "URL-friendly identifier (auto-generated from title or manually set)"
+    },
+    "title": {
+      "type": "string",
+      "description": "Display name of the game",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "filePath": {
+      "type": "string",
+      "description": "Relative path to game directory or executable"
+    },
+    "platformId": {
+      "type": "string",
+      "description": "Reference to Platform entity"
+    },
+    "collectionIds": {
+      "type": "array",
+      "description": "Array of Collection UUIDs",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "tags": {
+      "type": "array",
+      "description": "User-defined tags",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Game metadata",
+      "properties": {
+        "igdbId": {
+          "type": "integer",
+          "description": "IGDB API ID for metadata linking"
+        },
+        "metadataId": {
+          "type": "string",
+          "description": "Reference to SavedGameMetadata ID"
+        },
+        "description": {
+          "type": "string",
+          "description": "Game description"
+        },
+        "genre": {
+          "type": "array",
+          "description": "Game genres",
+          "items": {
+            "type": "string"
+          }
+        },
+        "developer": {
+          "type": "string",
+          "description": "Developer name"
+        },
+        "publisher": {
+          "type": "string",
+          "description": "Publisher name"
+        },
+        "releaseDate": {
+          "type": "string",
+          "description": "ISO date string",
+          "format": "date"
+        },
+        "rating": {
+          "type": "number",
+          "description": "User rating 1-10",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "playTime": {
+          "type": "number",
+          "description": "Total hours played"
+        },
+        "playCount": {
+          "type": "integer",
+          "description": "Number of times the game has been launched"
+        },
+        "lastPlayed": {
+          "type": "string",
+          "description": "ISO timestamp of last launch",
+          "format": "date-time"
+        },
+        "coverArt": {
+          "type": "string",
+          "description": "Local file path to cover image"
+        },
+        "screenshots": {
+          "type": "array",
+          "description": "Array of local screenshot paths",
+          "items": {
+            "type": "string"
+          }
+        },
+        "primaryImage": {
+          "type": "string",
+          "description": "Primary display image"
+        },
+        "backdropImage": {
+          "type": "string",
+          "description": "Background image for hover effects"
+        },
+        "similarGames": {
+          "type": "array",
+          "description": "Similar games",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "gameId": {
+                "type": "string"
+              },
+              "scraperId": {
+                "type": "string"
+              },
+              "scraperType": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "fileInfo": {
+      "type": "object",
+      "description": "File information",
+      "required": ["size", "lastModified"],
+      "properties": {
+        "size": {
+          "type": "integer",
+          "description": "File size in bytes",
+          "minimum": 0
+        },
+        "lastModified": {
+          "type": "string",
+          "description": "ISO timestamp",
+          "format": "date-time"
+        },
+        "checksum": {
+          "type": "string",
+          "description": "File integrity hash"
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "description": "Game-specific settings",
+      "properties": {
+        "wine": {
+          "type": "object",
+          "description": "Wine configuration",
+          "properties": {
+            "version": {
+              "type": "string",
+              "description": "Wine version for Windows games"
+            },
+            "prefix": {
+              "type": "string",
+              "description": "Wine prefix configuration"
+            },
+            "dlls": {
+              "type": "object",
+              "description": "DLL overrides",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "emulator": {
+          "type": "object",
+          "description": "Emulator configuration",
+          "properties": {
+            "core": {
+              "type": "string",
+              "description": "RetroArch core name"
+            },
+            "settings": {
+              "type": "object",
+              "description": "Emulator-specific settings"
+            }
+          }
+        },
+        "launch": {
+          "type": "object",
+          "description": "Launch configuration",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Launch command relative to game directory"
+            },
+            "arguments": {
+              "type": "array",
+              "description": "Launch arguments",
+              "items": {
+                "type": "string"
+              }
+            },
+            "environment": {
+              "type": "object",
+              "description": "Environment variables",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": "string",
+              "description": "Working directory"
+            }
+          }
+        }
+      }
+    },
+    "created": {
+      "type": "string",
+      "description": "Creation timestamp",
+      "format": "date-time"
+    },
+    "updated": {
+      "type": "string",
+      "description": "Last update timestamp",
+      "format": "date-time"
+    }
+  }
+}

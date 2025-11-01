@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema/settings-v1.0.json",
   "scrapers": {
     "igdb": {
       "clientId": "lpzomulxapy5mrfftuxcnwidw5ob2q",

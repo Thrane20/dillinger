@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dillinger.dev/schemas/v1.0/settings.json",
+  "title": "Settings",
+  "description": "Schema for application settings in the Dillinger game library",
+  "type": "object",
+  "properties": {
+    "scrapers": {
+      "type": "object",
+      "description": "Scraper configurations",
+      "properties": {
+        "igdb": {
+          "type": "object",
+          "description": "IGDB scraper configuration",
+          "properties": {
+            "clientId": {
+              "type": "string",
+              "description": "IGDB API client ID"
+            },
+            "clientSecret": {
+              "type": "string",
+              "description": "IGDB API client secret"
+            }
+          }
+        }
+      }
+    }
+  }
+}

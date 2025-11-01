@@ -1,4 +1,5 @@
 {
+  "$schema": "../../../schema/game-v1.0.json",
   "id": "test-adventure-game",
   "slug": "test-adventure-game",
   "title": "Test Adventure Game",
