@@ -8,7 +8,7 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "Unique identifier (UUID v4)",
+      "description": "Unique identifier (UUID v4). Pattern validates UUID v4 format: 8-4-4-4-12 hexadecimal characters with version 4 indicator and variant bits.",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "slug": {

@@ -38,6 +38,8 @@ export function formatLastPlayed(isoTimestamp: string | undefined): string {
   }
 
   if (diffDays < 365) {
+    // Note: Using a 30-day approximation for month calculation
+    // for simplicity and consistency
     const months = Math.floor(diffDays / 30);
     return months === 1 ? '1 month ago' : `${months} months ago`;
   }
