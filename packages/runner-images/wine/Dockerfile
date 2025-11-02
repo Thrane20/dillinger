@@ -84,8 +84,6 @@ RUN pacman -S --noconfirm --needed \
     lib32-libxcomposite \
     libxrender \
     lib32-libxrender \
-    # OpenGL/Vulkan support
-    lib32-nvidia-utils \
     # System utilities
     ca-certificates \
     curl \
@@ -105,6 +103,10 @@ RUN pacman -S --noconfirm --needed \
     p7zip \
     unrar \
     && pacman -Scc --noconfirm
+
+# Optionally install NVIDIA utilities if needed (won't fail if unavailable)
+# This allows the image to work on both NVIDIA and non-NVIDIA systems
+RUN pacman -S --noconfirm lib32-nvidia-utils || echo "NVIDIA utils not available, skipping..."
 
 # Install NVIDIA drivers detection script (inspired by GoW)
 # This script will detect and configure NVIDIA drivers at runtime if needed
