@@ -9,11 +9,22 @@
   "platformId": "linux-native",
   "filePath": "games/test-gui-game",
   "metadata": {
-    "genre": ["Test", "Utility"],
+    "genre": [
+      "Test",
+      "Utility"
+    ],
     "description": "A test game that opens a GUI window to verify X11/Wayland display forwarding is working correctly.",
-    "tags": ["test", "gui", "x11", "wayland"],
+    "tags": [
+      "test",
+      "gui",
+      "x11",
+      "wayland"
+    ],
     "coverImage": "",
-    "screenshots": []
+    "screenshots": [],
+    "lastPlayed": "2025-11-02T07:55:36.713Z",
+    "playCount": 2,
+    "playTime": 0.0030555555555555557
   },
   "settings": {
     "launch": {

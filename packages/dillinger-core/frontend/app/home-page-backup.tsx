@@ -1,0 +1,225 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+
+interface HealthStatus {
+  status: string;
+  timestamp: string;
+  version: string;
+  storage: string;
+  dataPath: string;
+  uptime?: number;
+  checks?: {
+    storage: boolean;
+    docker: boolean;
+    metadata: boolean;
+  };
+  counts?: {
+    games: number;
+    platforms: number;
+    sessions: number;
+    collections: number;
+  };
+}
+
+export default function HomePage() {
+  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function checkHealth() {
+      try {
+        const response = await fetch('/api/health');
+        if (response.ok) {
+          const data = await response.json();
+          setHealthStatus(data);
+        }
+      } catch (err) {
+        // Silently handle errors - status shown in footer
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    checkHealth();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-10 transition-colors duration-300">
+      {/* Welcome Section */}
+      <div className="neumorphic-panel text-center space-y-5">
+        <h2 className="text-4xl font-bold text-text">Welcome to Dillinger</h2>
+        <p className="text-lg text-muted max-w-3xl mx-auto">
+          "You shouldn't have come back, Flynn." - Master Control Program
+        </p>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        <div className="card">
+          <div className="card-body">
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-soft text-primary">
+                <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                  />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="flex-1 space-y-2">
+                <h3 className="text-lg font-semibold text-text">Your Games</h3>
+                <p className="text-sm text-muted">
+                  Browse your game library and launch games with one click.
+                </p>
+                <a href="/games" className="btn-primary">
+                  View Games
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-body">
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/15 text-secondary">
+                <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+              </div>
+              <div className="flex-1 space-y-2">
+                <h3 className="text-lg font-semibold text-text">Add Games</h3>
+                <p className="text-sm text-muted">
+                  Add games from your file system and automatically fetch metadata from external sources.
+                </p>
+                <a href="/add-game" className="btn-secondary">
+                  Add Game
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-body">
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/20 text-accent">
+                <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="flex-1 space-y-2">
+                <h3 className="text-lg font-semibold text-text">Platforms</h3>
+                <p className="text-sm text-muted">
+                  Configure gaming platforms and execution environments for different game types.
+                </p>
+                <a href="/platforms" className="btn-accent">
+                  View Platforms
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card md:col-span-2 xl:col-span-1">
+          <div className="card-body">
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/15 text-secondary">
+                <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                  />
+                </svg>
+              </div>
+              <div className="flex-1 space-y-2">
+                <h3 className="text-lg font-semibold text-text">Collections</h3>
+                <p className="text-sm text-muted">
+                  Organize your games into collections for better management and discovery.
+                </p>
+                <a href="/collections" className="btn-secondary">
+                  Create Collection
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* System Information */}
+      {healthStatus && (
+        <div className="card">
+          <div className="card-header">
+            <h3 className="text-lg font-semibold text-text">System Information</h3>
+          </div>
+          <div className="card-body">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted">Version</dt>
+                <dd className="mt-1 text-sm font-medium text-text">{healthStatus.version}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted">Storage</dt>
+                <dd className="mt-1 text-sm font-medium text-text">{healthStatus.storage}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted">Data Path</dt>
+                <dd className="mt-1 text-sm font-medium text-text font-mono">{healthStatus.dataPath}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted">Uptime</dt>
+                <dd className="mt-1 text-sm font-medium text-text">
+                  {healthStatus.uptime ? `${Math.floor(healthStatus.uptime / 60)} minutes` : 'Unknown'}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      )}
+
+      {/* Getting Started */}
+      {(!healthStatus?.counts || (healthStatus.counts.games === 0 && healthStatus.counts.platforms === 0)) && (
+        <div className="card">
+          <div className="card-header">
+            <h3 className="text-lg font-semibold text-text">Getting Started</h3>
+          </div>
+          <div className="card-body">
+            <div className="prose max-w-none">
+              <p className="text-muted">
+                Welcome to Dillinger! To get started with your game library:
+              </p>
+              <ol className="list-decimal list-inside space-y-2 text-muted mt-4">
+                <li>First, check out the available platforms and configure any you need</li>
+                <li>Add your first game by clicking "Add Game" and selecting a game file</li>
+                <li>Organize your games into collections for better management</li>
+                <li>Launch games directly from your library with one click</li>
+              </ol>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <a href="/platforms" className="btn-primary">
+                  View Platforms
+                </a>
+                <a href="/add-game" className="btn-neutral">
+                  Add Your First Game
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

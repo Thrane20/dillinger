@@ -1,7 +1,6 @@
 {
-  "$schema": "../../../schema/games-index-v1.0.json",
   "count": 7,
-  "lastUpdated": "2025-11-01T07:18:25.277Z",
+  "lastUpdated": "2025-11-02T07:55:40.003Z",
   "byPlatform": {
     "wine": [
       "diablo"
@@ -187,6 +186,7 @@
     "test-gui-game"
   ],
   "popular": [
-    "test-adventure-game"
+    "test-adventure-game",
+    "test-gui-game"
   ]
 }
