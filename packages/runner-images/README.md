@@ -37,14 +37,29 @@ Runs native Linux games and applications.
 - AppImage games
 - Flatpak games
 
-### Wine/Proton (`wine-proton/`)
-Runs Windows games via Wine or Proton.
+### Wine (`wine/`)
+Runs Windows games and applications via Wine.
+
+**Base:** Arch Linux (latest)
 
 **Features:**
-- Wine Staging latest
-- DXVK for DirectX to Vulkan translation
-- Proton compatibility layer
-- Windows game launcher support
+- Wine latest with Wine Mono and Gecko
+- X11 display support
+- PulseAudio for audio
+- OpenGL and Vulkan support (64-bit and 32-bit)
+- NVIDIA GPU auto-detection and configuration
+- Installer support for Windows executables (.exe, .msi)
+- Winetricks for additional Windows components
+- Comprehensive Windows gaming libraries
+
+**Example use cases:**
+- Install Windows games via setup.exe
+- Run pre-installed Windows games
+- Windows applications
+- Legacy Windows games
+
+### Wine/Proton (`wine-proton/`) - Coming Soon
+Future runner with Proton support for enhanced Windows game compatibility.
 
 ## Usage
 
@@ -54,8 +69,8 @@ Runs Windows games via Wine or Proton.
 # Build Linux native runner
 docker build -t dillinger/runner-linux-native:latest ./packages/runner-images/linux-native
 
-# Build Wine/Proton runner
-docker build -t dillinger/runner-wine-proton:latest ./packages/runner-images/wine-proton
+# Build Wine runner
+docker build -t dillinger/runner-wine:latest ./packages/runner-images/wine
 ```
 
 ### Running a Game
@@ -73,11 +88,26 @@ docker run -it --rm \
 
 # Example: Run a Windows game via Wine
 docker run -it --rm \
-  -v /path/to/windows/game:/game:ro \
   -v /path/to/wine/prefix:/wineprefix:rw \
-  -e GAME_EXECUTABLE="/game/game.exe" \
+  -v /path/to/saves:/saves:rw \
+  -e GAME_EXECUTABLE="/wineprefix/drive_c/Program Files/MyGame/game.exe" \
   -e WINEPREFIX=/wineprefix \
-  dillinger/runner-wine-proton:latest
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  --device /dev/dri \
+  dillinger/runner-wine:latest
+
+# Example: Install a Windows game
+docker run -it --rm \
+  -v /path/to/installer:/installers:ro \
+  -v /path/to/wine/prefix:/wineprefix:rw \
+  -e INSTALLER_MODE=true \
+  -e INSTALLER_PATH="/installers/setup.exe" \
+  -e WINEPREFIX=/wineprefix \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  --device /dev/dri \
+  dillinger/runner-wine:latest
 ```
 
 ## Environment Variables
@@ -93,11 +123,19 @@ docker run -it --rm \
 - `DISPLAY` - X11 display (required for GUI games)
 - `PULSE_SERVER` - PulseAudio server (optional)
 
-### Wine/Proton Specific
+### Wine Specific
 
 - `WINEPREFIX` - Wine prefix directory (default: `/wineprefix`)
 - `WINEARCH` - Wine architecture: win32 or win64 (default: win64)
-- `PROTON_VERSION` - Specific Proton version to use (optional)
+- `WINEDEBUG` - Wine debug level (default: `-all` for no debug output)
+- `DISPLAY` - X11 display (required for GUI games)
+
+#### Installer Mode
+
+- `INSTALLER_MODE` - Set to `true` to run an installer instead of a game
+- `INSTALLER_PATH` - Path to the Windows installer executable (required when INSTALLER_MODE=true)
+- `INSTALLER_ARGS` - Arguments to pass to the installer (optional)
+- `KEEP_ALIVE` - Set to `true` to keep container running after installation (optional)
 
 ## Volume Mounts
 

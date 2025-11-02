@@ -58,7 +58,7 @@ dillinger/
 │   ├── runner-types/        # TypeScript types for game execution
 │   ├── runner-images/       # Docker images for running games
 │   │   ├── linux-native/    # Native Linux game runner
-│   │   └── wine-proton/     # Windows game runner (future)
+│   │   └── wine/            # Windows game runner via Wine
 │   ├── validation/          # Input validation schemas
 │   └── shared-legacy/       # Legacy shared utilities
 ├── docker/                  # Docker configurations
