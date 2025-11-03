@@ -304,6 +304,7 @@ router.post('/save', async (req, res) => {
     const game: Game = {
       id: slug,
       title: gameData.title,
+      slug: gameData.slug || slug,
       filePath: '', // Empty until user configures launch
       platformId: '', // Empty until user configures platform
       collectionIds: [],

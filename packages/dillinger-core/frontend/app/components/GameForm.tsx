@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { MagnifyingGlassIcon, FolderIcon } from '@heroicons/react/24/outline';
+import InstallGameDialog from './InstallGameDialog';
+import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
+import FileExplorer from './FileExplorer';
 
 interface GameFormData {
   id?: string;
   title: string;
   slug?: string;
-  filePath: string;
   platformId: string;
   tags: string;
   metadata: {
@@ -57,10 +60,13 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [showImageSelector, setShowImageSelector] = useState<'primary' | 'backdrop' | null>(null);
+  const [showInstallDialog, setShowInstallDialog] = useState(false);
+  const [showShortcutDialog, setShowShortcutDialog] = useState(false);
+  const [showFileExplorer, setShowFileExplorer] = useState(false);
+  const [discoveredExecutables, setDiscoveredExecutables] = useState<string[]>([]);
   const [formData, setFormData] = useState<GameFormData>({
     title: '',
     slug: '',
-    filePath: '',
     platformId: '',
     tags: '',
     metadata: {
@@ -99,7 +105,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               setFormData({
                 id: game.id,
                 title: game.title || '',
-                filePath: game.filePath || '',
+                slug: game.slug || '',
                 platformId: game.platformId || '',
                 tags: Array.isArray(game.tags) ? game.tags.join(', ') : '',
                 metadata: {
@@ -136,6 +142,53 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       loadGameData();
     }
   }, [mode, gameId]);
+
+  // Poll for installation status when installation is in progress
+  useEffect(() => {
+    if (mode === 'edit' && gameId && formData._originalGame?.installation?.status === 'installing') {
+      const pollInstallationStatus = async () => {
+        try {
+          const response = await fetch(`/api/games/${gameId}/install/status`);
+          if (response.ok) {
+            const result = await response.json();
+            
+            if (result.success) {
+              if (result.status === 'installed' && result.executables) {
+                setDiscoveredExecutables(result.executables);
+                
+                if (result.autoSelectedExecutable) {
+                  // Auto-update the filePath with the discovered executable
+                  setFormData(prev => ({
+                    ...prev,
+                    filePath: `${formData._originalGame?.installation?.installPath}/${result.autoSelectedExecutable}`
+                  }));
+                }
+                
+                // Reload the page to show the updated status
+                setTimeout(() => window.location.reload(), 1000);
+              } else if (result.status === 'failed') {
+                // Reload to show failed status
+                setTimeout(() => window.location.reload(), 1000);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to check installation status:', err);
+        }
+      };
+
+      // Poll every 3 seconds
+      const interval = setInterval(pollInstallationStatus, 3000);
+      
+      // Initial check
+      pollInstallationStatus();
+      
+      return () => clearInterval(interval);
+    }
+    
+    // Return undefined if condition not met
+    return undefined;
+  }, [mode, gameId, formData._originalGame?.installation?.status]);
 
   // Load available images from scraped metadata
   useEffect(() => {
@@ -196,7 +249,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       
       const payload = {
         title: formData.title,
-        filePath: formData.filePath,
         platformId: formData.platformId,
         tags,
         collectionIds: formData._originalGame?.collectionIds || [],
@@ -246,7 +298,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       if (onSuccess) {
         onSuccess();
       } else {
-        router.push('/games');
+        const savedGameId = result.data?.id || gameId;
+        router.push(`/?scrollTo=${savedGameId}`);
         router.refresh();
       }
     } catch (err) {
@@ -378,6 +431,44 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     }
   };
 
+  const handleSelectShortcut = (shortcut: ShortcutInfo) => {
+    setFormData(prev => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        launch: {
+          ...prev.settings?.launch,
+          command: shortcut.target || prev.settings?.launch?.command || '',
+          arguments: shortcut.arguments ? [shortcut.arguments] : prev.settings?.launch?.arguments || [],
+          workingDirectory: shortcut.workingDirectory || prev.settings?.launch?.workingDirectory || '',
+        }
+      }
+    }));
+    setShowShortcutDialog(false);
+  };
+
+  const handleBrowseInstallDirectory = () => {
+    setShowShortcutDialog(false);
+    setShowFileExplorer(true);
+  };
+
+  const handleFileExplorerSelect = (path: string) => {
+    // Set the selected file as launch command
+    setFormData(prev => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        launch: {
+          ...prev.settings?.launch,
+          command: path,
+          workingDirectory: prev.settings?.launch?.workingDirectory || 
+            path.substring(0, path.lastIndexOf('/')) || '',
+        }
+      }
+    }));
+    setShowFileExplorer(false);
+  };
+
   return (
     <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-6">
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
@@ -468,22 +559,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             />
           </div>
 
-          {/* File Path */}
-          <div>
-            <label htmlFor="filePath" className="block text-sm font-medium text-muted mb-2">
-              File Path
-            </label>
-            <input
-              type="text"
-              id="filePath"
-              name="filePath"
-              value={formData.filePath}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="/path/to/game/executable"
-            />
-          </div>
-
           {/* Platform */}
           <div>
             <label htmlFor="platformId" className="block text-sm font-medium text-muted mb-2">
@@ -497,8 +572,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
             >
               <option value="">Select a platform...</option>
-              <option value="native">Native (Linux)</option>
-              <option value="wine">Wine (Windows)</option>
+              <option value="linux-native">Native (Linux)</option>
+              <option value="windows-wine">Wine (Windows)</option>
               <option value="proton">Proton (Steam)</option>
               <option value="dosbox">DOSBox</option>
               <option value="scummvm">ScummVM</option>
@@ -736,6 +811,92 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
         )}
 
+        {/* Installation Section */}
+        {mode === 'edit' && !formData._originalGame?.installation?.status && (
+          <div className="space-y-4 mb-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <p className="text-sm text-muted mb-3">
+                This game hasn't been installed yet. Click the button below to run the installer.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowInstallDialog(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Install Game
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'edit' && formData._originalGame?.installation?.status === 'installed' && (
+          <div className="space-y-4 mb-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+              <p className="text-sm text-green-700 dark:text-green-300">
+                ✓ Game installed at: {formData._originalGame.installation.installPath}
+              </p>
+              {formData._originalGame.installation.installedAt && (
+                <p className="text-xs text-muted mt-1">
+                  Installed: {new Date(formData._originalGame.installation.installedAt).toLocaleString()}
+                </p>
+              )}
+              {discoveredExecutables.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-green-700 dark:text-green-300 mb-1">
+                    Discovered Executables:
+                  </p>
+                  <ul className="text-xs text-muted space-y-1">
+                    {discoveredExecutables.map((exe, index) => (
+                      <li key={index} className="font-mono">
+                        {index === 0 && '→ '}{exe} {index === 0 && '(auto-selected)'}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {mode === 'edit' && formData._originalGame?.installation?.status === 'installing' && (
+          <div className="space-y-4 mb-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+              <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                ⏳ Installation in progress... Follow the installer wizard on your display.
+              </p>
+              <p className="text-xs text-muted mt-1">
+                Container ID: {formData._originalGame.installation.containerId}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {mode === 'edit' && formData._originalGame?.installation?.status === 'failed' && (
+          <div className="space-y-4 mb-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+              <p className="text-sm text-red-700 dark:text-red-300 mb-2">
+                ✗ Installation failed
+              </p>
+              {formData._originalGame.installation.error && (
+                <p className="text-xs text-muted">
+                  Error: {formData._originalGame.installation.error}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowInstallDialog(true)}
+                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Retry Installation
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Launch Settings */}
         <div className="space-y-4 mb-6">
           <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
@@ -744,15 +905,39 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             <label htmlFor="settings.launch.command" className="block text-sm font-medium text-muted mb-2">
               Launch Command
             </label>
-            <input
-              type="text"
-              id="settings.launch.command"
-              name="settings.launch.command"
-              value={formData.settings?.launch?.command || ''}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="./start.sh or game.exe"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                id="settings.launch.command"
+                name="settings.launch.command"
+                value={formData.settings?.launch?.command || ''}
+                onChange={handleChange}
+                className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                placeholder="./start.sh or game.exe"
+              />
+              {formData._originalGame?.installation?.status === 'installed' && formData._originalGame?.installation?.installPath && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowShortcutDialog(true)}
+                    className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-1"
+                    title="Search for shortcut files"
+                  >
+                    <MagnifyingGlassIcon className="w-4 h-4" />
+                    Shortcuts
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFileExplorer(true)}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
+                    title="Browse installation directory"
+                  >
+                    <FolderIcon className="w-4 h-4" />
+                    Browse
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           <div>
@@ -786,7 +971,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               if (onCancel) {
                 onCancel();
               } else {
-                router.push('/games');
+                router.push('/');
               }
             }}
             className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
@@ -795,6 +980,43 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </button>
         </div>
       </div>
+
+      {/* Installation Dialog */}
+      {showInstallDialog && gameId && formData.platformId && (
+        <InstallGameDialog
+          gameId={gameId}
+          platformId={formData.platformId}
+          onClose={() => setShowInstallDialog(false)}
+          onSuccess={() => {
+            setSuccessMessage('Installation started! Follow the wizard on your display.');
+            // Reload the game data to show installation status
+            window.location.reload();
+          }}
+        />
+      )}
+
+      {/* Shortcut Selector Dialog */}
+      {showShortcutDialog && gameId && formData._originalGame?.installation?.installPath && (
+        <ShortcutSelectorDialog
+          gameId={gameId}
+          installPath={formData._originalGame.installation.installPath}
+          isOpen={showShortcutDialog}
+          onClose={() => setShowShortcutDialog(false)}
+          onSelectShortcut={handleSelectShortcut}
+          onBrowseManually={handleBrowseInstallDirectory}
+        />
+      )}
+
+      {/* File Explorer for browsing installation directory */}
+      {showFileExplorer && formData._originalGame?.installation?.installPath && (
+        <FileExplorer
+          isOpen={showFileExplorer}
+          onClose={() => setShowFileExplorer(false)}
+          onSelect={handleFileExplorerSelect}
+          selectMode="file"
+          title="Select Game Executable"
+        />
+      )}
     </form>
   );
 }

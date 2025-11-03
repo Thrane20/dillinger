@@ -166,7 +166,7 @@ EXPOSE 4000
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV BACKEND_PORT=4001
-ENV DATA_PATH=/data
+ENV DILLINGER_ROOT=/data
 ENV FRONTEND_URL=http://localhost:4000
 
 # Health check - using node instead of curl

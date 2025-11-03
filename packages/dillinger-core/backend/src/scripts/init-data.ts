@@ -13,7 +13,8 @@ import { JSONStorageService } from '../services/storage.js';
 import type { Platform } from '@dillinger/shared';
 import { generateUUID, createTimestamp } from '@dillinger/shared';
 
-const DATA_PATH = process.env.DATA_PATH || '/data';
+// Use the same logic as storage service - points to dillinger_root volume
+const DATA_PATH = process.env.DILLINGER_ROOT || '/data';
 
 async function initializeDataDirectories() {
   console.log('🗂️  Initializing Dillinger data directories...');

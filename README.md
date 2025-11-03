@@ -126,12 +126,24 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
    pnpm run build:shared
    ```
 
-4. **Start development servers:**
+4. **Create the foundational Docker volume:**
+   ```bash
+   # The dillinger_root volume is required for all data storage
+   # In development, it will be auto-created on first run, but you can create it manually:
+   docker volume create \
+     --driver local \
+     --opt type=none \
+     --opt device=$(pwd)/packages/dillinger-core/backend/data \
+     --opt o=bind \
+     dillinger_root
+   ```
+
+5. **Start development servers:**
    ```bash
    pnpm run dev
    ```
 
-5. **Open your browser:**
+6. **Open your browser:**
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:3001
    - Health Check: http://localhost:3001/api/health
@@ -141,12 +153,17 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
 For a complete containerized development environment:
 
 ```bash
+# First, ensure the dillinger_root volume exists
+docker volume create dillinger_root
+
 # Start all services with Docker Compose
 pnpm run docker:dev
 
 # Stop all services
 pnpm run docker:down
 ```
+
+**Note**: The `dillinger_root` volume is the foundational volume where all JSON database files are stored. See [docs/DILLINGER_ROOT_VOLUME.md](docs/DILLINGER_ROOT_VOLUME.md) for detailed information.
 
 ## 📚 Usage
 

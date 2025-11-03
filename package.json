@@ -15,11 +15,12 @@
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
     "setup": "pnpm install && pnpm run build:shared && pnpm run type-check",
     "build:shared": "pnpm --filter=@dillinger/runner-types --filter=@dillinger/validation run build",
-    "dev:core": "pnpm --filter=@dillinger/core run dev",
-    "dev:runner": "pnpm --filter=@dillinger/runner run dev",
-    "docker:dev": "docker-compose -f docker-compose.dev.yml up --build",
-    "docker:down": "docker-compose -f docker-compose.dev.yml down",
-    "docker:runner": "docker-compose -f docker-compose.runner.yml up --build"
+    "docker:build:runners": "pnpm run docker:build:runner:linux-native && pnpm run docker:build:runner:wine",
+    "docker:build:runner:linux-native": "cd packages/runner-images/linux-native && ./build.sh",
+    "docker:build:runner:wine": "cd packages/runner-images/wine && ./build.sh",
+    "docker:build:runners:no-cache": "pnpm run docker:build:runner:linux-native:no-cache && pnpm run docker:build:runner:wine:no-cache",
+    "docker:build:runner:linux-native:no-cache": "cd packages/runner-images/linux-native && docker build --no-cache --tag dillinger/runner-linux-native:latest --file Dockerfile .",
+    "docker:build:runner:wine:no-cache": "cd packages/runner-images/wine && docker build --no-cache --tag dillinger/runner-wine:latest ."
   },
   "keywords": [
     "game-library",

@@ -4,7 +4,9 @@ import fs from 'fs-extra';
 import path from 'path';
 import type { ScraperSettings } from '@dillinger/shared';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || path.join(process.cwd(), 'data');
+// Use the same DILLINGER_ROOT logic as storage service
+// This MUST point to the dillinger_root Docker volume mount point
+const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
 const SETTINGS_PATH = path.join(DILLINGER_ROOT, 'storage', 'settings.json');
 
 export interface AppSettings {

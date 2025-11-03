@@ -42,6 +42,19 @@ export interface LaunchGameRequest {
   };
 }
 
+export interface InstallGameRequest {
+  installerPath: string; // Path to installer file (exe, msi, etc.)
+  installPath: string; // Target installation directory
+  platformId: string; // Platform to use for installation
+}
+
+export interface InstallGameResponse {
+  success: boolean;
+  containerId?: string;
+  message?: string;
+  error?: string;
+}
+
 export interface CreateCollectionRequest {
   name: string;
   description?: string;

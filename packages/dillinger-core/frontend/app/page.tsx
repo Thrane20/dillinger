@@ -138,21 +138,24 @@ export default function GamesPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const scrollTo = params.get('scrollTo');
-    if (scrollTo && games.length > 0) {
-      // Wait a bit for the DOM to render
-      setTimeout(() => {
-        const element = document.getElementById(`game-${scrollTo}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Add a highlight effect
-          element.classList.add('ring-4', 'ring-blue-500');
-          setTimeout(() => {
-            element.classList.remove('ring-4', 'ring-blue-500');
-          }, 2000);
-        }
-      }, 100);
+    if (scrollTo) {
+      // If we have a scrollTo param, reload games to ensure the new game is in the list
+      loadGames().then(() => {
+        // Wait a bit for the DOM to render
+        setTimeout(() => {
+          const element = document.getElementById(`game-${scrollTo}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Add a highlight effect
+            element.classList.add('ring-4', 'ring-blue-500');
+            setTimeout(() => {
+              element.classList.remove('ring-4', 'ring-blue-500');
+            }, 2000);
+          }
+        }, 100);
+      });
     }
-  }, [games]);
+  }, []); // Empty dependency array - only run on mount
 
   async function loadGames() {
     try {
@@ -461,7 +464,8 @@ export default function GamesPage() {
             const session = sessions[game.id];
             const isLaunching = launching[game.id];
             const isRunning = session && session.status === 'running';
-            const isConfigured = game.filePath && game.platformId; // Game is configured if it has filePath and platform
+            // Game is configured if it has a launch command set (either via installation or manual config)
+            const isConfigured = game.platformId && game.settings?.launch?.command;
             const primaryImage = game.metadata?.primaryImage;
             
             // Check if any game is currently running

@@ -1,7 +1,10 @@
 {
-  "count": 7,
-  "lastUpdated": "2025-11-02T07:55:40.003Z",
+  "count": 4,
+  "lastUpdated": "2025-11-03T08:30:10.152Z",
   "byPlatform": {
+    "windows-wine": [
+      "close-combat-iii-the-russian-front-2"
+    ],
     "wine": [
       "diablo"
     ],
@@ -12,22 +15,21 @@
   },
   "byCollection": {},
   "byGenre": {
-    "role-playing (rpg)": [
-      "baldurs-gate-ii-throne-of-bhaal",
-      "diablo"
+    "real time strategy (rts)": [
+      "close-combat-iii-the-russian-front-2"
+    ],
+    "simulator": [
+      "close-combat-iii-the-russian-front-2"
     ],
     "strategy": [
-      "baldurs-gate-ii-throne-of-bhaal",
+      "close-combat-iii-the-russian-front-2",
       "diablo"
     ],
-    "shooter": [
-      "battlefield-2",
-      "call-of-duty",
-      "wolfenstein-the-new-order"
+    "role-playing (rpg)": [
+      "diablo"
     ],
     "adventure": [
-      "test-adventure-game",
-      "wolfenstein-the-new-order"
+      "test-adventure-game"
     ],
     "interactive fiction": [
       "test-adventure-game"
@@ -40,25 +42,24 @@
     ]
   },
   "byTag": {
-    "role-playing (rpg)": [
-      "baldurs-gate-ii-throne-of-bhaal",
-      "diablo"
+    "real time strategy (rts)": [
+      "close-combat-iii-the-russian-front-2"
+    ],
+    "simulator": [
+      "close-combat-iii-the-russian-front-2"
     ],
     "strategy": [
-      "baldurs-gate-ii-throne-of-bhaal",
+      "close-combat-iii-the-russian-front-2",
       "diablo"
     ],
-    "shooter": [
-      "battlefield-2",
-      "call-of-duty",
-      "wolfenstein-the-new-order"
+    "role-playing (rpg)": [
+      "diablo"
     ],
     "test": [
       "test-adventure-game"
     ],
     "adventure": [
-      "test-adventure-game",
-      "wolfenstein-the-new-order"
+      "test-adventure-game"
     ],
     "text-based": [
       "test-adventure-game"
@@ -66,29 +67,23 @@
   },
   "search": {
     "titles": {
-      "baldur's": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "close": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "gate": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "combat": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "ii:": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "iii:": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "throne": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "the": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "bhaal": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "russian": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "battlefield": [
-        "battlefield-2"
-      ],
-      "call": [
-        "call-of-duty"
-      ],
-      "duty": [
-        "call-of-duty"
+      "front": [
+        "close-combat-iii-the-russian-front-2"
       ],
       "diablo": [
         "diablo"
@@ -106,44 +101,26 @@
       ],
       "gui": [
         "test-gui-game"
-      ],
-      "wolfenstein:": [
-        "wolfenstein-the-new-order"
-      ],
-      "the": [
-        "wolfenstein-the-new-order"
-      ],
-      "new": [
-        "wolfenstein-the-new-order"
-      ],
-      "order": [
-        "wolfenstein-the-new-order"
       ]
     },
     "fuzzy": {
-      "baldur's": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "close": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "gate": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "combat": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "ii:": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "iii:": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "throne": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "the": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "bhaal": [
-        "baldurs-gate-ii-throne-of-bhaal"
+      "russian": [
+        "close-combat-iii-the-russian-front-2"
       ],
-      "battlefield": [
-        "battlefield-2"
-      ],
-      "call": [
-        "call-of-duty"
-      ],
-      "duty": [
-        "call-of-duty"
+      "front": [
+        "close-combat-iii-the-russian-front-2"
       ],
       "diablo": [
         "diablo"
@@ -161,27 +138,12 @@
       ],
       "gui": [
         "test-gui-game"
-      ],
-      "wolfenstein:": [
-        "wolfenstein-the-new-order"
-      ],
-      "the": [
-        "wolfenstein-the-new-order"
-      ],
-      "new": [
-        "wolfenstein-the-new-order"
-      ],
-      "order": [
-        "wolfenstein-the-new-order"
       ]
     }
   },
   "recent": [
-    "wolfenstein-the-new-order",
-    "call-of-duty",
-    "battlefield-2",
+    "close-combat-iii-the-russian-front-2",
     "diablo",
-    "baldurs-gate-ii-throne-of-bhaal",
     "test-adventure-game",
     "test-gui-game"
   ],

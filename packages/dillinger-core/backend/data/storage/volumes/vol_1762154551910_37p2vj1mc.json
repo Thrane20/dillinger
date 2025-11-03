@@ -1,0 +1,9 @@
+{
+  "id": "vol_1762154551910_37p2vj1mc",
+  "name": "dillinger_root",
+  "dockerVolumeName": "dillinger_dillinger_root",
+  "hostPath": "/mnt/linuxfast/dev/dillinger/packages/dillinger-core/backend/data",
+  "createdAt": "2025-11-03T07:22:31.910Z",
+  "type": "docker",
+  "status": "active"
+}

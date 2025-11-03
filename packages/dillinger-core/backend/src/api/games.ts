@@ -3,9 +3,12 @@ import type { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { v4 as uuidv4 } from 'uuid';
 import { JSONStorageService } from '../services/storage.js';
+import { DockerService } from '../services/docker-service.js';
+import type { InstallGameRequest, InstallGameResponse } from '@dillinger/shared';
 
 const router = Router();
 const storage = JSONStorageService.getInstance();
+const dockerService = DockerService.getInstance();
 
 /**
  * Generate a URL-friendly slug from a title
@@ -214,9 +217,29 @@ router.put('/:id', gameValidation, async (req: Request, res: Response) => {
       newSlug = slugify(req.body.title);
     }
 
+    // Check if launch configuration was saved with a valid command
+    // If so, mark the game as installed
+    let installationUpdate = {};
+    if (req.body.settings?.launch?.command) {
+      // Extract install path from command if available, or use existing
+      const installPath = existingGame.installation?.installPath;
+      
+      installationUpdate = {
+        installation: {
+          ...existingGame.installation,
+          status: 'installed',
+          installPath: installPath || existingGame.installation?.installPath,
+          installedAt: existingGame.installation?.installedAt || new Date().toISOString(),
+        }
+      };
+      
+      console.log(`✅ Marking game "${req.body.title || existingGame.title}" as installed (launch config saved)`);
+    }
+
     const updatedGame = {
       ...existingGame,
       ...req.body,
+      ...installationUpdate,
       ...(newSlug ? { slug: newSlug } : {}),
       id: existingGame.id, // Preserve original ID
       created: existingGame.created, // Preserve creation date
@@ -273,6 +296,318 @@ router.delete('/:id', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete game',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST /api/games/:id/install - Install a game using Docker with GUI
+router.post('/:id/install', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { installerPath, installPath, platformId } = req.body as InstallGameRequest;
+
+    if (!id || !installerPath || !installPath || !platformId) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required fields: installerPath, installPath, platformId',
+      } as InstallGameResponse);
+      return;
+    }
+
+    // Find the game
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      } as InstallGameResponse);
+      return;
+    }
+
+    // Get platform information
+    const platform = await storage.readEntity<any>('platforms', platformId);
+    if (!platform) {
+      res.status(404).json({
+        success: false,
+        error: 'Platform not found',
+      } as InstallGameResponse);
+      return;
+    }
+
+    // Generate session ID for this installation
+    const sessionId = uuidv4();
+
+    console.log(`🎮 Starting game installation for: ${game.title}`);
+    console.log(`  Installer: ${installerPath}`);
+    console.log(`  Install target: ${installPath}`);
+    console.log(`  Platform: ${platform.name}`);
+
+    // Start installation container
+    const containerInfo = await dockerService.installGame({
+      installerPath,
+      installPath,
+      platform,
+      sessionId,
+    });
+
+    // Update game with installation information
+    const updatedGame = {
+      ...game,
+      installation: {
+        status: 'installing' as const,
+        installPath,
+        installerPath,
+        containerId: containerInfo.containerId,
+        installMethod: 'automated' as const,
+      },
+      updated: new Date().toISOString(),
+    };
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    console.log(`✓ Installation started with container: ${containerInfo.containerId}`);
+
+    res.json({
+      success: true,
+      containerId: containerInfo.containerId,
+      message: 'Installation started. The installation GUI should appear on your display.',
+    } as InstallGameResponse);
+  } catch (error) {
+    console.error('Error starting game installation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start installation',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    } as InstallGameResponse);
+  }
+});
+
+// POST /api/games/:id/install/complete - Mark installation as complete
+router.post('/:id/install/complete', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const { success: installSuccess, error: installError } = req.body;
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    const updatedGame = {
+      ...game,
+      installation: {
+        ...game.installation,
+        status: installSuccess ? ('installed' as const) : ('failed' as const),
+        installedAt: installSuccess ? new Date().toISOString() : undefined,
+        error: installError,
+        containerId: undefined, // Clear container ID after completion
+      },
+      updated: new Date().toISOString(),
+    };
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    console.log(`✓ Installation ${installSuccess ? 'completed' : 'failed'} for: ${game.title}`);
+
+    res.json({
+      success: true,
+      data: updatedGame,
+      message: installSuccess ? 'Installation completed successfully' : 'Installation failed',
+    });
+  } catch (error) {
+    console.error('Error completing installation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update installation status',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// GET /api/games/:id/install/status - Check installation status
+router.get('/:id/install/status', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    const installation = game.installation;
+    if (!installation || !installation.containerId) {
+      res.json({
+        success: true,
+        status: installation?.status || 'not_installed',
+        isRunning: false,
+      });
+      return;
+    }
+
+    // Check if installation container is still running
+    try {
+      const containerResult = await dockerService.waitForInstallationComplete(installation.containerId);
+      
+      if (containerResult.success || containerResult.exitCode !== -1) {
+        // Installation finished - scan for executables
+        console.log(`🎮 Installation completed for ${game.title}, scanning for executables...`);
+        
+        const executables = await dockerService.scanForGameExecutables(installation.installPath || '');
+        
+        // Update game with installation completion and discovered executables
+        const updatedGame = {
+          ...game,
+          installation: {
+            ...installation,
+            status: containerResult.success ? ('installed' as const) : ('failed' as const),
+            installedAt: containerResult.success ? new Date().toISOString() : undefined,
+            error: containerResult.success ? undefined : `Installation failed with exit code ${containerResult.exitCode}`,
+            containerId: undefined, // Clear container ID
+          },
+          // Auto-set the most likely executable as filePath
+          filePath: executables.length > 0 ? `${installation.installPath}/${executables[0]}` : game.filePath,
+          // Auto-set working directory to installation path if empty
+          settings: {
+            ...game.settings,
+            launch: {
+              ...game.settings?.launch,
+              workingDirectory: game.settings?.launch?.workingDirectory || installation.installPath || '',
+            }
+          },
+          updated: new Date().toISOString(),
+        };
+
+        await storage.writeEntity('games', fileKey, updatedGame);
+
+        res.json({
+          success: true,
+          status: updatedGame.installation?.status,
+          isRunning: false,
+          executables: executables,
+          autoSelectedExecutable: executables.length > 0 ? executables[0] : null,
+        });
+      } else {
+        // Still running
+        res.json({
+          success: true,
+          status: 'installing',
+          isRunning: true,
+        });
+      }
+    } catch (error) {
+      console.error('Error checking container status:', error);
+      res.json({
+        success: true,
+        status: 'failed',
+        isRunning: false,
+        error: 'Failed to check installation status',
+      });
+    }
+  } catch (error) {
+    console.error('Error checking installation status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check installation status',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// GET /api/games/:id/shortcuts - Scan for Windows shortcuts (.lnk files)
+router.get('/:id/shortcuts', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const { game } = await findGameAndFileKey(id);
+    if (!game || !game.installation?.installPath) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found or not installed',
+      });
+      return;
+    }
+
+    const shortcuts = await dockerService.scanForShortcuts(game.installation.installPath);
+    
+    res.json({
+      success: true,
+      shortcuts: shortcuts,
+    });
+  } catch (error) {
+    console.error('Error scanning for shortcuts:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to scan for shortcuts',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST /api/games/:id/shortcuts/parse - Parse a specific .lnk file
+router.post('/:id/shortcuts/parse', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { shortcutPath } = req.body;
+    
+    if (!id || !shortcutPath) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID and shortcut path are required',
+      });
+      return;
+    }
+
+    const { game } = await findGameAndFileKey(id);
+    if (!game || !game.installation?.installPath) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found or not installed',
+      });
+      return;
+    }
+
+    const shortcutInfo = await dockerService.parseShortcut(shortcutPath);
+    
+    res.json({
+      success: true,
+      shortcut: shortcutInfo,
+    });
+  } catch (error) {
+    console.error('Error parsing shortcut:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to parse shortcut',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

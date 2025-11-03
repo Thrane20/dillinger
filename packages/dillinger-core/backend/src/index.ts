@@ -6,12 +6,15 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { JSONStorageService } from './services/storage.js';
 import { SettingsService } from './services/settings.js';
+import { VolumeVerificationService } from './services/volume-verification.js';
 import { getScraperManager } from './services/scrapers/index.js';
 import gamesLauncherRouter from './api/games-launcher.js';
 import gamesRouter from './api/games.js';
 import settingsRouter from './api/settings.js';
 import scrapersRouter from './api/scrapers.js';
 import imagesRouter from './api/images.js';
+import filesystemRouter from './api/filesystem.js';
+import volumesRouter from './api/volumes.js';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -122,6 +125,12 @@ app.use('/api/scrapers', scrapersRouter);
 // Image serving routes
 app.use('/api/images', imagesRouter);
 
+// Filesystem browsing routes
+app.use('/api/filesystem', filesystemRouter);
+
+// Volume management routes
+app.use('/api/volumes', volumesRouter);
+
 // Basic 404 handler for API routes
 app.use('/api/*', (req, res) => {
   res.status(404).json({
@@ -152,23 +161,62 @@ app.use(
 // Initialize storage directories and start server
 async function startServer() {
   try {
+    // STEP 1: Verify required Docker volumes exist
+    // The dillinger_root volume is the foundation - all JSON data sits on it
+    console.log('🔍 Checking required Docker volumes...');
+    
+    // In development, auto-create the volume if it doesn't exist
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        await VolumeVerificationService.verifyRequiredVolumes();
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('You must have a volume mounted')) {
+          console.log('🏗️  Development mode: Auto-creating dillinger_root volume...');
+          
+          // Auto-create bind mount to current data directory
+          const currentDataPath = process.env.DILLINGER_ROOT || 
+            `${process.cwd()}/packages/dillinger-core/backend/data`;
+          
+          await VolumeVerificationService.createDillingerRootVolume(currentDataPath);
+          
+          // Verify it was created successfully
+          await VolumeVerificationService.verifyRequiredVolumes();
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      // In production, volume MUST exist - fail hard if not
+      await VolumeVerificationService.verifyRequiredVolumes();
+    }
+
+    // STEP 2: Initialize storage directories
     await storage.ensureDirectories();
     console.log('📁 Storage directories initialized');
 
-    // Initialize settings and scrapers
+    // STEP 3: Initialize settings and scrapers
     await settingsService.initialize();
     const scraperSettings = await settingsService.getScraperSettings();
     await scraperManager.initialize(scraperSettings);
     console.log('⚙️  Settings and scrapers initialized');
 
+    // STEP 4: Start the server
     app.listen(PORT, () => {
       console.log(`🚀 Dillinger API server running on port ${PORT}`);
       console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`💾 Data storage: JSON files in ${process.env.DATA_PATH || '/data'}`);
+      console.log(`💾 Data storage: JSON files in dillinger_root volume`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
+    
+    if (error instanceof Error && error.message.includes('You must have a volume mounted')) {
+      console.error('');
+      console.error('🛑 STARTUP FAILED: Missing required Docker volume');
+      console.error('   This is the foundational volume where all Dillinger JSON data is stored.');
+      console.error('   See the error message above for instructions on how to create it.');
+    }
+    
     process.exit(1);
   }
 }

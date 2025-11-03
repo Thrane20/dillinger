@@ -8,9 +8,10 @@ import type {
 } from '@dillinger/shared';
 
 // DILLINGER_ROOT is the base directory for all game data and metadata
-// In development: ./packages/dillinger-core/backend/data
-// In production: Configured by deployment (e.g., /opt/dillinger)
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || path.join(process.cwd(), 'data');
+// This MUST point to the dillinger_root Docker volume mount point
+// In development: Bind mounted to ./packages/dillinger-core/backend/data via dillinger_root volume
+// In production: The dillinger_root Docker volume (typically /data inside container)
+const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
 const DATA_PATH = path.join(DILLINGER_ROOT, 'storage');
 
 export interface EntityCounts {
@@ -59,7 +60,7 @@ export class JSONStorageService {
     await fs.ensureDir(DILLINGER_ROOT);
     
     // Ensure storage subdirectories exist
-    const storageDirs = ['games', 'platforms', 'sessions', 'collections', 'metadata'];
+    const storageDirs = ['games', 'platforms', 'sessions', 'collections', 'metadata', 'volumes'];
     await Promise.all(
       storageDirs.map((dir) => fs.ensureDir(path.join(DATA_PATH, dir)))
     );

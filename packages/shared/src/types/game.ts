@@ -52,6 +52,15 @@ export interface Game {
       workingDirectory?: string; // Working directory relative to game directory
     };
   };
+  installation?: {
+    status?: 'not_installed' | 'installing' | 'installed' | 'failed'; // Installation state
+    installPath?: string; // Path where game is installed
+    installerPath?: string; // Path to installer file (exe, msi, etc.)
+    installedAt?: string; // ISO timestamp when installation completed
+    installMethod?: 'manual' | 'automated'; // How the game was installed
+    containerId?: string; // Active installation container ID
+    error?: string; // Error message if installation failed
+  };
   created: string; // ISO timestamp
   updated: string; // ISO timestamp
 }

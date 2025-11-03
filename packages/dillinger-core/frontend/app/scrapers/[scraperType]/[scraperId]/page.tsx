@@ -99,7 +99,9 @@ export default function GameDetailPage({ params }: PageProps) {
 
   const handleGoToGame = () => {
     if (savedGameId) {
-      router.push(`/games?scrollTo=${savedGameId}`);
+      // Refresh the router cache to ensure games list is up-to-date
+      router.refresh();
+      router.push(`/?scrollTo=${savedGameId}`);
     }
   };
 

@@ -9,7 +9,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: process.env.BACKEND_PORT || '4001',
-        DATA_PATH: process.env.DATA_PATH || '/data',
+        DILLINGER_ROOT: process.env.DILLINGER_ROOT || '/data',
         FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:4000',
       },
       instances: 1,

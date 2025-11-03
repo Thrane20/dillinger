@@ -37,6 +37,7 @@ export interface GameDetailData {
   scraperId: string;
   scraperType: ScraperType;
   title: string;
+  slug?: string;
   alternativeTitles?: string[];
   summary?: string;
   storyline?: string;

@@ -10,12 +10,12 @@ services:
     ports:
       - "4000:4000"
     volumes:
-      - dillinger_library:/data
+      - dillinger_root:/data
     environment:
       - NODE_ENV=production
       - PORT=4000
       - BACKEND_PORT=4001
-      - DATA_PATH=/data
+      - DILLINGER_ROOT=/data
       - FRONTEND_URL=http://localhost:4000
     restart: unless-stopped
     healthcheck:
@@ -26,5 +26,5 @@ services:
       start_period: 30s
 
 volumes:
-  dillinger_library:
+  dillinger_root:
     external: true

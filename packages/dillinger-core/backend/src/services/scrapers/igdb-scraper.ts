@@ -118,7 +118,7 @@ export class IGDBScraper extends BaseScraper {
 
   async getGameDetail(scraperId: string): Promise<GameDetailData> {
     const body = `
-      fields name, alternative_names.name, summary, storyline, first_release_date,
+      fields name, slug, alternative_names.name, summary, storyline, first_release_date,
              platforms.name, platforms.abbreviation, platforms.category,
              genres.name, themes.name, game_modes.name,
              involved_companies.company.name, involved_companies.developer, involved_companies.publisher,
@@ -266,6 +266,7 @@ export class IGDBScraper extends BaseScraper {
       scraperId: String(game.id),
       scraperType: this.type,
       title: game.name,
+      slug: game.slug,
       alternativeTitles: game.alternative_names?.map((alt: any) => alt.name) || [],
       summary: game.summary,
       storyline: game.storyline,
