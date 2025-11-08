@@ -6,6 +6,7 @@ import { MagnifyingGlassIcon, FolderIcon } from '@heroicons/react/24/outline';
 import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
+import ContainerLogsDialog from './ContainerLogsDialog';
 
 interface GameFormData {
   id?: string;
@@ -25,11 +26,29 @@ interface GameFormData {
     backdropImage?: string;
   };
   settings?: {
+    wine?: {
+      arch?: 'win32' | 'win64';
+      debug?: {
+        relay?: boolean;
+        seh?: boolean;
+        tid?: boolean;
+        timestamp?: boolean;
+        heap?: boolean;
+        file?: boolean;
+        module?: boolean;
+        win?: boolean;
+        d3d?: boolean;
+        opengl?: boolean;
+        all?: boolean;
+      };
+    };
     launch?: {
       command?: string;
       arguments?: string[];
       environment?: Record<string, string>;
       workingDirectory?: string;
+      fullscreen?: boolean;
+      resolution?: string;
     };
   };
   // Store the full original game data to preserve scraper metadata
@@ -63,6 +82,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [showInstallDialog, setShowInstallDialog] = useState(false);
   const [showShortcutDialog, setShowShortcutDialog] = useState(false);
   const [showFileExplorer, setShowFileExplorer] = useState(false);
+  const [showLogsDialog, setShowLogsDialog] = useState(false);
   const [discoveredExecutables, setDiscoveredExecutables] = useState<string[]>([]);
   const [formData, setFormData] = useState<GameFormData>({
     title: '',
@@ -81,6 +101,10 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       backdropImage: '',
     },
     settings: {
+      wine: {
+        arch: 'win64',
+        debug: {},
+      },
       launch: {
         command: '',
         arguments: [],
@@ -122,11 +146,17 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   backdropImage: game.metadata?.backdropImage || '',
                 },
                 settings: {
+                  wine: {
+                    arch: game.settings?.wine?.arch || 'win64',
+                    debug: game.settings?.wine?.debug || {},
+                  },
                   launch: {
                     command: game.settings?.launch?.command || '',
                     arguments: game.settings?.launch?.arguments || [],
                     environment: game.settings?.launch?.environment || {},
                     workingDirectory: game.settings?.launch?.workingDirectory || '',
+                    fullscreen: game.settings?.launch?.fullscreen || false,
+                    resolution: game.settings?.launch?.resolution || '1920x1080',
                   },
                 },
                 _originalGame: game, // Store full original data
@@ -156,13 +186,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               if (result.status === 'installed' && result.executables) {
                 setDiscoveredExecutables(result.executables);
                 
-                if (result.autoSelectedExecutable) {
-                  // Auto-update the filePath with the discovered executable
-                  setFormData(prev => ({
-                    ...prev,
-                    filePath: `${formData._originalGame?.installation?.installPath}/${result.autoSelectedExecutable}`
-                  }));
-                }
+                // NOTE: We don't update filePath here - it should remain the game directory path
+                // The launch command is already set from the shortcut/executable selection
                 
                 // Reload the page to show the updated status
                 setTimeout(() => window.location.reload(), 1000);
@@ -335,12 +360,40 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           },
         },
       }));
+    } else if (name.startsWith('settings.wine.')) {
+      const wineKey = name.split('.')[2];
+      setFormData((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          wine: {
+            ...prev.settings?.wine,
+            [wineKey]: value,
+          },
+        },
+      }));
     } else {
       setFormData((prev) => ({
         ...prev,
         [name]: value,
       }));
     }
+  };
+
+  const handleWineDebugChange = (channel: string, enabled: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        wine: {
+          ...prev.settings?.wine,
+          debug: {
+            ...prev.settings?.wine?.debug,
+            [channel]: enabled,
+          },
+        },
+      },
+    }));
   };
 
   const selectImage = (imageUrl: string) => {
@@ -469,6 +522,67 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     setShowFileExplorer(false);
   };
 
+  const handleDebugContainer = async () => {
+    if (!formData._originalGame?.id) {
+      console.error('No game ID available for debug container');
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:3001/api/launch/${formData._originalGame.id}/debug`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to launch debug container');
+      }
+
+      const data = await response.json();
+      
+      // Show the docker exec command in an alert/dialog
+      alert(
+        `Debug container started!\n\n` +
+        `Container ID: ${data.container.containerId.substring(0, 12)}\n\n` +
+        `To attach to the container, run this command in your terminal:\n\n` +
+        `${data.container.execCommand}\n\n` +
+        `The container will keep running until you stop it manually.`
+      );
+    } catch (error) {
+      console.error('Error launching debug container:', error);
+      alert('Failed to launch debug container. Check console for details.');
+    }
+  };
+
+  const handleRunRegistrySetup = async () => {
+    if (!formData._originalGame?.id) {
+      console.error('No game ID available for registry setup');
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:3001/api/launch/${formData._originalGame.id}/registry-setup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        alert(`✓ Registry Setup Complete\n\n${data.message}`);
+      } else {
+        alert(`Registry Setup\n\n${data.message || 'Failed to run registry setup'}`);
+      }
+    } catch (error) {
+      console.error('Error running registry setup:', error);
+      alert('Failed to run registry setup. Check console for details.');
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-6">
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
@@ -579,6 +693,141 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               <option value="scummvm">ScummVM</option>
             </select>
           </div>
+
+          {/* Wine Architecture - only show for Wine platform */}
+          {formData.platformId === 'windows-wine' && (
+            <div>
+              <label htmlFor="settings.wine.arch" className="block text-sm font-medium text-muted mb-2">
+                Wine Architecture
+              </label>
+              <select
+                id="settings.wine.arch"
+                name="settings.wine.arch"
+                value={formData.settings?.wine?.arch || 'win64'}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+              >
+                <option value="win64">64-bit (win64) - Default for modern games</option>
+                <option value="win32">32-bit (win32) - For older games</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Older GOG games often require 32-bit (win32) architecture
+              </p>
+            </div>
+          )}
+
+          {/* Wine Debug Channels - only show for Wine platform */}
+          {formData.platformId === 'windows-wine' && (
+            <div>
+              <label className="block text-sm font-medium text-muted mb-2">
+                Wine Debug Channels (for troubleshooting)
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-800">
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.relay || false}
+                    onChange={(e) => handleWineDebugChange('relay', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">relay (function calls)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.seh || false}
+                    onChange={(e) => handleWineDebugChange('seh', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">seh (exceptions)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.tid || false}
+                    onChange={(e) => handleWineDebugChange('tid', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">tid (thread IDs)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.timestamp || false}
+                    onChange={(e) => handleWineDebugChange('timestamp', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">timestamp</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.heap || false}
+                    onChange={(e) => handleWineDebugChange('heap', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">heap (memory)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.file || false}
+                    onChange={(e) => handleWineDebugChange('file', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">file (I/O)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.module || false}
+                    onChange={(e) => handleWineDebugChange('module', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">module (loading)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.win || false}
+                    onChange={(e) => handleWineDebugChange('win', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">win (windows)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.d3d || false}
+                    onChange={(e) => handleWineDebugChange('d3d', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">d3d (Direct3D)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.opengl || false}
+                    onChange={(e) => handleWineDebugChange('opengl', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm">opengl</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer col-span-2 md:col-span-1">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.wine?.debug?.all || false}
+                    onChange={(e) => handleWineDebugChange('all', e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+                  />
+                  <span className="text-sm font-semibold text-red-600 dark:text-red-400">all (very verbose!)</span>
+                </label>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Enable debug channels to troubleshoot Wine issues. Warning: This can generate a lot of log output.
+              </p>
+            </div>
+          )}
 
           {/* Tags */}
           <div>
@@ -836,6 +1085,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
               <p className="text-sm text-green-700 dark:text-green-300">
                 ✓ Game installed at: {formData._originalGame.installation.installPath}
+                {formData._originalGame.slug && formData._originalGame.platformId === 'windows-wine' && (
+                  <>
+                    <br />
+                    <span className="ml-4 text-xs">
+                      Wine prefix: {formData._originalGame.installation.installPath}/.wine-{formData._originalGame.slug}
+                    </span>
+                  </>
+                )}
               </p>
               {formData._originalGame.installation.installedAt && (
                 <p className="text-xs text-muted mt-1">
@@ -856,6 +1113,22 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   </ul>
                 </div>
               )}
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleDebugContainer}
+                  className="px-3 py-1.5 bg-yellow-600 text-white text-sm rounded-md hover:bg-yellow-700 transition-colors"
+                >
+                  🐛 Debug Container
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRunRegistrySetup}
+                  className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 transition-colors"
+                >
+                  🔧 Registry Setup
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -886,13 +1159,25 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   Error: {formData._originalGame.installation.error}
                 </p>
               )}
-              <button
-                type="button"
-                onClick={() => setShowInstallDialog(true)}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Retry Installation
-              </button>
+              <div className="flex gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowInstallDialog(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  Retry Installation
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowLogsDialog(true)}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  View Logs
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -954,6 +1239,65 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               placeholder="Relative path from game directory"
             />
           </div>
+
+          {/* Display Options - only show for Wine platform */}
+          {formData.platformId === 'windows-wine' && (
+            <>
+              <div className="col-span-2">
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.settings?.launch?.fullscreen || false}
+                    onChange={(e) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        settings: {
+                          ...prev.settings,
+                          launch: {
+                            ...prev.settings?.launch,
+                            fullscreen: e.target.checked,
+                          },
+                        },
+                      }));
+                    }}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-muted">
+                    Launch in fullscreen (Wine virtual desktop)
+                  </span>
+                </label>
+                <p className="text-xs text-gray-500 mt-1 ml-6">
+                  Creates a virtual desktop for better window management and fullscreen support
+                </p>
+              </div>
+
+              {formData.settings?.launch?.fullscreen && (
+                <div>
+                  <label htmlFor="settings.launch.resolution" className="block text-sm font-medium text-muted mb-2">
+                    Resolution
+                  </label>
+                  <select
+                    id="settings.launch.resolution"
+                    name="settings.launch.resolution"
+                    value={formData.settings?.launch?.resolution || '1920x1080'}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                  >
+                    <option value="1920x1080">1920x1080 (Full HD)</option>
+                    <option value="2560x1440">2560x1440 (QHD)</option>
+                    <option value="3840x2160">3840x2160 (4K)</option>
+                    <option value="1600x900">1600x900</option>
+                    <option value="1440x900">1440x900</option>
+                    <option value="1366x768">1366x768</option>
+                    <option value="1280x1024">1280x1024</option>
+                    <option value="1280x720">1280x720 (HD)</option>
+                    <option value="1024x768">1024x768</option>
+                    <option value="800x600">800x600</option>
+                  </select>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Buttons */}
@@ -1015,6 +1359,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           onSelect={handleFileExplorerSelect}
           selectMode="file"
           title="Select Game Executable"
+        />
+      )}
+
+      {/* Container Logs Dialog */}
+      {showLogsDialog && gameId && (
+        <ContainerLogsDialog
+          gameId={gameId}
+          onClose={() => setShowLogsDialog(false)}
         />
       )}
     </form>

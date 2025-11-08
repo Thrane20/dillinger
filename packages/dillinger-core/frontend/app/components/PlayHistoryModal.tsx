@@ -3,19 +3,15 @@
 import { useEffect, useState } from 'react';
 import { formatPlayTime } from '../utils/timeFormat';
 
-interface GameSession {
+interface GameSessionEntry {
   id: string;
-  gameId: string;
-  platformId: string;
-  status: string;
+  startTime: string;
+  endTime?: string;
+  duration?: number;
+  exitCode?: number;
+  status: 'starting' | 'running' | 'stopped' | 'error';
   containerId?: string;
-  performance: {
-    startTime: string;
-    endTime?: string;
-    duration?: number;
-  };
-  created: string;
-  updated: string;
+  platformId: string;
 }
 
 interface PlayHistoryModalProps {
@@ -26,7 +22,7 @@ interface PlayHistoryModalProps {
 }
 
 export default function PlayHistoryModal({ gameId, gameTitle, isOpen, onClose }: PlayHistoryModalProps) {
-  const [sessions, setSessions] = useState<GameSession[]>([]);
+  const [sessions, setSessions] = useState<GameSessionEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,11 +44,11 @@ export default function PlayHistoryModal({ gameId, gameTitle, isOpen, onClose }:
       
       const data = await response.json();
       if (data.success && data.sessions) {
-        // Sort by start time, most recent first
+        // Filter completed sessions and sort by start time, most recent first
         const sortedSessions = data.sessions
-          .filter((s: GameSession) => s.status === 'stopped' && s.performance.duration)
-          .sort((a: GameSession, b: GameSession) => 
-            new Date(b.performance.startTime).getTime() - new Date(a.performance.startTime).getTime()
+          .filter((s: GameSessionEntry) => s.status === 'stopped' && s.duration)
+          .sort((a: GameSessionEntry, b: GameSessionEntry) => 
+            new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
           );
         setSessions(sortedSessions);
       }
@@ -90,7 +86,7 @@ export default function PlayHistoryModal({ gameId, gameTitle, isOpen, onClose }:
     }
   }
 
-  const totalSeconds = sessions.reduce((sum, s) => sum + (s.performance.duration || 0), 0);
+  const totalSeconds = sessions.reduce((sum, s) => sum + (s.duration || 0), 0);
   const totalHours = totalSeconds / 3600;
 
   if (!isOpen) return null;
@@ -140,9 +136,9 @@ export default function PlayHistoryModal({ gameId, gameTitle, isOpen, onClose }:
                         index % 2 === 0 ? 'bg-gray-50 dark:bg-gray-800' : 'bg-white dark:bg-gray-900'
                       }`}
                     >
-                      <td className="py-3 px-4 text-text">{formatDateTime(session.performance.startTime)}</td>
+                      <td className="py-3 px-4 text-text">{formatDateTime(session.startTime)}</td>
                       <td className="py-3 px-4 text-text font-mono">
-                        {session.performance.duration ? formatDuration(session.performance.duration) : 'N/A'}
+                        {session.duration ? formatDuration(session.duration) : 'N/A'}
                       </td>
                       <td className="py-3 px-4">
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100">

@@ -2,9 +2,12 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { v4 as uuidv4 } from 'uuid';
+import * as path from 'path';
+import * as fs from 'fs-extra';
 import { JSONStorageService } from '../services/storage.js';
 import { DockerService } from '../services/docker-service.js';
 import type { InstallGameRequest, InstallGameResponse } from '@dillinger/shared';
+import { DILLINGER_ROOT } from '../services/settings.js';
 
 const router = Router();
 const storage = JSONStorageService.getInstance();
@@ -285,7 +288,34 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return;
     }
 
+    // Delete the game JSON file
     await storage.deleteEntity('games', fileKey);
+
+    // Clean up associated metadata directory if game has a slug
+    if (game.slug) {
+      const metadataPath = path.join(DILLINGER_ROOT, 'storage', 'metadata', game.slug);
+      try {
+        if (await fs.pathExists(metadataPath)) {
+          await fs.remove(metadataPath);
+          console.log(`✓ Deleted metadata directory: ${metadataPath}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to delete metadata directory for ${game.slug}:`, error);
+        // Don't fail the entire deletion if metadata cleanup fails
+      }
+    }
+
+    // Clean up associated saves directory
+    const savesPath = path.join(DILLINGER_ROOT, 'saves', game.id);
+    try {
+      if (await fs.pathExists(savesPath)) {
+        await fs.remove(savesPath);
+        console.log(`✓ Deleted saves directory: ${savesPath}`);
+      }
+    } catch (error) {
+      console.warn(`Failed to delete saves directory for ${game.id}:`, error);
+      // Don't fail the entire deletion if saves cleanup fails
+    }
 
     res.json({
       success: true,
@@ -349,6 +379,7 @@ router.post('/:id/install', async (req: Request, res: Response) => {
       installPath,
       platform,
       sessionId,
+      game, // Pass game object for slug-based Wine prefix
     });
 
     // Update game with installation information
@@ -608,6 +639,161 @@ router.post('/:id/shortcuts/parse', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to parse shortcut',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/games/:id/container-logs
+ * Get logs from the installation or launch container
+ */
+router.get('/:id/container-logs', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+    }
+    
+    const { type = 'install', tail = '100' } = req.query;
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    
+    if (!game) {
+      return res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+    }
+
+    // Get the container ID based on type
+    let containerId: string | null = null;
+    
+    if (type === 'install' && game.installation?.containerId) {
+      containerId = game.installation.containerId;
+    } else if (type === 'launch') {
+      // For launch containers, we need to get the session container ID
+      // This would require session tracking which we'll implement later
+      return res.status(400).json({
+        success: false,
+        error: 'Launch container logs not yet implemented',
+      });
+    }
+
+    if (!containerId) {
+      return res.status(404).json({
+        success: false,
+        error: 'No container found for this game',
+      });
+    }
+
+    // Get the logs from Docker
+    const logs = await dockerService.getContainerLogs(containerId, parseInt(tail as string));
+
+    return res.json({
+      success: true,
+      logs,
+      containerId,
+    });
+  } catch (error) {
+    console.error('Error getting container logs:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get container logs',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/games/active-containers/logs
+ * Get logs from all active containers (sessions + installations)
+ */
+router.get('/active-containers/logs', async (req: Request, res: Response) => {
+  try {
+    const { tail = '100' } = req.query;
+    const tailNum = parseInt(tail as string);
+
+    // Get all games to check for active installations
+    const games = await storage.listEntities<any>('games');
+    
+    // Get all sessions to check for running games
+    const sessions = await storage.listEntities<any>('sessions');
+    
+    const containerLogs: Array<{
+      containerId: string;
+      type: 'install' | 'launch';
+      gameName: string;
+      gameId: string;
+      logs: string;
+      status: string;
+    }> = [];
+
+    // Collect installation container logs
+    for (const game of games) {
+      if (game.installation?.containerId && game.installation?.status === 'installing') {
+        try {
+          // Check if container exists first
+          const exists = await dockerService.containerExists(game.installation.containerId);
+          if (!exists) {
+            continue; // Skip silently
+          }
+          
+          const logs = await dockerService.getContainerLogs(game.installation.containerId, tailNum);
+          containerLogs.push({
+            containerId: game.installation.containerId,
+            type: 'install',
+            gameName: game.title || game.slug || game.id,
+            gameId: game.id,
+            logs,
+            status: game.installation.status,
+          });
+        } catch (error) {
+          // Container stopped or removed between check and fetch - skip silently
+        }
+      }
+    }
+
+    // Collect running game session logs
+    for (const session of sessions) {
+      if (session.containerId && (session.status === 'running' || session.status === 'starting')) {
+        try {
+          // Check if container exists first
+          const exists = await dockerService.containerExists(session.containerId);
+          if (!exists) {
+            continue; // Skip silently
+          }
+          
+          const logs = await dockerService.getContainerLogs(session.containerId, tailNum);
+          const game = games.find(g => g.id === session.gameId);
+          containerLogs.push({
+            containerId: session.containerId,
+            type: 'launch',
+            gameName: game ? (game.title || game.slug || game.id) : session.gameId,
+            gameId: session.gameId,
+            logs,
+            status: session.status,
+          });
+        } catch (error) {
+          // Container stopped or removed between check and fetch - skip silently
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      containers: containerLogs,
+      count: containerLogs.length,
+    });
+  } catch (error) {
+    console.error('Error getting active container logs:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get active container logs',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

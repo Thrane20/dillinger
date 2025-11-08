@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Express } from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -7,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { JSONStorageService } from './services/storage.js';
 import { SettingsService } from './services/settings.js';
 import { VolumeVerificationService } from './services/volume-verification.js';
+import { WebSocketService } from './services/websocket-service.js';
 import { getScraperManager } from './services/scrapers/index.js';
 import gamesLauncherRouter from './api/games-launcher.js';
 import gamesRouter from './api/games.js';
@@ -17,18 +19,18 @@ import filesystemRouter from './api/filesystem.js';
 import volumesRouter from './api/volumes.js';
 
 const app: Express = express();
+const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 
 // Trust proxy - required for rate limiting behind reverse proxies
-// In production behind a reverse proxy, set to 1
-// In development, we don't use rate limiting on a per-IP basis
-const trustProxyValue = process.env.NODE_ENV === 'production' ? 1 : false;
-app.set('trust proxy', trustProxyValue);
+// Enable in both dev and production to avoid X-Forwarded-For header warnings
+app.set('trust proxy', 1);
 
-// Initialize storage service
+// Initialize services
 const storage = JSONStorageService.getInstance();
 const settingsService = SettingsService.getInstance();
 const scraperManager = getScraperManager();
+const wsService = WebSocketService.getInstance();
 
 // Security middleware
 app.use(
@@ -51,8 +53,16 @@ app.use(
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  skip: () => process.env.NODE_ENV === 'development', // Skip rate limiting in development
+  max: 1000, // Increased limit for development (100 was too low)
+  skip: (req) => {
+    // Skip rate limiting in development or for local requests
+    const ip = req.ip || '';
+    return process.env.NODE_ENV === 'development' || 
+           ip === '127.0.0.1' || 
+           ip === '::1' ||
+           ip.startsWith('172.') || // Docker network
+           ip.startsWith('192.168.'); // Local network
+  },
   message: {
     error: 'rate_limit_exceeded',
     message: 'Too many requests from this IP, please try again later.',
@@ -200,10 +210,14 @@ async function startServer() {
     await scraperManager.initialize(scraperSettings);
     console.log('⚙️  Settings and scrapers initialized');
 
-    // STEP 4: Start the server
-    app.listen(PORT, () => {
+    // STEP 4: Initialize WebSocket server
+    wsService.initialize(server);
+
+    // STEP 5: Start the server
+    server.listen(PORT, () => {
       console.log(`🚀 Dillinger API server running on port ${PORT}`);
       console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📡 WebSocket logs: ws://localhost:${PORT}/ws/logs`);
       console.log(`💾 Data storage: JSON files in dillinger_root volume`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
@@ -224,11 +238,13 @@ async function startServer() {
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
+  wsService.shutdown();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log('🛑 SIGINT received, shutting down gracefully...');
+  wsService.shutdown();
   process.exit(0);
 });
 

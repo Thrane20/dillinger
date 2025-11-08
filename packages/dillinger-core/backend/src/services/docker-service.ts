@@ -3,6 +3,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import type { Game, Platform } from '@dillinger/shared';
 import { JSONStorageService } from './storage.js';
+import { SettingsService } from './settings.js';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -17,12 +18,17 @@ export interface GameInstallOptions {
   installPath: string; // Absolute path to target installation directory
   platform: Platform;
   sessionId: string;
+  game: Game; // Game object for slug and other metadata
 }
 
 export interface ContainerInfo {
   containerId: string;
   status: string;
   createdAt: string;
+}
+
+export interface DebugContainerInfo extends ContainerInfo {
+  execCommand: string; // Docker exec command to attach to container
 }
 
 export class DockerService {
@@ -47,6 +53,47 @@ export class DockerService {
       DockerService.instance = new DockerService();
     }
     return DockerService.instance;
+  }
+
+  /**
+   * Build WINEDEBUG environment variable from game settings
+   * @param game Game object with optional wine debug configuration
+   * @returns WINEDEBUG string (e.g., "-all", "+relay,+seh", "+all")
+   */
+  private buildWineDebug(game: Game): string {
+    const debug = game.settings?.wine?.debug;
+    
+    // If no debug settings or all false, disable all debug output
+    if (!debug || Object.keys(debug).length === 0) {
+      return '-all';
+    }
+    
+    // If "all" is enabled, enable all debug output
+    if (debug.all) {
+      return '+all';
+    }
+    
+    // Build comma-separated list of enabled channels
+    const enabledChannels: string[] = [];
+    
+    if (debug.relay) enabledChannels.push('+relay');
+    if (debug.seh) enabledChannels.push('+seh');
+    if (debug.tid) enabledChannels.push('+tid');
+    if (debug.timestamp) enabledChannels.push('+timestamp');
+    if (debug.heap) enabledChannels.push('+heap');
+    if (debug.file) enabledChannels.push('+file');
+    if (debug.module) enabledChannels.push('+module');
+    if (debug.win) enabledChannels.push('+win');
+    if (debug.d3d) enabledChannels.push('+d3d');
+    if (debug.opengl) enabledChannels.push('+opengl');
+    
+    // If no channels enabled, disable all
+    if (enabledChannels.length === 0) {
+      return '-all';
+    }
+    
+    // Return comma-separated list
+    return enabledChannels.join(',');
   }
 
   /**
@@ -180,56 +227,256 @@ export class DockerService {
   }
 
   /**
+   * Create session volume for an absolute path (e.g., installed games)
+   */
+  async setCurrentSessionVolumeAbsolute(absolutePath: string): Promise<void> {
+    // Ensure host path is detected first
+    await this.detectHostPath();
+    
+    // Convert to host path if running in devcontainer
+    const hostPath = this.getHostPath(absolutePath);
+
+    console.log(`Setting session volume to absolute path: ${absolutePath}`);
+    if (hostPath !== absolutePath) {
+      console.log(`  Host path: ${hostPath}`);
+    }
+
+    try {
+      // Check if volume exists
+      const volume = docker.getVolume(this.SESSION_VOLUME);
+      try {
+        await volume.inspect();
+        // Volume exists, remove it first
+        console.log(`Removing existing ${this.SESSION_VOLUME} volume`);
+        
+        try {
+          await volume.remove();
+        } catch (removeErr: any) {
+          if (removeErr.statusCode === 409) {
+            // Volume is in use, find and remove containers using it
+            console.log(`Volume in use, cleaning up containers...`);
+            await this.cleanupVolumeContainers();
+            
+            // Try removing volume again
+            await volume.remove();
+          } else {
+            throw removeErr;
+          }
+        }
+      } catch (err: any) {
+        if (err.statusCode !== 404) {
+          throw err;
+        }
+        // Volume doesn't exist, which is fine
+      }
+
+      // Create new volume with bind mount to absolute path
+      console.log(`Creating ${this.SESSION_VOLUME} volume bound to ${hostPath}`);
+      await docker.createVolume({
+        Name: this.SESSION_VOLUME,
+        Driver: 'local',
+        DriverOpts: {
+          type: 'none',
+          device: hostPath,
+          o: 'bind'
+        }
+      });
+
+      console.log(`✓ Session volume configured for ${absolutePath}`);
+    } catch (error) {
+      console.error('Error setting session volume:', error);
+      throw new Error(`Failed to configure session volume: ${error}`);
+    }
+  }
+
+  /**
    * Launch a game in a Docker container
    */
   async launchGame(options: GameLaunchOptions): Promise<ContainerInfo> {
     const { game, platform, sessionId } = options;
 
-    // Set up the session volume to point to the game directory
-    await this.setCurrentSessionVolume(game.filePath);
+    // Ensure host path detection
+    await this.detectHostPath();
+
+    const gameDirectory = game.installation?.installPath || game.filePath;
+    
+    if (!gameDirectory) {
+      throw new Error('Game has no file path or installation path configured');
+    }
+
+    // Set up the session volume ONLY for non-Wine games
+    // Wine games use direct Wine prefix bind mounts, no temp volume needed
+    if (platform.type !== 'wine') {
+      const isAbsolutePath = path.isAbsolute(gameDirectory);
+      if (isAbsolutePath) {
+        await this.setCurrentSessionVolumeAbsolute(gameDirectory);
+      } else {
+        await this.setCurrentSessionVolume(gameDirectory);
+      }
+    }
 
     // Get launch configuration
     const launchCommand = game.settings?.launch?.command || './start.sh';
     const launchArgs = game.settings?.launch?.arguments || [];
     const environment = game.settings?.launch?.environment || {};
 
-    // Construct the full executable path inside the container
-    const workingDir = game.settings?.launch?.workingDirectory || '.';
-    const gameExecutable = path.posix.join('/game', workingDir, launchCommand);
-
-    console.log(`Launching game: ${game.title}`);
-    console.log(`  Container Image: ${platform.configuration.containerImage}`);
-    console.log(`  Executable: ${gameExecutable}`);
-    console.log(`  Arguments: ${launchArgs.join(' ')}`);
+    // For Wine games, convert Windows paths to Linux paths within the Wine prefix
+    // Windows path: C:\GOG Games\Close Combat 3\cc3.exe
+    // Becomes: /wineprefix/drive_c/GOG Games/Close Combat 3/cc3.exe
+    let gameExecutable: string;
+    let cmdArray: string[];
+    let containerWorkingDir: string | undefined;
+    
+    if (platform.type === 'wine') {
+      // Convert Windows path to Linux path in Wine prefix
+      // Remove drive letter (C:) and convert backslashes to forward slashes
+      let linuxPath = launchCommand.replace(/^[A-Za-z]:/, ''); // Remove "C:"
+      linuxPath = linuxPath.replace(/\\/g, '/'); // Convert backslashes
+      
+      // Construct full path: /wineprefix/drive_c/path/to/game.exe
+      gameExecutable = path.posix.join('/wineprefix/drive_c', linuxPath);
+      
+      // Prepare clean arguments
+      const cleanArgs = launchArgs
+        .filter(arg => arg && typeof arg === 'string')
+        .map(arg => arg.replace(/\0/g, ''))
+        .filter(arg => arg !== ''); // Remove empty strings
+      
+      // Build Wine command with Linux path: wine /wineprefix/drive_c/GOG Games/.../game.exe arg1 arg2
+      cmdArray = ['wine', gameExecutable, ...cleanArgs];
+      
+      // Working directory doesn't matter - WINEPREFIX handles it
+      containerWorkingDir = '/wineprefix';
+      
+      console.log(`Launching game: ${game.title}`);
+      console.log(`  Container Image: ${platform.configuration.containerImage}`);
+      console.log(`  Original Windows path: ${launchCommand}`);
+      console.log(`  Converted Linux path: ${gameExecutable}`);
+      console.log(`  Wine command: ${cmdArray.join(' ')}`);
+      console.log(`  Container working dir: ${containerWorkingDir}`);
+    } else {
+      // For native Linux games, construct the path normally
+      gameExecutable = path.posix.join('/game', launchCommand);
+      
+      const cleanArgs = launchArgs
+        .filter(arg => arg && typeof arg === 'string')
+        .map(arg => arg.replace(/\0/g, ''));
+      
+      cmdArray = [gameExecutable, ...cleanArgs];
+      containerWorkingDir = '/game';
+      
+      console.log(`Launching game: ${game.title}`);
+      console.log(`  Container Image: ${platform.configuration.containerImage}`);
+      console.log(`  Executable: ${gameExecutable}`);
+      console.log(`  Arguments: ${cleanArgs.join(' ') || '(none)'}`);
+      console.log(`  Working directory: ${containerWorkingDir}`);
+    }
 
     // Prepare environment variables
     const env = [
-      `GAME_EXECUTABLE=${gameExecutable}`,
-      `GAME_ARGS=${launchArgs.join(' ')}`,
+      `GAME_ID=${game.id}`,
+      `SESSION_ID=${sessionId}`,
+      `SAVES_PATH=/data/saves/${game.id}`, // Game-specific saves directory in dillinger_root
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
 
+    // Add Wine-specific configuration for Windows games
+    if (platform.type === 'wine') {
+      // The Wine container's entrypoint script expects GAME_EXECUTABLE
+      const cleanArgs = launchArgs
+        .filter(arg => arg && typeof arg === 'string')
+        .map(arg => arg.replace(/\0/g, ''))
+        .filter(arg => arg !== '')
+        .join(' ');
+      
+      // Build WINEDEBUG environment variable from game settings
+      const wineDebug = this.buildWineDebug(game);
+      
+      // Check if fullscreen/virtual desktop is requested
+      const fullscreen = game.settings?.launch?.fullscreen || false;
+      const resolution = game.settings?.launch?.resolution || '1920x1080';
+      
+      // Note: WINEARCH should NOT be set when launching with an existing prefix
+      // Wine will auto-detect the architecture from the existing prefix
+      // Setting it causes "not supported in wow64 mode" errors
+      env.push(
+        `WINEDEBUG=${wineDebug}`,
+        'WINEPREFIX=/wineprefix',
+        `GAME_EXECUTABLE=${gameExecutable}`,
+        `GAME_ARGS=${cleanArgs}`
+      );
+      
+      // Add Wine virtual desktop for fullscreen support
+      if (fullscreen) {
+        env.push(`WINE_VIRTUAL_DESKTOP=${resolution}`);
+        console.log(`  Wine virtual desktop enabled: ${resolution}`);
+      }
+      
+      console.log(`  WINEDEBUG=${wineDebug}`);
+      console.log(`  GAME_EXECUTABLE=${gameExecutable}`);
+      console.log(`  GAME_ARGS=${cleanArgs || '(none)'}`);
+    }
+
     // Get display forwarding configuration
-    const displayConfig = this.getDisplayConfiguration();
+    const displayConfig = await this.getDisplayConfiguration();
     env.push(...displayConfig.env);
     
     console.log(`  Display mode: ${displayConfig.mode}`);
+    console.log(`  WINEPREFIX will be set to: /wineprefix`);
+    
+    // Determine Wine prefix path if this is a Wine game
+    // The game files are in the filePath (e.g., "close-combat-iii-the-russian-front")
+    // The Wine prefix is in dillinger_installed/.wine-<slug>
+    const gameIdentifier = game.slug || game.id;
+    let winePrefixPath: string | null = null;
+    
+    if (platform.type === 'wine') {
+      // Extract the base directory from the game's filePath
+      // filePath is like "close-combat-iii-the-russian-front" or "games/my-game"
+      const gameBasePath = game.filePath.split('/')[0]; // Get first segment
+      const installBasePath = game.filePath.includes('/') 
+        ? game.filePath.substring(0, game.filePath.lastIndexOf('/'))
+        : '';
+      
+      // For now, assume Wine prefix is in /mnt/linuxfast/dillinger_installed
+      // TODO: Make this configurable
+      const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
+      winePrefixPath = path.posix.join(
+        this.getHostPath(hostInstallPath),
+        `.wine-${gameIdentifier}`
+      );
+      
+      console.log(`  Wine prefix: ${winePrefixPath}`);
+    }
+
+    // Build volume binds
+    const binds = [
+      `dillinger_root:/data:rw`, // Mount dillinger_root volume for saves/state
+      `dillinger_installers:/installers:rw`, // Use named volume for installers
+      `dillinger_installed:/config:rw`, // Use named volume for config
+      ...displayConfig.volumes
+    ];
+    
+    // For Wine games, mount the Wine prefix; for native games, mount the game directory
+    if (platform.type === 'wine' && winePrefixPath) {
+      binds.push(`${winePrefixPath}:/wineprefix:rw`);
+      console.log(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
+    } else {
+      // For non-Wine games, mount the game directory
+      binds.push(`${this.SESSION_VOLUME}:/game:ro`);
+      console.log(`  Mounting game directory: ${this.SESSION_VOLUME} -> /game`);
+    }
 
     try {
       // Create and start the container
-      const container = await docker.createContainer({
+      const containerConfig: any = {
         Image: platform.configuration.containerImage || 'dillinger/runner-linux-native:latest',
         name: `dillinger-session-${sessionId}`,
         Env: env,
+        WorkingDir: containerWorkingDir,
         HostConfig: {
-          AutoRemove: false, // Keep container after exit for debugging
-          Binds: [
-            `${this.SESSION_VOLUME}:/game:ro`, // Mount game directory as read-only
-            `dillinger_saves_${sessionId}:/saves:rw`, // Mount saves directory as read-write
-            `dillinger_installers:/installers:rw`, // Use named volume for installers
-            `dillinger_installed:/config:rw`, // Use named volume for config
-            ...displayConfig.volumes
-          ],
+          AutoRemove: true, // Auto-remove container when stopped
+          Binds: binds,
           Devices: displayConfig.devices,
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
@@ -239,7 +486,15 @@ export class DockerService {
         OpenStdin: true,
         AttachStdout: true,
         AttachStderr: true,
-      });
+      };
+      
+      // For Wine games, the entrypoint script handles execution via env vars
+      // For native games, pass the command directly
+      if (platform.type !== 'wine') {
+        containerConfig.Cmd = cmdArray;
+      }
+      
+      const container = await docker.createContainer(containerConfig);
 
       await container.start();
       
@@ -261,12 +516,363 @@ export class DockerService {
   }
 
   /**
+   * Launch a debug container for troubleshooting
+   * Returns the container info and a docker exec command to attach interactively
+   */
+  async launchDebugContainer(options: GameLaunchOptions): Promise<DebugContainerInfo> {
+    const { game, platform, sessionId } = options;
+
+    // Ensure host path detection
+    await this.detectHostPath();
+
+    const gameDirectory = game.installation?.installPath || game.filePath;
+    
+    if (!gameDirectory) {
+      throw new Error('Game has no file path or installation path configured');
+    }
+
+    // Set up the session volume ONLY for non-Wine games
+    // Wine games use direct Wine prefix bind mounts, no temp volume needed
+    if (platform.type !== 'wine') {
+      const isAbsolutePath = path.isAbsolute(gameDirectory);
+      if (isAbsolutePath) {
+        await this.setCurrentSessionVolumeAbsolute(gameDirectory);
+      } else {
+        await this.setCurrentSessionVolume(gameDirectory);
+      }
+    }
+
+    // Get Wine prefix for Wine games (same logic as launchGame)
+    const gameIdentifier = game.slug || game.id;
+    let winePrefixPath: string | null = null;
+    
+    if (platform.type === 'wine') {
+      const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
+      winePrefixPath = path.posix.join(
+        this.getHostPath(hostInstallPath),
+        `.wine-${gameIdentifier}`
+      );
+      console.log(`  Debug Wine prefix: ${winePrefixPath}`);
+    }
+
+    // Setup display configuration
+    const displayConfig = await this.getDisplayConfiguration();
+    
+    // Base environment
+    const env = [
+      ...displayConfig.env,
+      'DEBIAN_FRONTEND=noninteractive',
+    ];
+
+    // Add Wine-specific environment
+    if (platform.type === 'wine') {
+      // Build WINEDEBUG environment variable from game settings
+      const wineDebug = this.buildWineDebug(game);
+      
+      // Note: WINEARCH should NOT be set for debug containers with existing prefixes
+      // Wine will auto-detect the architecture from the existing prefix
+      env.push('WINEPREFIX=/wineprefix');
+      env.push(`WINEDEBUG=${wineDebug}`);
+      
+      console.log(`  WINEDEBUG=${wineDebug}`);
+    }
+
+    // Setup volume binds
+    const binds = [
+      `dillinger_root:/data:rw`,
+      ...displayConfig.volumes
+    ];
+    
+    if (platform.type === 'wine' && winePrefixPath) {
+      binds.push(`${winePrefixPath}:/wineprefix:rw`);
+    } else {
+      binds.push(`${this.SESSION_VOLUME}:/game:ro`);
+    }
+
+    try {
+      const containerConfig: any = {
+        Image: platform.configuration.containerImage || 'dillinger/runner-linux-native:latest',
+        name: `dillinger-debug-${sessionId}`,
+        Env: env,
+        WorkingDir: platform.type === 'wine' ? '/wineprefix' : '/game',
+        Entrypoint: ['/bin/bash', '-c', 'tail -f /dev/null'], // Override entrypoint for debug mode
+        HostConfig: {
+          AutoRemove: false,
+          Binds: binds,
+          Devices: displayConfig.devices,
+          IpcMode: displayConfig.ipcMode,
+          SecurityOpt: displayConfig.securityOpt,
+        },
+        Tty: true,
+        OpenStdin: true,
+      };
+      
+      const container = await docker.createContainer(containerConfig);
+      await container.start();
+      const info = await container.inspect();
+
+      console.log(`✓ Debug container started: ${container.id}`);
+      console.log(`  Container ID: ${info.Id}`);
+
+      // Generate the docker exec command for interactive access
+      const execCommand = `docker exec -it ${info.Id.substring(0, 12)} /bin/bash`;
+
+      return {
+        containerId: info.Id,
+        status: info.State.Status,
+        createdAt: info.Created,
+        execCommand,
+      };
+    } catch (error) {
+      console.error('Error launching debug container:', error);
+      throw new Error(`Failed to launch debug container: ${error}`);
+    }
+  }
+
+  /**
+   * Run registry setup scripts for Wine games
+   * Detects .cmd/.bat files with REG ADD commands and converts them to .reg format
+   */
+  async runRegistrySetup(options: { game: Game; platform: Platform }): Promise<{ success: boolean; message: string }> {
+    const { game, platform } = options;
+
+    if (platform.type !== 'wine') {
+      return { success: false, message: 'Registry setup is only for Wine games' };
+    }
+
+    const gameIdentifier = game.slug || game.id;
+    const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
+    const winePrefixPath = path.posix.join(
+      this.getHostPath(hostInstallPath),
+      `.wine-${gameIdentifier}`
+    );
+    
+    // The game files are inside the Wine prefix at drive_c/GOG Games/<game>/
+    // We need to extract the game directory from the launch command
+    const launchCommand = game.settings?.launch?.command || '';
+    const windowsPath = launchCommand.replace(/^[A-Za-z]:/, ''); // Remove C:
+    const gameDirPath = path.dirname(windowsPath.replace(/\\/g, '/')); // Get directory
+    const gameInstallPath = path.posix.join(winePrefixPath, 'drive_c', gameDirPath.substring(1)); // Remove leading /
+
+    console.log(`Looking for registry files in: ${gameInstallPath}`);
+
+    // Look for registry setup files
+    const { readdir, readFile, writeFile } = await import('fs/promises');
+    
+    try {
+      const files = await readdir(gameInstallPath);
+      const regSetupFiles = files.filter(f => 
+        (f.toLowerCase().endsWith('.cmd') || f.toLowerCase().endsWith('.bat')) &&
+        (f.toLowerCase().includes('reg') || f.toLowerCase().includes('setup'))
+      );
+
+      if (regSetupFiles.length === 0) {
+        return { success: false, message: 'No registry setup files found (looking for .cmd/.bat files with "reg" or "setup" in name)' };
+      }
+
+      console.log(`Found registry setup files: ${regSetupFiles.join(', ')}`);
+
+      // Process the first registry file found
+      const regFile = regSetupFiles[0];
+      if (!regFile) {
+        return { success: false, message: 'No registry file found in array' };
+      }
+      
+      const cmdFilePath = path.join(gameInstallPath, regFile);
+      const cmdContent = await readFile(cmdFilePath, 'utf-8');
+
+      // Convert CMD format to REG format
+      const regContent = this.convertCmdToReg(cmdContent);
+      
+      // Write the .reg file
+      const regFilePath = path.join(gameInstallPath, 'dillinger_setup.reg');
+      await writeFile(regFilePath, regContent, 'utf-8');
+      
+      console.log(`Converted ${regFile} to dillinger_setup.reg`);
+
+      // Run wine regedit in a temporary container
+      const displayConfig = await this.getDisplayConfiguration();
+      
+      // Build WINEDEBUG from game settings (though registry setup usually doesn't need verbose debug)
+      const wineDebug = this.buildWineDebug(game);
+      
+      // Note: WINEARCH should NOT be set when using an existing prefix
+      // Wine will auto-detect the architecture from the existing prefix
+      const containerConfig: any = {
+        Image: platform.configuration.containerImage || 'dillinger/runner-wine:latest',
+        Entrypoint: ['/bin/bash', '-c'],
+        Cmd: [`cd /game && WINEPREFIX=/wineprefix wine regedit /S dillinger_setup.reg`],
+        Env: [
+          'WINEPREFIX=/wineprefix',
+          `WINEDEBUG=${wineDebug}`,
+          ...displayConfig.env,
+        ],
+        HostConfig: {
+          AutoRemove: true,
+          Binds: [
+            `${winePrefixPath}:/wineprefix:rw`,
+            `${gameInstallPath}:/game:ro`,
+          ],
+          Devices: displayConfig.devices,
+        },
+        WorkingDir: '/game',
+      };
+
+      console.log(`Running: wine regedit /S dillinger_setup.reg (WINEDEBUG=${wineDebug})`);
+      
+      const container = await docker.createContainer(containerConfig);
+      
+      await container.start();
+      const result = await container.wait();
+
+      if (result.StatusCode === 0) {
+        console.log(`✓ Successfully imported registry settings from ${regFile}`);
+        return { success: true, message: `Registry settings imported from ${regFile}` };
+      } else {
+        console.error(`Failed to import registry settings, exit code: ${result.StatusCode}`);
+        return { success: false, message: `Failed to import registry settings (exit code: ${result.StatusCode})` };
+      }
+
+    } catch (error: any) {
+      console.error('Error running registry setup:', error);
+      return { success: false, message: `Error: ${error.message}` };
+    }
+  }
+
+  /**
+   * Convert Windows CMD registry script to .reg file format
+   */
+  private convertCmdToReg(cmdContent: string): string {
+    const lines = cmdContent.split('\n');
+    let regContent = 'Windows Registry Editor Version 5.00\n\n';
+    let currentKey = '';
+    
+    // Extract regpath variable if defined
+    let regpathValue = '';
+    for (const line of lines) {
+      const regpathMatch = line.match(/SET\s+regpath=["']([^"']+)["']/i);
+      if (regpathMatch && regpathMatch[1]) {
+        regpathValue = regpathMatch[1];
+        break;
+      }
+    }
+    
+    console.log(`Found regpath variable: ${regpathValue}`);
+    console.log(`Total lines in CMD file: ${lines.length}`);
+    
+    let processedCount = 0;
+    let skippedCount = 0;
+    let matchedCount = 0;
+    
+    for (const line of lines) {
+      let trimmed = line.trim();
+      
+      // Skip empty lines, comments, and SET commands
+      if (!trimmed || trimmed.startsWith('::') || trimmed.startsWith('@') || trimmed.startsWith('SET ') || trimmed === 'exit') {
+        skippedCount++;
+        continue;
+      }
+      
+      processedCount++;
+      const originalLine = trimmed;
+      
+      // Replace %regpath% with actual value
+      if (regpathValue) {
+        trimmed = trimmed.replace(/%regpath%/gi, `"${regpathValue}"`);
+      }
+      
+      console.log(`[${processedCount}] Original: ${originalLine.substring(0, 80)}`);
+      console.log(`[${processedCount}] After replace: ${trimmed.substring(0, 100)}`);
+      
+      // Parse REG ADD commands - more flexible pattern
+      // Matches: REG ADD "path" /v "name" /t TYPE /d "data" /f [/reg:32]
+      const regAddMatch = trimmed.match(/REG\s+ADD\s+"([^"]+)"\s+\/v\s+"([^"]+)"\s+\/t\s+(\S+)\s+\/d\s+(.+?)(?:\s+\/f|\s+$)/i);
+      
+      if (regAddMatch) {
+        matchedCount++;
+        console.log(`[${processedCount}] MATCHED!`);
+        const keyPath = regAddMatch[1];
+        const valueName = regAddMatch[2];
+        const valueType = regAddMatch[3];
+        let valueData = regAddMatch[4]?.trim();
+        
+        if (!keyPath || !valueName || !valueType || !valueData) {
+          console.log(`Skipping line - missing data: ${trimmed}`);
+          continue;
+        }
+        
+        // Remove quotes from valueData if present
+        if (valueData.startsWith('"') && valueData.includes('"')) {
+          valueData = valueData.match(/"([^"]*)"/)?.[1] || valueData;
+        }
+        
+        // Add key header if it changed
+        if (keyPath !== currentKey) {
+          currentKey = keyPath;
+          regContent += `\n[${keyPath}]\n`;
+        }
+        
+        // Convert value based on type
+        if (valueType === 'REG_SZ') {
+          regContent += `"${valueName}"="${valueData}"\n`;
+        } else if (valueType === 'REG_DWORD') {
+          const hexValue = parseInt(valueData).toString(16).padStart(8, '0');
+          regContent += `"${valueName}"=dword:${hexValue}\n`;
+        } else if (valueType === 'REG_BINARY') {
+          // Convert binary data (e.g., "01000000" to "01,00,00,00")
+          const hexBytes = valueData.match(/.{2}/g)?.join(',') || valueData;
+          regContent += `"${valueName}"=hex:${hexBytes}\n`;
+        }
+      }
+    }
+    
+    console.log(`\n=== CMD Parsing Summary ===`);
+    console.log(`Total lines: ${lines.length}`);
+    console.log(`Skipped: ${skippedCount}`);
+    console.log(`Processed: ${processedCount}`);
+    console.log(`Matched: ${matchedCount}`);
+    console.log(`===========================\n`);
+    
+    console.log(`Generated .reg file with ${regContent.split('\n').length} lines`);
+    return regContent;
+  }
+
+  /**
+   * Monitor a game container and notify when it stops
+   * This runs asynchronously and updates the session status
+   */
+  async monitorGameContainer(
+    containerId: string, 
+    sessionId: string,
+    onStop?: (exitCode: number) => void | Promise<void>
+  ): Promise<void> {
+    try {
+      const container = docker.getContainer(containerId);
+      
+      console.log(`🔍 Monitoring game container: ${containerId.substring(0, 12)}`);
+      
+      // Wait for container to finish (this blocks until container stops)
+      const result = await container.wait();
+      
+      console.log(`✓ Game container stopped: ${containerId.substring(0, 12)}`);
+      console.log(`  Exit code: ${result.StatusCode}`);
+      
+      // Call the callback if provided
+      if (onStop) {
+        await onStop(result.StatusCode);
+      }
+    } catch (error) {
+      console.error('Error monitoring game container:', error);
+    }
+  }
+
+  /**
    * Install a game using Docker with GUI support
    * This runs an installer (exe, msi, etc.) in a containerized environment
    * with X11/Wayland passthrough so the user sees the installation wizard
    */
   async installGame(options: GameInstallOptions): Promise<ContainerInfo> {
-    const { installerPath, installPath, platform, sessionId } = options;
+    const { installerPath, installPath, platform, sessionId, game } = options;
 
     // Ensure host path is detected
     await this.detectHostPath();
@@ -275,14 +881,37 @@ export class DockerService {
     console.log(`  Installation target: ${installPath}`);
     console.log(`  Platform: ${platform.name} (${platform.type})`);
     console.log(`  Container Image: ${platform.configuration.containerImage}`);
+    console.log(`  Game slug: ${game.slug || game.id}`);
 
     // Convert paths to host paths if running in devcontainer
     const hostInstallerPath = this.getHostPath(installerPath);
     const hostInstallPath = this.getHostPath(installPath);
 
     // Get display forwarding configuration
-    const displayConfig = this.getDisplayConfiguration();
+    const displayConfig = await this.getDisplayConfiguration();
     console.log(`  Display mode: ${displayConfig.mode}`);
+
+    // Use game slug (or ID if no slug) for Wine prefix directory
+    const gameIdentifier = game.slug || game.id;
+    const winePrefixPath = path.posix.join(hostInstallPath, `.wine-${gameIdentifier}`);
+    
+    console.log(`  Wine prefix: ${winePrefixPath}`);
+
+    // For Wine installations, ensure the Wine prefix directory exists with proper permissions
+    // We'll create it with a permissive mode so Wine can use it
+    if (platform.type === 'wine') {
+      try {
+        const fs = await import('fs-extra');
+        // Create directory if it doesn't exist
+        await fs.ensureDir(winePrefixPath);
+        // Set permissions to 777 so Wine user in container can access it
+        await fs.chmod(winePrefixPath, 0o777);
+        console.log(`  ✓ Wine prefix directory prepared with correct permissions`);
+      } catch (error) {
+        console.warn(`  ⚠ Could not prepare Wine prefix directory:`, error);
+        // Continue anyway - Wine will try to create it
+      }
+    }
 
     // Prepare environment variables for installation
     const env = [
@@ -293,11 +922,22 @@ export class DockerService {
 
     // Add Wine-specific configuration for Windows installers
     if (platform.type === 'wine') {
+      // Get Wine architecture from game settings (default to win64)
+      const wineArch = game.settings?.wine?.arch || 'win64';
+      
+      // Build WINEDEBUG from game settings (but default to -all for installation)
+      // Installation usually works better with minimal logging
+      const wineDebug = this.buildWineDebug(game);
+      
       env.push(
-        'WINEDEBUG=-all', // Reduce Wine debug output
-        'WINEPREFIX=/install/.wine', // Use install directory for Wine prefix
+        `WINEDEBUG=${wineDebug}`, // Use game's debug settings
+        `WINEPREFIX=/wineprefix`, // Wine prefix mounted separately
+        `WINEARCH=${wineArch}`, // Wine architecture (win32 or win64)
         'DISPLAY_WINEPREFIX=1' // Signal to show Wine configuration if needed
       );
+      
+      console.log(`  Wine architecture: ${wineArch}`);
+      console.log(`  WINEDEBUG=${wineDebug}`);
     }
 
     try {
@@ -307,11 +947,11 @@ export class DockerService {
         name: `dillinger-install-${sessionId}`,
         Env: env,
         HostConfig: {
-          AutoRemove: false, // Keep container for debugging
+          AutoRemove: true, // Auto-remove container when installation completes
           Binds: [
             `${hostInstallerPath}:/installer/${path.basename(installerPath)}:ro`, // Mount installer as read-only
             `${hostInstallPath}:/install:rw`, // Mount installation target as read-write
-            `${hostInstallPath}/.wine:/wineprefix:rw`, // Prevent anonymous wineprefix volume
+            `${winePrefixPath}:/wineprefix:rw`, // Game-specific Wine prefix (prevents interference between games)
             `dillinger_installers:/installers:rw`, // Use named volume for installers
             `dillinger_installed:/config:rw`, // Use named volume for config
             ...displayConfig.volumes
@@ -673,10 +1313,9 @@ export class DockerService {
       await container.stop();
       console.log(`✓ Game container stopped: ${containerId}`);
       
-      // Clean up the session volume
-      if (cleanupVolume && sessionId) {
-        await this.cleanupSessionVolume(sessionId);
-      }
+      // Note: We don't clean up save volumes here anymore
+      // Save volumes are game-based (dillinger_saves_<gameId>) and persist across sessions
+      // They should only be deleted when the game itself is deleted
     } catch (error: any) {
       // 304 means container is already stopped - this is fine
       if (error.statusCode === 304) {
@@ -692,25 +1331,6 @@ export class DockerService {
       
       console.error('Error stopping game container:', error);
       throw new Error(`Failed to stop game: ${error}`);
-    }
-  }
-
-  /**
-   * Clean up a session's save volume
-   */
-  async cleanupSessionVolume(sessionId: string): Promise<void> {
-    const volumeName = `dillinger_saves_${sessionId}`;
-    try {
-      const volume = docker.getVolume(volumeName);
-      await volume.remove();
-      console.log(`✓ Cleaned up session volume: ${volumeName}`);
-    } catch (error: any) {
-      if (error.statusCode === 404) {
-        console.log(`ℹ Session volume not found (already cleaned): ${volumeName}`);
-        return;
-      }
-      console.error(`Failed to cleanup session volume ${volumeName}:`, error);
-      // Don't throw - volume cleanup failure shouldn't break session stop
     }
   }
 
@@ -795,17 +1415,59 @@ export class DockerService {
   /**
    * Get container logs
    */
+  /**
+   * Check if a container exists (without throwing errors)
+   */
+  async containerExists(containerId: string): Promise<boolean> {
+    try {
+      const container = docker.getContainer(containerId);
+      await container.inspect();
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   async getContainerLogs(containerId: string, tail: number = 100): Promise<string> {
     try {
       const container = docker.getContainer(containerId);
-      const logs = await container.logs({
+      
+      // Get logs as buffer (follow: false returns Buffer)
+      const logsBuffer = await container.logs({
         stdout: true,
         stderr: true,
         tail,
         timestamps: true,
+        follow: false,
       });
-      return logs.toString('utf8');
+
+      // Docker's multiplexed stream format: 8-byte header per chunk
+      // Header: [stream_type, 0, 0, 0, size1, size2, size3, size4]
+      // stream_type: 1=stdout, 2=stderr
+      const logs: string[] = [];
+      let offset = 0;
+
+      while (offset < logsBuffer.length) {
+        // Read 8-byte header
+        const streamType = logsBuffer[offset];
+        const size = logsBuffer.readUInt32BE(offset + 4);
+        
+        // Read payload
+        const payload = logsBuffer.slice(offset + 8, offset + 8 + size).toString('utf8');
+        logs.push(payload);
+        
+        offset += 8 + size;
+      }
+
+      // Join and remove duplicates
+      const allLines = logs.join('').split('\n').filter(line => line.trim());
+      const uniqueLines = Array.from(new Set(allLines));
+      return uniqueLines.join('\n');
     } catch (error) {
+      // Don't log 404 errors - just rethrow silently
+      if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 404) {
+        throw new Error('Container not found');
+      }
       console.error('Error getting container logs:', error);
       throw new Error(`Failed to get container logs: ${error}`);
     }
@@ -816,14 +1478,14 @@ export class DockerService {
    * Supports X11 and Wayland display protocols
    * Prefers X11 when both are available (more compatible with games)
    */
-  private getDisplayConfiguration(): {
+  private async getDisplayConfiguration(): Promise<{
     mode: 'x11' | 'wayland' | 'none';
     env: string[];
     volumes: string[];
     devices: Array<{ PathOnHost: string; PathInContainer: string; CgroupPermissions: string }>;
     ipcMode?: string;
     securityOpt?: string[];
-  } {
+  }> {
     const display = process.env.DISPLAY;
     const waylandDisplay = process.env.WAYLAND_DISPLAY;
     const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
@@ -844,6 +1506,22 @@ export class DockerService {
         console.log(`  ⚠ No Xauthority file found, X11 may require xhost +local:docker`);
       }
       
+      // Add PulseAudio socket for audio support
+      const userHome = process.env.HOME;
+      if (xdgRuntimeDir && existsSync(`${xdgRuntimeDir}/pulse`)) {
+        volumes.push(`${xdgRuntimeDir}/pulse:/run/user/1000/pulse:rw`);
+        console.log(`  ✓ PulseAudio socket available`);
+        
+        // Mount PulseAudio cookie if it exists
+        const pulseCookie = `${userHome}/.config/pulse/cookie`;
+        if (existsSync(pulseCookie)) {
+          volumes.push(`${pulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
+          console.log(`  ✓ PulseAudio cookie available`);
+        }
+      } else {
+        console.log(`  ⚠ No PulseAudio socket found at ${xdgRuntimeDir}/pulse`);
+      }
+      
       // Check if GPU device exists
       const devices = [];
       if (existsSync('/dev/dri')) {
@@ -853,12 +1531,26 @@ export class DockerService {
         console.log(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
       }
       
+      // Get default PulseAudio sink from settings or environment variable
+      // This allows directing audio to a specific output when multiple are available
+      const settingsService = SettingsService.getInstance();
+      const audioSettings = await settingsService.getAudioSettings();
+      const pulseSink = audioSettings.defaultSink || process.env.PULSE_SINK || '';
+      
+      const envVars = [
+        `DISPLAY=${display}`,
+        'XAUTHORITY=',  // Disable Xauthority requirement
+        'PULSE_SERVER=unix:/run/user/1000/pulse/native',
+        'PULSE_COOKIE=/home/gameuser/.config/pulse/cookie',
+      ];
+      
+      if (pulseSink) {
+        envVars.push(`PULSE_SINK=${pulseSink}`);
+      }
+      
       return {
         mode: 'x11',
-        env: [
-          `DISPLAY=${display}`,
-          'XAUTHORITY='  // Disable Xauthority requirement
-        ],
+        env: envVars,
         volumes,
         devices,
         ipcMode: 'host', // Required for X11 shared memory
@@ -910,77 +1602,74 @@ export class DockerService {
   }
 
   /**
-   * List all session volumes (dillinger_saves_*)
+   * NOTE: Save volumes are no longer used
+   * 
+   * Game saves are now stored in dillinger_root at /data/saves/<gameId>
+   * This eliminates the need for per-game or per-session save volumes.
+   * All save data is centralized in the dillinger_root volume.
+   * 
+   * Any old dillinger_saves_* volumes can be safely deleted manually.
    */
-  async listSessionVolumes(): Promise<Array<{ name: string; inUse: boolean }>> {
-    try {
-      // Get all volumes
-      const volumeListResponse = await docker.listVolumes();
-      const allVolumes = volumeListResponse.Volumes || [];
-      
-      // Filter for session volumes
-      const sessionVolumes = allVolumes
-        .filter(vol => vol.Name.startsWith('dillinger_saves_'))
-        .map(vol => vol.Name);
-
-      // Get all running containers to check which volumes are in use
-      const runningContainers = await docker.listContainers();
-      const volumesInUse = new Set<string>();
-
-      for (const container of runningContainers) {
-        const containerInfo = await docker.getContainer(container.Id).inspect();
-        const mounts = containerInfo.Mounts || [];
-        mounts.forEach(mount => {
-          if (mount.Type === 'volume' && mount.Name) {
-            volumesInUse.add(mount.Name);
-          }
-        });
-      }
-
-      return sessionVolumes.map(name => ({
-        name,
-        inUse: volumesInUse.has(name),
-      }));
-    } catch (error) {
-      console.error('Error listing session volumes:', error);
-      throw new Error(`Failed to list session volumes: ${error}`);
-    }
-  }
 
   /**
-   * Clean up all inactive session volumes
-   * Returns count of volumes cleaned and any errors
+   * Get available PulseAudio sinks on the host system
    */
-  async cleanupInactiveSessionVolumes(): Promise<{ cleaned: number; failed: number; errors: string[] }> {
+  async getAvailableAudioSinks(): Promise<Array<{ id: string; name: string; description: string }>> {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
     try {
-      const sessionVolumes = await this.listSessionVolumes();
-      const inactiveVolumes = sessionVolumes.filter(v => !v.inUse);
-
-      console.log(`Found ${inactiveVolumes.length} inactive session volumes to clean up`);
-
-      let cleaned = 0;
-      let failed = 0;
-      const errors: string[] = [];
-
-      for (const volumeInfo of inactiveVolumes) {
-        try {
-          const volume = docker.getVolume(volumeInfo.name);
-          await volume.remove();
-          console.log(`  ✓ Cleaned up: ${volumeInfo.name}`);
-          cleaned++;
-        } catch (error: any) {
-          console.error(`  ✗ Failed to clean up ${volumeInfo.name}:`, error.message);
-          failed++;
-          errors.push(`${volumeInfo.name}: ${error.message}`);
+      // Use pactl to list sinks
+      const { stdout } = await execAsync('pactl list sinks');
+      
+      const sinks: Array<{ id: string; name: string; description: string }> = [];
+      const lines = stdout.split('\n');
+      
+      let currentSink: { id?: string; name?: string; description?: string } = {};
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        
+        // New sink entry starts
+        if (trimmed.startsWith('Sink #')) {
+          if (currentSink.id && currentSink.name) {
+            sinks.push({
+              id: currentSink.id,
+              name: currentSink.name,
+              description: currentSink.description || currentSink.name
+            });
+          }
+          currentSink = {};
+        }
+        
+        // Parse Name field (the actual sink ID we need)
+        if (trimmed.startsWith('Name:')) {
+          currentSink.id = trimmed.substring(5).trim();
+          currentSink.name = currentSink.id; // Fallback if no description
+        }
+        
+        // Parse Description field (human-readable name)
+        if (trimmed.startsWith('Description:')) {
+          const description = trimmed.substring(12).trim();
+          currentSink.description = description;
+          currentSink.name = description;
         }
       }
-
-      console.log(`✓ Cleanup complete: ${cleaned} cleaned, ${failed} failed`);
-
-      return { cleaned, failed, errors };
+      
+      // Add last sink if exists
+      if (currentSink.id && currentSink.name) {
+        sinks.push({
+          id: currentSink.id,
+          name: currentSink.name,
+          description: currentSink.description || currentSink.name
+        });
+      }
+      
+      return sinks;
     } catch (error) {
-      console.error('Error during bulk cleanup:', error);
-      throw new Error(`Failed to cleanup session volumes: ${error}`);
+      console.error('Failed to get audio sinks:', error);
+      return [];
     }
   }
 }

@@ -59,9 +59,20 @@ if [ -n "$DISPLAY" ]; then
     fi
 fi
 
-# Configure PulseAudio (learned from GoW)
-if command -v pulseaudio >/dev/null 2>&1; then
-    echo -e "${BLUE}Configuring audio...${NC}"
+# Configure PulseAudio
+if [ -n "$PULSE_SERVER" ]; then
+    echo -e "${BLUE}Configuring audio (using host PulseAudio)...${NC}"
+    echo "  PULSE_SERVER: $PULSE_SERVER"
+    
+    # Test connection to PulseAudio
+    if pactl info >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ PulseAudio connection successful${NC}"
+    else
+        echo -e "${YELLOW}⚠ Cannot connect to PulseAudio server${NC}"
+        echo "  Make sure the PulseAudio socket is mounted"
+    fi
+elif command -v pulseaudio >/dev/null 2>&1; then
+    echo -e "${BLUE}Configuring audio (container-local)...${NC}"
     if pulseaudio --check 2>/dev/null; then
         echo -e "${GREEN}✓ PulseAudio is running${NC}"
     else
@@ -163,14 +174,30 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "  Executable: $GAME_EXECUTABLE"
 echo "  Arguments: ${GAME_ARGS:-<none>}"
+
+# Check for Wine virtual desktop mode
+if [ -n "$WINE_VIRTUAL_DESKTOP" ]; then
+    echo "  Virtual Desktop: $WINE_VIRTUAL_DESKTOP"
+fi
+
 echo ""
 
 # Change to game directory
 cd "$(dirname "$GAME_EXECUTABLE")" || true
 
 # Launch the game via Wine
-if [ -n "$GAME_ARGS" ]; then
-    exec wine "$GAME_EXECUTABLE" $GAME_ARGS
+if [ -n "$WINE_VIRTUAL_DESKTOP" ]; then
+    # Use Wine virtual desktop for fullscreen/windowed mode
+    if [ -n "$GAME_ARGS" ]; then
+        exec wine explorer /desktop=Dillinger,"$WINE_VIRTUAL_DESKTOP" "$GAME_EXECUTABLE" $GAME_ARGS
+    else
+        exec wine explorer /desktop=Dillinger,"$WINE_VIRTUAL_DESKTOP" "$GAME_EXECUTABLE"
+    fi
 else
-    exec wine "$GAME_EXECUTABLE"
+    # Standard Wine launch
+    if [ -n "$GAME_ARGS" ]; then
+        exec wine "$GAME_EXECUTABLE" $GAME_ARGS
+    else
+        exec wine "$GAME_EXECUTABLE"
+    fi
 fi

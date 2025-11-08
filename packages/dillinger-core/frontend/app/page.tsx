@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
-import PlayHistoryModal from './components/PlayHistoryModal';
 
 interface Game {
   id: string;
@@ -56,11 +55,6 @@ export default function GamesPage() {
   const [displayedBackdrop, setDisplayedBackdrop] = useState<string | null>(null);
   const [backdropOpacity, setBackdropOpacity] = useState(0);
   const [gridColumns, setGridColumns] = useState(2); // Default to 2 columns
-  const [playHistoryModal, setPlayHistoryModal] = useState<{ isOpen: boolean; gameId: string | null; gameTitle: string }>({
-    isOpen: false,
-    gameId: null,
-    gameTitle: '',
-  });
 
   const hoveredGame = hoveredGameId ? games.find(g => g.id === hoveredGameId) : null;
   const backdropImage = hoveredGame?.metadata?.backdropImage;
@@ -157,6 +151,51 @@ export default function GamesPage() {
     }
   }, []); // Empty dependency array - only run on mount
 
+  // Poll running sessions to detect when containers stop
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      // Check if we have any running sessions
+      const runningSessions = Object.entries(sessions).filter(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        ([_, session]) => session.status === 'running'
+      );
+      
+      if (runningSessions.length === 0) {
+        return; // Nothing to poll
+      }
+
+      // Check each running session
+      for (const [gameId, session] of runningSessions) {
+        try {
+          const response = await fetch(`/api/launch/${gameId}/sessions`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.sessions) {
+              // Find the current session
+              const currentSession = data.sessions.find(
+                (s: any) => s.id === session.id
+              );
+              
+              if (currentSession && currentSession.status !== 'running') {
+                // Session is no longer running - remove from local state
+                console.log(`Session for game ${gameId} is no longer running (status: ${currentSession.status})`);
+                setSessions((prev) => {
+                  const newSessions = { ...prev };
+                  delete newSessions[gameId];
+                  return newSessions;
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`Error polling session for game ${gameId}:`, err);
+        }
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [sessions]); // Re-run when sessions change
+
   async function loadGames() {
     try {
       const response = await fetch('/api/games');
@@ -204,25 +243,6 @@ export default function GamesPage() {
     } catch (err) {
       setError('Failed to delete game: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
-  }
-
-  function handleOpenPlayHistory(gameId: string) {
-    const game = games.find(g => g.id === gameId);
-    if (game) {
-      setPlayHistoryModal({
-        isOpen: true,
-        gameId: gameId,
-        gameTitle: game.title,
-      });
-    }
-  }
-
-  function handleClosePlayHistory() {
-    setPlayHistoryModal({
-      isOpen: false,
-      gameId: null,
-      gameTitle: '',
-    });
   }
 
   async function launchGame(gameId: string) {
@@ -561,15 +581,15 @@ export default function GamesPage() {
                             </div>
                           )}
                         </div>
-                        <button
-                          onClick={() => handleOpenPlayHistory(game.id)}
+                        <a
+                          href={`/games/${game.id}/sessions`}
                           className="flex-shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
                           title="View play history"
                         >
                           <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                           </svg>
-                        </button>
+                        </a>
                       </>
                     )}
                   </div>
@@ -752,16 +772,6 @@ export default function GamesPage() {
             </div>
           )}
         </div>
-
-        {/* Play History Modal */}
-        {playHistoryModal.gameId && (
-          <PlayHistoryModal
-            gameId={playHistoryModal.gameId}
-            gameTitle={playHistoryModal.gameTitle}
-            isOpen={playHistoryModal.isOpen}
-            onClose={handleClosePlayHistory}
-          />
-        )}
       </div>
     );
   }

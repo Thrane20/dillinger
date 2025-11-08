@@ -23,6 +23,7 @@ export interface EntityCounts {
 
 export class JSONStorageService {
   private static instance: JSONStorageService;
+  private loggedErrors = new Set<string>(); // Track logged errors to avoid spam
 
   static getInstance(): JSONStorageService {
     if (!JSONStorageService.instance) {
@@ -131,7 +132,12 @@ export class JSONStorageService {
           entities.push(entity);
         } catch (error) {
           // Skip files that can't be read (deleted, corrupted, etc.)
-          console.warn(`Skipping ${type}/${file}:`, (error as Error).message);
+          // Only log each unique error once to avoid spam
+          const errorKey = `${type}/${file}`;
+          if (!this.loggedErrors.has(errorKey)) {
+            console.warn(`Skipping ${type}/${file}:`, (error as Error).message);
+            this.loggedErrors.add(errorKey);
+          }
         }
       }
 

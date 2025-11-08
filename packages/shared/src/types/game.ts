@@ -40,6 +40,22 @@ export interface Game {
       version?: string; // Wine version for Windows games
       prefix?: string; // Wine prefix configuration
       dlls?: Record<string, string>; // DLL overrides
+      arch?: 'win32' | 'win64'; // Wine architecture (WINEARCH)
+      debug?: {
+        // Wine debug channels - controls WINEDEBUG environment variable
+        // Each channel can be enabled individually for debugging
+        relay?: boolean;      // Function call relay (very verbose)
+        seh?: boolean;        // Structured exception handling
+        tid?: boolean;        // Thread IDs in messages
+        timestamp?: boolean;  // Timestamps in messages
+        heap?: boolean;       // Heap operations
+        file?: boolean;       // File operations
+        module?: boolean;     // Module loading
+        win?: boolean;        // Window messages
+        d3d?: boolean;        // Direct3D operations
+        opengl?: boolean;     // OpenGL operations
+        all?: boolean;        // Enable all debug output (very verbose!)
+      };
     };
     emulator?: {
       core?: string; // RetroArch core name
@@ -50,6 +66,8 @@ export interface Game {
       arguments?: string[]; // Launch arguments
       environment?: Record<string, string>; // Environment variables
       workingDirectory?: string; // Working directory relative to game directory
+      fullscreen?: boolean; // Request fullscreen mode (uses Wine virtual desktop)
+      resolution?: string; // Window/desktop resolution (e.g., "1920x1080")
     };
   };
   installation?: {

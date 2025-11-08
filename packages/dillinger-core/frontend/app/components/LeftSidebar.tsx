@@ -13,22 +13,26 @@ interface Volume {
   status: 'active' | 'error';
 }
 
+// NOTE: SessionVolumeInfo interface commented out - no longer needed with dillinger_root architecture
+/*
 interface SessionVolumeInfo {
   total: number;
   active: number;
   inactive: number;
 }
+*/
 
 export default function LeftSidebar() {
   const [showFileExplorer, setShowFileExplorer] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(false);
-  const [showCleanupDialog, setShowCleanupDialog] = useState(false);
+  // NOTE: Cleanup dialog state commented out - no longer needed with dillinger_root architecture
+  // const [showCleanupDialog, setShowCleanupDialog] = useState(false);
   const [selectedPath, setSelectedPath] = useState('');
   const [volumeName, setVolumeName] = useState('');
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sessionInfo, setSessionInfo] = useState<SessionVolumeInfo | null>(null);
-  const [cleanupInProgress, setCleanupInProgress] = useState(false);
+  // const [sessionInfo, setSessionInfo] = useState<SessionVolumeInfo | null>(null);
+  // const [cleanupInProgress, setCleanupInProgress] = useState(false);
 
   // Load volumes on mount
   useEffect(() => {
@@ -111,6 +115,9 @@ export default function LeftSidebar() {
     }
   }
 
+  // NOTE: This function is commented out as save volumes are no longer used
+  // All game saves are stored in dillinger_root at /data/saves/<gameId>
+  /*
   async function handleCleanSessionVolumes() {
     // Load session info first
     console.log('Loading session volumes...');
@@ -138,26 +145,27 @@ export default function LeftSidebar() {
     console.log('Confirming cleanup...');
     setCleanupInProgress(true);
     try {
-      const response = await fetch('http://localhost:3001/api/volumes/cleanup-sessions', {
+      const response = await fetch('http://localhost:3001/api/volumes/cleanup-saves', {
         method: 'DELETE',
       });
 
       const data = await response.json();
       console.log('Cleanup response:', data);
       if (data.success) {
-        alert(data.message || `Cleaned up ${data.data.cleaned} session volumes`);
+        alert(data.message || `Cleaned up ${data.data.cleaned} orphaned save volumes`);
         setShowCleanupDialog(false);
         setSessionInfo(null);
       } else {
         alert(`Failed to cleanup: ${data.error}`);
       }
     } catch (error) {
-      console.error('Failed to cleanup session volumes:', error);
-      alert('Failed to cleanup session volumes');
+      console.error('Failed to cleanup save volumes:', error);
+      alert('Failed to cleanup save volumes');
     } finally {
       setCleanupInProgress(false);
     }
   }
+  */
 
   return (
     <div className="space-y-4">
@@ -259,8 +267,11 @@ export default function LeftSidebar() {
                   </div>
                 )}
 
-                {/* Clean Session Volumes Button */}
-                <div className="mt-3 pt-3 border-t border-border">
+                {/* Clean Session Volumes Button - DEPRECATED
+                    Game saves are now stored in dillinger_root at /data/saves/<gameId>
+                    No separate save volumes are created anymore.
+                */}
+                {/* <div className="mt-3 pt-3 border-t border-border">
                   <button
                     onClick={handleCleanSessionVolumes}
                     className="w-full text-xs px-3 py-2 rounded bg-warning/20 text-warning hover:bg-warning hover:text-white transition-all flex items-center justify-center gap-2"
@@ -271,7 +282,7 @@ export default function LeftSidebar() {
                     </svg>
                     Clean Session Volumes
                   </button>
-                </div>
+                </div> */}
               </div>
             </div>
 
@@ -356,7 +367,9 @@ export default function LeftSidebar() {
         </div>
       )}
 
+      {/* NOTE: Session Cleanup Dialog commented out - no longer needed with dillinger_root architecture */}
       {/* Session Cleanup Confirmation Dialog */}
+      {/*
       {(() => {
         console.log('Dialog render check - showCleanupDialog:', showCleanupDialog, 'sessionInfo:', sessionInfo);
         return null;
@@ -422,6 +435,7 @@ export default function LeftSidebar() {
           </div>
         </div>
       )}
+      */}
     </div>
   );
 }

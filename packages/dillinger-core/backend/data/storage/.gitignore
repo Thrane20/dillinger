@@ -1,4 +1,5 @@
 /sessions/
 /metadata/
 /games/
-
+/volumes/
+settings.json

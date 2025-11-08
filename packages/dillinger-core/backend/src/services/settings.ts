@@ -6,11 +6,16 @@ import type { ScraperSettings } from '@dillinger/shared';
 
 // Use the same DILLINGER_ROOT logic as storage service
 // This MUST point to the dillinger_root Docker volume mount point
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
+export const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
 const SETTINGS_PATH = path.join(DILLINGER_ROOT, 'storage', 'settings.json');
+
+export interface AudioSettings {
+  defaultSink?: string; // PulseAudio sink identifier (e.g., "alsa_output.pci-0000_03_00.1.hdmi-stereo-extra1")
+}
 
 export interface AppSettings {
   scrapers?: ScraperSettings;
+  audio?: AudioSettings;
   // Future settings can be added here:
   // streaming?: StreamingSettings;
   // library?: LibrarySettings;
@@ -51,6 +56,18 @@ export class SettingsService {
   async updateScraperSettings(settings: Partial<ScraperSettings>): Promise<void> {
     this.settings.scrapers = {
       ...this.settings.scrapers,
+      ...settings,
+    };
+    await this.save();
+  }
+
+  async getAudioSettings(): Promise<AudioSettings> {
+    return this.settings.audio || {};
+  }
+
+  async updateAudioSettings(settings: Partial<AudioSettings>): Promise<void> {
+    this.settings.audio = {
+      ...this.settings.audio,
       ...settings,
     };
     await this.save();

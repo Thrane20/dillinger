@@ -20,6 +20,10 @@ export default function SettingsPage() {
   const [igdbClientId, setIgdbClientId] = useState('');
   const [igdbClientSecret, setIgdbClientSecret] = useState('');
   
+  // Audio settings
+  const [availableAudioSinks, setAvailableAudioSinks] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [selectedAudioSink, setSelectedAudioSink] = useState('');
+  
   // UI Settings
   const [backdropFadeDuration, setBackdropFadeDuration] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -30,6 +34,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadSettings();
+    loadAudioSettings();
   }, []);
 
   const loadSettings = async () => {
@@ -46,6 +51,20 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: 'Failed to load settings' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAudioSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/audio`);
+      if (!response.ok) {
+        throw new Error('Failed to load audio settings');
+      }
+      const data = await response.json();
+      setAvailableAudioSinks(data.availableSinks || []);
+      setSelectedAudioSink(data.settings?.defaultSink || '');
+    } catch (error) {
+      console.error('Failed to load audio settings:', error);
     }
   };
 
@@ -101,6 +120,38 @@ export default function SettingsPage() {
     
     // Dispatch custom event to notify games page
     window.dispatchEvent(new CustomEvent('backdropSettingsChanged'));
+  };
+
+  const saveAudioSettings = async () => {
+    if (!selectedAudioSink) {
+      setMessage({ type: 'error', text: 'Please select an audio output' });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/audio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ defaultSink: selectedAudioSink }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save audio settings');
+      }
+
+      setMessage({ type: 'success', text: 'Audio settings saved successfully!' });
+      await loadAudioSettings();
+    } catch (error) {
+      console.error('Failed to save audio settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save audio settings' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -206,6 +257,51 @@ export default function SettingsPage() {
             Additional scraper integrations (SteamGridDB, Giant Bomb, etc.) will be available in
             future updates.
           </p>
+        </div>
+
+        {/* Audio Settings */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">Audio Settings</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Select the default audio output device for games. This setting will be used by all game containers.
+          </p>
+
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="audioSink" className="block text-sm font-medium mb-2">
+                Audio Output Device
+              </label>
+              {availableAudioSinks.length > 0 ? (
+                <select
+                  id="audioSink"
+                  value={selectedAudioSink}
+                  onChange={(e) => setSelectedAudioSink(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">Select an audio output...</option>
+                  {availableAudioSinks.map((sink) => (
+                    <option key={sink.id} value={sink.id}>
+                      {sink.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  No audio outputs detected. Make sure PulseAudio or PipeWire is running.
+                </p>
+              )}
+            </div>
+
+            {availableAudioSinks.length > 0 && (
+              <button
+                onClick={saveAudioSettings}
+                disabled={saving || !selectedAudioSink}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {saving ? 'Saving...' : 'Save Audio Settings'}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* UI Settings */}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import LogPanel from './LogPanel';
 
 interface HealthStatus {
   status: string;
@@ -62,6 +63,11 @@ export default function RightSidebar() {
           </div>
           
           <div className="space-y-4">
+            {/* Container Logs - Permanent at top */}
+            <div className="p-4 rounded-lg bg-surface/50 border border-border">
+              <LogPanel />
+            </div>
+
             <div className="p-4 rounded-lg bg-surface/50 border border-border">
               <h3 className="text-sm font-semibold text-text mb-2">Game Info</h3>
               <p className="text-xs text-muted italic">This space for rent</p>

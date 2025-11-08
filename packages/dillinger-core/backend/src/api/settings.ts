@@ -8,10 +8,12 @@ import type {
 } from '@dillinger/shared';
 import { SettingsService } from '../services/settings.js';
 import { getScraperManager } from '../services/scrapers/index.js';
+import { DockerService } from '../services/docker-service.js';
 
 const router = Router();
 const settingsService = SettingsService.getInstance();
 const scraperManager = getScraperManager();
+const dockerService = DockerService.getInstance();
 
 /**
  * GET /api/settings/scrapers
@@ -116,6 +118,59 @@ router.post('/scrapers', async (req, res) => {
     res.json(response);
   } catch (error) {
     console.error('Failed to update scraper settings:', error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/settings/audio
+ * Get audio settings and available sinks
+ */
+router.get('/audio', async (req, res) => {
+  try {
+    const settings = await settingsService.getAudioSettings();
+    const availableSinks = await dockerService.getAvailableAudioSinks();
+
+    res.json({
+      settings,
+      availableSinks,
+    });
+  } catch (error) {
+    console.error('Failed to get audio settings:', error);
+    res.status(500).json({
+      error: 'Failed to get audio settings',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/settings/audio
+ * Update audio settings
+ */
+router.post('/audio', async (req, res) => {
+  try {
+    const { defaultSink } = req.body;
+
+    if (!defaultSink) {
+      res.status(400).json({
+        success: false,
+        message: 'Missing defaultSink',
+      });
+      return;
+    }
+
+    await settingsService.updateAudioSettings({ defaultSink });
+
+    res.json({
+      success: true,
+      message: 'Audio settings updated successfully',
+    });
+  } catch (error) {
+    console.error('Failed to update audio settings:', error);
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Unknown error',

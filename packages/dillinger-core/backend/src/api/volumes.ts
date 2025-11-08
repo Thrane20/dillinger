@@ -179,56 +179,14 @@ router.get('/docker/list', async (req: Request, res: Response): Promise<void> =>
 });
 
 /**
- * GET /api/volumes/session-volumes
- * List all session save volumes (dillinger_saves_*)
+ * NOTE: Save volume endpoints removed
+ * 
+ * Game saves are now stored in dillinger_root at /data/saves/<gameId>
+ * No separate save volumes are created anymore.
+ * 
+ * Any old dillinger_saves_* volumes can be safely removed manually:
+ * docker volume ls | grep dillinger_saves | awk '{print $2}' | xargs docker volume rm
  */
-router.get('/session-volumes', async (req: Request, res: Response): Promise<void> => {
-  console.log('📊 Listing session volumes...');
-  try {
-    const volumes = await dockerService.listSessionVolumes();
-    console.log(`  Found ${volumes.length} session volumes (${volumes.filter(v => v.inUse).length} active, ${volumes.filter(v => !v.inUse).length} inactive)`);
-    
-    res.json({
-      success: true,
-      data: {
-        volumes,
-        total: volumes.length,
-        active: volumes.filter(v => v.inUse).length,
-        inactive: volumes.filter(v => !v.inUse).length,
-      },
-    });
-  } catch (error) {
-    console.error('❌ Error listing session volumes:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to list session volumes',
-    });
-  }
-});
-
-/**
- * DELETE /api/volumes/cleanup-sessions
- * Clean up all inactive session volumes
- */
-router.delete('/cleanup-sessions', async (req: Request, res: Response): Promise<void> => {
-  console.log('🧹 Starting session volume cleanup...');
-  try {
-    const result = await dockerService.cleanupInactiveSessionVolumes();
-    console.log(`✅ Cleanup complete: ${result.cleaned} cleaned, ${result.failed} failed`);
-    
-    res.json({
-      success: true,
-      data: result,
-      message: `Cleaned up ${result.cleaned} inactive session volumes${result.failed > 0 ? `, ${result.failed} failed` : ''}`,
-    });
-  } catch (error) {
-    console.error('❌ Error cleaning up session volumes:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to cleanup session volumes',
-    });
-  }
-});
 
 /**
  * GET /api/volumes/:id

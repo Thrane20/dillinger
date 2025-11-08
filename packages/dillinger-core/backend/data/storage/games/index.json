@@ -1,9 +1,9 @@
 {
   "count": 4,
-  "lastUpdated": "2025-11-03T08:30:10.152Z",
+  "lastUpdated": "2025-11-07T07:49:08.329Z",
   "byPlatform": {
     "windows-wine": [
-      "close-combat-iii-the-russian-front-2"
+      "close-combat-iii-the-russian-front"
     ],
     "wine": [
       "diablo"
@@ -16,13 +16,13 @@
   "byCollection": {},
   "byGenre": {
     "real time strategy (rts)": [
-      "close-combat-iii-the-russian-front-2"
+      "close-combat-iii-the-russian-front"
     ],
     "simulator": [
-      "close-combat-iii-the-russian-front-2"
+      "close-combat-iii-the-russian-front"
     ],
     "strategy": [
-      "close-combat-iii-the-russian-front-2",
+      "close-combat-iii-the-russian-front",
       "diablo"
     ],
     "role-playing (rpg)": [
@@ -43,13 +43,13 @@
   },
   "byTag": {
     "real time strategy (rts)": [
-      "close-combat-iii-the-russian-front-2"
+      "close-combat-iii-the-russian-front"
     ],
     "simulator": [
-      "close-combat-iii-the-russian-front-2"
+      "close-combat-iii-the-russian-front"
     ],
     "strategy": [
-      "close-combat-iii-the-russian-front-2",
+      "close-combat-iii-the-russian-front",
       "diablo"
     ],
     "role-playing (rpg)": [
@@ -68,22 +68,22 @@
   "search": {
     "titles": {
       "close": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "combat": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "iii:": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "the": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "russian": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "front": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "diablo": [
         "diablo"
@@ -105,22 +105,22 @@
     },
     "fuzzy": {
       "close": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "combat": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "iii:": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "the": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "russian": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "front": [
-        "close-combat-iii-the-russian-front-2"
+        "close-combat-iii-the-russian-front"
       ],
       "diablo": [
         "diablo"
@@ -142,12 +142,13 @@
     }
   },
   "recent": [
-    "close-combat-iii-the-russian-front-2",
+    "close-combat-iii-the-russian-front",
     "diablo",
     "test-adventure-game",
     "test-gui-game"
   ],
   "popular": [
+    "close-combat-iii-the-russian-front",
     "test-adventure-game",
     "test-gui-game"
   ]
