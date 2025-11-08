@@ -266,6 +266,89 @@ router.put('/:id', gameValidation, async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/games/:id/settings - Update game settings (gamescope, moonlight, launch, etc.)
+router.patch('/:id/settings', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const { game: existingGame, fileKey } = await findGameAndFileKey(id);
+    
+    if (!existingGame || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    // Merge settings - deep merge for nested objects
+    const updatedSettings = {
+      ...existingGame.settings,
+      ...req.body,
+    };
+
+    // Deep merge for nested settings objects
+    if (req.body.wine) {
+      updatedSettings.wine = {
+        ...existingGame.settings?.wine,
+        ...req.body.wine,
+      };
+    }
+    if (req.body.launch) {
+      updatedSettings.launch = {
+        ...existingGame.settings?.launch,
+        ...req.body.launch,
+      };
+    }
+    if (req.body.gamescope) {
+      updatedSettings.gamescope = {
+        ...existingGame.settings?.gamescope,
+        ...req.body.gamescope,
+      };
+    }
+    if (req.body.moonlight) {
+      updatedSettings.moonlight = {
+        ...existingGame.settings?.moonlight,
+        ...req.body.moonlight,
+      };
+    }
+    if (req.body.emulator) {
+      updatedSettings.emulator = {
+        ...existingGame.settings?.emulator,
+        ...req.body.emulator,
+      };
+    }
+
+    const updatedGame = {
+      ...existingGame,
+      settings: updatedSettings,
+      updated: new Date().toISOString(),
+    };
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    res.json({
+      success: true,
+      data: updatedGame,
+      message: 'Game settings updated successfully',
+    });
+  } catch (error) {
+    console.error('Error updating game settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update game settings',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 // DELETE /api/games/:id - Delete a game
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
