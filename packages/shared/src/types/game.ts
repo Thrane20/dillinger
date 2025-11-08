@@ -69,6 +69,27 @@ export interface Game {
       fullscreen?: boolean; // Request fullscreen mode (uses Wine virtual desktop)
       resolution?: string; // Window/desktop resolution (e.g., "1920x1080")
     };
+    gamescope?: {
+      enabled?: boolean; // Use gamescope compositor for this game
+      width?: number; // Output width (default: 1920)
+      height?: number; // Output height (default: 1080)
+      refreshRate?: number; // Refresh rate in Hz (default: 60)
+      fullscreen?: boolean; // Launch in fullscreen mode
+      upscaler?: 'auto' | 'fsr' | 'nis' | 'linear' | 'nearest'; // Upscaling filter
+      inputWidth?: number; // Input resolution width for upscaling
+      inputHeight?: number; // Input resolution height for upscaling
+      borderless?: boolean; // Borderless window mode
+      limitFps?: number; // Frame rate limit
+    };
+    moonlight?: {
+      enabled?: boolean; // Enable Moonlight streaming for this game
+      quality?: 'low' | 'medium' | 'high' | 'ultra'; // Streaming quality preset
+      bitrate?: number; // Custom bitrate in Mbps (overrides quality preset)
+      framerate?: 30 | 60 | 120; // Target framerate for streaming
+      resolution?: string; // Streaming resolution (e.g., "1920x1080")
+      codec?: 'h264' | 'h265' | 'av1'; // Video codec
+      audioCodec?: 'opus' | 'aac'; // Audio codec
+    };
   };
   installation?: {
     status?: 'not_installed' | 'installing' | 'installed' | 'failed'; // Installation state
@@ -84,7 +105,11 @@ export interface Game {
 }
 
 export type PlatformType = 'native' | 'wine' | 'emulator';
-export type StreamingMethod = 'games-on-whales' | 'wolf' | 'x11';
+export type StreamingMethod = 'games-on-whales' | 'wolf' | 'moonlight' | 'x11';
+export type GamescopeUpscaler = 'auto' | 'fsr' | 'nis' | 'linear' | 'nearest';
+export type MoonlightQuality = 'low' | 'medium' | 'high' | 'ultra';
+export type VideoCodec = 'h264' | 'h265' | 'av1';
+export type AudioCodec = 'opus' | 'aac';
 
 export interface Platform {
   id: string; // UUID v4
@@ -105,6 +130,18 @@ export interface Platform {
         biosFiles?: string[]; // Required BIOS files
       };
       environment?: Record<string, string>; // Default environment variables
+      gamescope?: {
+        enabled?: boolean; // Enable gamescope by default for this platform
+        width?: number; // Default output width
+        height?: number; // Default output height
+        refreshRate?: number; // Default refresh rate
+        upscaler?: GamescopeUpscaler; // Default upscaling filter
+      };
+      moonlight?: {
+        enabled?: boolean; // Enable moonlight by default for this platform
+        quality?: MoonlightQuality; // Default streaming quality
+        framerate?: 30 | 60 | 120; // Default target framerate
+      };
     };
   };
   validation: {

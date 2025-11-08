@@ -380,6 +380,69 @@ export class DockerService {
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
 
+    // Add Gamescope configuration if enabled
+    const gamescopeConfig = game.settings?.gamescope;
+    if (gamescopeConfig?.enabled) {
+      env.push(
+        'USE_GAMESCOPE=true',
+        `GAMESCOPE_WIDTH=${gamescopeConfig.width || 1920}`,
+        `GAMESCOPE_HEIGHT=${gamescopeConfig.height || 1080}`,
+        `GAMESCOPE_REFRESH=${gamescopeConfig.refreshRate || 60}`,
+        `GAMESCOPE_FULLSCREEN=${gamescopeConfig.fullscreen ? 'true' : 'false'}`,
+        `GAMESCOPE_UPSCALER=${gamescopeConfig.upscaler || 'auto'}`
+      );
+      
+      if (gamescopeConfig.inputWidth && gamescopeConfig.inputHeight) {
+        env.push(
+          `GAMESCOPE_INPUT_WIDTH=${gamescopeConfig.inputWidth}`,
+          `GAMESCOPE_INPUT_HEIGHT=${gamescopeConfig.inputHeight}`
+        );
+      }
+      
+      if (gamescopeConfig.limitFps) {
+        env.push(`GAMESCOPE_FPS_LIMIT=${gamescopeConfig.limitFps}`);
+      }
+      
+      console.log(`  Gamescope enabled: ${gamescopeConfig.width}x${gamescopeConfig.height}@${gamescopeConfig.refreshRate}Hz`);
+      console.log(`  Gamescope upscaler: ${gamescopeConfig.upscaler || 'auto'}`);
+    }
+
+    // Add Moonlight streaming configuration if enabled
+    const moonlightConfig = game.settings?.moonlight;
+    if (moonlightConfig?.enabled) {
+      env.push('ENABLE_MOONLIGHT=true');
+      
+      // Set quality preset or custom bitrate
+      if (moonlightConfig.bitrate) {
+        env.push(`MOONLIGHT_BITRATE=${moonlightConfig.bitrate * 1000}`); // Convert Mbps to Kbps
+      } else {
+        const qualityPreset = moonlightConfig.quality || 'high';
+        env.push(`MOONLIGHT_QUALITY=${qualityPreset}`);
+      }
+      
+      if (moonlightConfig.framerate) {
+        env.push(`MOONLIGHT_FPS=${moonlightConfig.framerate}`);
+      }
+      
+      if (moonlightConfig.resolution) {
+        env.push(`MOONLIGHT_RESOLUTION=${moonlightConfig.resolution}`);
+      }
+      
+      if (moonlightConfig.codec) {
+        env.push(`MOONLIGHT_CODEC=${moonlightConfig.codec}`);
+      }
+      
+      if (moonlightConfig.audioCodec) {
+        env.push(`MOONLIGHT_AUDIO_CODEC=${moonlightConfig.audioCodec}`);
+      }
+      
+      console.log(`  Moonlight streaming enabled`);
+      console.log(`  Moonlight quality: ${moonlightConfig.quality || 'custom'}`);
+      if (moonlightConfig.bitrate) {
+        console.log(`  Moonlight bitrate: ${moonlightConfig.bitrate}Mbps`);
+      }
+    }
+
     // Add Wine-specific configuration for Windows games
     if (platform.type === 'wine') {
       // The Wine container's entrypoint script expects GAME_EXECUTABLE
@@ -487,6 +550,29 @@ export class DockerService {
         AttachStdout: true,
         AttachStderr: true,
       };
+      
+      // Expose Moonlight ports if streaming is enabled
+      if (moonlightConfig?.enabled) {
+        containerConfig.ExposedPorts = {
+          '47984/tcp': {}, // HTTPS
+          '47989/tcp': {}, // HTTP
+          '47999/udp': {}, // Control
+          '48010/tcp': {}, // RTSP
+          '48100/udp': {}, // Video
+          '48200/udp': {}, // Audio
+        };
+        
+        containerConfig.HostConfig.PortBindings = {
+          '47984/tcp': [{ HostPort: '47984' }],
+          '47989/tcp': [{ HostPort: '47989' }],
+          '47999/udp': [{ HostPort: '47999' }],
+          '48010/tcp': [{ HostPort: '48010' }],
+          '48100/udp': [{ HostPort: '48100' }],
+          '48200/udp': [{ HostPort: '48200' }],
+        };
+        
+        console.log(`  Moonlight ports exposed: 47984, 47989, 47999, 48010, 48100, 48200`);
+      }
       
       // For Wine games, the entrypoint script handles execution via env vars
       // For native games, pass the command directly
