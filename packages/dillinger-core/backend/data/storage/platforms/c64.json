@@ -1,0 +1,31 @@
+{
+  "$schema": "../../../schema/platform-v1.0.json",
+  "id": "c64",
+  "name": "Commodore 64",
+  "type": "emulator",
+  "description": "Commodore 64 games via VICE emulator. Supports disk images, tapes, cartridges, and program files.",
+  "configuration": {
+    "containerImage": "dillinger/runner-vice:latest",
+    "supportedExtensions": [".d64", ".d71", ".d81", ".g64", ".g71", ".t64", ".tap", ".crt", ".prg", ".p00", ".zip"],
+    "defaultSettings": {
+      "environment": {
+        "DISPLAY": ":0",
+        "VICE_ROM_PATH": "/usr/lib/vice",
+        "VICE_CONFIG_DIR": "/config/vice"
+      },
+      "launch": {
+        "command": "x64sc",
+        "arguments": ["-autostart"]
+      }
+    }
+  },
+  "validation": {
+    "fileValidation": [".d64", ".d71", ".d81", ".g64", ".g71", ".t64", ".tap", ".crt", ".prg", ".p00", ".zip"]
+  },
+  "displayStreaming": {
+    "method": "x11"
+  },
+  "isActive": true,
+  "created": "2025-11-09T12:40:00Z",
+  "updated": "2025-11-09T12:40:00Z"
+}

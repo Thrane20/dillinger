@@ -22,9 +22,11 @@
     "docker:build:base": "cd packages/runner-images && ./build.sh base",
     "docker:build:linux-native": "cd packages/runner-images && ./build.sh linux-native",
     "docker:build:wine": "cd packages/runner-images && ./build.sh wine",
+    "docker:build:vice": "cd packages/runner-images && ./build.sh vice",
     "docker:build:base:no-cache": "cd packages/runner-images && ./build.sh --no-cache base",
     "docker:build:linux-native:no-cache": "cd packages/runner-images && ./build.sh --no-cache linux-native",
-    "docker:build:wine:no-cache": "cd packages/runner-images && ./build.sh --no-cache wine"
+    "docker:build:wine:no-cache": "cd packages/runner-images && ./build.sh --no-cache wine",
+    "docker:build:vice:no-cache": "cd packages/runner-images && ./build.sh --no-cache vice"
   },
   "keywords": [
     "game-library",

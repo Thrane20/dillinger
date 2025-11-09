@@ -61,6 +61,34 @@ Runs Windows games and applications via Wine.
 ### Wine/Proton (`wine-proton/`) - Coming Soon
 Future runner with Proton support for enhanced Windows game compatibility.
 
+### VICE (`vice/`)
+Runs Commodore computer games via VICE emulator.
+
+**Base:** Arch Linux (latest)
+
+**Features:**
+- Full VICE emulator suite (C64, C128, VIC-20, Plus/4, PET, CBM-II)
+- X11 display support
+- PulseAudio for audio
+- ROM file support (no installation required)
+- Save state support
+- Accurate cycle-based emulation
+- True drive emulation for maximum compatibility
+
+**Supported systems:**
+- Commodore 64 (C64)
+- Commodore 128 (C128)
+- Commodore VIC-20
+- Commodore Plus/4
+- Commodore PET
+- Commodore CBM-II series
+
+**Example use cases:**
+- Play C64 disk images (.d64)
+- Run VIC-20 cartridges (.crt)
+- Load tape images (.t64, .tap)
+- Execute program files (.prg)
+
 ## Usage
 
 ### Building Images
@@ -71,6 +99,9 @@ docker build -t dillinger/runner-linux-native:latest ./packages/runner-images/li
 
 # Build Wine runner
 docker build -t dillinger/runner-wine:latest ./packages/runner-images/wine
+
+# Build VICE runner
+docker build -t dillinger/runner-vice:latest ./packages/runner-images/vice
 ```
 
 ### Running a Game
