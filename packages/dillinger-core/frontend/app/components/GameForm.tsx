@@ -49,6 +49,8 @@ interface GameFormData {
       workingDirectory?: string;
       fullscreen?: boolean;
       resolution?: string;
+      useXrandr?: boolean;
+      xrandrMode?: string;
     };
   };
   // Store the full original game data to preserve scraper metadata
@@ -157,6 +159,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     workingDirectory: game.settings?.launch?.workingDirectory || '',
                     fullscreen: game.settings?.launch?.fullscreen || false,
                     resolution: game.settings?.launch?.resolution || '1920x1080',
+                    useXrandr: game.settings?.launch?.useXrandr || false,
+                    xrandrMode: game.settings?.launch?.xrandrMode || '',
                   },
                 },
                 _originalGame: game, // Store full original data
@@ -1294,6 +1298,56 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     <option value="1024x768">1024x768</option>
                     <option value="800x600">800x600</option>
                   </select>
+                </div>
+              )}
+
+              {formData.settings?.launch?.fullscreen && (
+                <div className="col-span-2">
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.settings?.launch?.useXrandr || false}
+                      onChange={(e) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          settings: {
+                            ...prev.settings,
+                            launch: {
+                              ...prev.settings?.launch,
+                              useXrandr: e.target.checked,
+                            },
+                          },
+                        }));
+                      }}
+                      className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-muted">
+                      Set display resolution before launch (xrandr)
+                    </span>
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1 ml-6">
+                    Automatically changes your display resolution to match the game. Useful for older games that don't handle resolution scaling well.
+                  </p>
+                </div>
+              )}
+
+              {formData.settings?.launch?.fullscreen && formData.settings?.launch?.useXrandr && (
+                <div>
+                  <label htmlFor="settings.launch.xrandrMode" className="block text-sm font-medium text-muted mb-2">
+                    xrandr Resolution
+                  </label>
+                  <input
+                    type="text"
+                    id="settings.launch.xrandrMode"
+                    name="settings.launch.xrandrMode"
+                    value={formData.settings?.launch?.xrandrMode || formData.settings?.launch?.resolution || '1920x1080'}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                    placeholder="e.g., 1920x1080"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Display resolution to set via xrandr (defaults to game resolution above)
+                  </p>
                 </div>
               )}
             </>
