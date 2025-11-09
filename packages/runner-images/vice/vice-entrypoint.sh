@@ -4,7 +4,6 @@
 set -e
 
 # Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -56,7 +55,7 @@ echo "  VICE Config Dir: $VICE_CONFIG_DIR"
 if [ ! -d "$VICE_CONFIG_DIR" ]; then
     echo -e "${BLUE}Creating VICE configuration directory...${NC}"
     mkdir -p "$VICE_CONFIG_DIR"
-    chown -R ${UNAME:-gameuser}:${UNAME:-gameuser} "$VICE_CONFIG_DIR"
+    chown -R "${UNAME:-gameuser}":"${UNAME:-gameuser}" "$VICE_CONFIG_DIR"
     echo -e "${GREEN}✓ VICE configuration directory created${NC}"
 else
     echo -e "${GREEN}✓ VICE configuration directory exists${NC}"
@@ -145,11 +144,11 @@ echo ""
 
 # Execute command as game user if provided
 if [ "$#" -gt 0 ]; then
-    echo -e "${BLUE}Executing command: $@${NC}"
+    echo -e "${BLUE}Executing command: $*${NC}"
     echo ""
-    exec gosu ${UNAME:-gameuser} "$@"
+    exec gosu "${UNAME:-gameuser}" "$@"
 else
     echo -e "${BLUE}No command provided, starting shell...${NC}"
     echo ""
-    exec gosu ${UNAME:-gameuser} /bin/bash
+    exec gosu "${UNAME:-gameuser}" /bin/bash
 fi
