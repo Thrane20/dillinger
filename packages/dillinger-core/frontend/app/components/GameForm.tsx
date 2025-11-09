@@ -28,6 +28,9 @@ interface GameFormData {
   settings?: {
     wine?: {
       arch?: 'win32' | 'win64';
+      useDxvk?: boolean;
+      compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10';
+      dlls?: Record<string, string>;
       debug?: {
         relay?: boolean;
         seh?: boolean;
@@ -51,6 +54,26 @@ interface GameFormData {
       resolution?: string;
       useXrandr?: boolean;
       xrandrMode?: string;
+      useGamescope?: boolean;
+      gamescopeWidth?: number;
+      gamescopeHeight?: number;
+      gamescopeOutputWidth?: number;
+      gamescopeOutputHeight?: number;
+    };
+    gamescope?: {
+      enabled?: boolean;
+      width?: number;
+      height?: number;
+      refreshRate?: number;
+      fullscreen?: boolean;
+      upscaler?: 'auto' | 'fsr' | 'nis' | 'linear' | 'nearest';
+      inputWidth?: number;
+      inputHeight?: number;
+      borderless?: boolean;
+      limitFps?: number;
+    };
+    mangohud?: {
+      enabled?: boolean;
     };
   };
   // Store the full original game data to preserve scraper metadata
@@ -150,6 +173,9 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 settings: {
                   wine: {
                     arch: game.settings?.wine?.arch || 'win64',
+                    useDxvk: game.settings?.wine?.useDxvk || false,
+                    compatibilityMode: game.settings?.wine?.compatibilityMode || 'none',
+                    dlls: game.settings?.wine?.dlls || {},
                     debug: game.settings?.wine?.debug || {},
                   },
                   launch: {
@@ -161,6 +187,20 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     resolution: game.settings?.launch?.resolution || '1920x1080',
                     useXrandr: game.settings?.launch?.useXrandr || false,
                     xrandrMode: game.settings?.launch?.xrandrMode || '',
+                  },
+                  gamescope: {
+                    enabled: game.settings?.gamescope?.enabled || false,
+                    width: game.settings?.gamescope?.width || 1920,
+                    height: game.settings?.gamescope?.height || 1080,
+                    refreshRate: game.settings?.gamescope?.refreshRate || 60,
+                    fullscreen: game.settings?.gamescope?.fullscreen || false,
+                    upscaler: game.settings?.gamescope?.upscaler || 'auto',
+                    inputWidth: game.settings?.gamescope?.inputWidth || undefined,
+                    inputHeight: game.settings?.gamescope?.inputHeight || undefined,
+                    limitFps: game.settings?.gamescope?.limitFps || undefined,
+                  },
+                  mangohud: {
+                    enabled: game.settings?.mangohud?.enabled || false,
                   },
                 },
                 _originalGame: game, // Store full original data
@@ -373,6 +413,18 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           wine: {
             ...prev.settings?.wine,
             [wineKey]: value,
+          },
+        },
+      }));
+    } else if (name.startsWith('settings.gamescope.')) {
+      const gamescopeKey = name.split('.')[2];
+      setFormData((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          gamescope: {
+            ...prev.settings?.gamescope,
+            [gamescopeKey]: value,
           },
         },
       }));
@@ -718,6 +770,150 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 Older GOG games often require 32-bit (win32) architecture
               </p>
             </div>
+          )}
+
+          {/* DXVK - only show for Wine platform */}
+          {formData.platformId === 'windows-wine' && (
+            <div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="settings.wine.useDxvk"
+                  checked={formData.settings?.wine?.useDxvk || false}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...formData.settings,
+                        wine: {
+                          ...formData.settings?.wine,
+                          useDxvk: e.target.checked,
+                        },
+                      },
+                    });
+                  }}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                />
+                <label htmlFor="settings.wine.useDxvk" className="text-sm font-medium text-text">
+                  Use DXVK (DirectX to Vulkan translation)
+                </label>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Required for MangoHUD to work with DirectX games. Improves performance and enables Vulkan-based overlays.
+              </p>
+            </div>
+          )}
+
+          {/* Wine Compatibility Mode - only show for Wine platform */}
+          {formData.platformId === 'windows-wine' && (
+            <div>
+              <label htmlFor="settings.wine.compatibilityMode" className="block text-sm font-medium text-muted mb-2">
+                Windows Compatibility Mode
+              </label>
+              <select
+                id="settings.wine.compatibilityMode"
+                name="settings.wine.compatibilityMode"
+                value={formData.settings?.wine?.compatibilityMode || 'none'}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+              >
+                <option value="none">None (Default)</option>
+                <option value="legacy">Legacy Games (Win98 era, DirectDraw optimized)</option>
+                <option value="win98">Windows 98</option>
+                <option value="winxp">Windows XP</option>
+                <option value="win7">Windows 7</option>
+                <option value="win10">Windows 10</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                For old games (1995-2000), try "Legacy Games" mode which optimizes DirectDraw/DirectSound settings
+              </p>
+            </div>
+          )}
+
+          {/* Wine DLL Overrides - Advanced section */}
+          {formData.platformId === 'windows-wine' && (
+            <details className="border border-gray-300 dark:border-gray-600 rounded-md p-4">
+              <summary className="text-sm font-medium text-muted cursor-pointer hover:text-text">
+                Advanced: DLL Overrides
+              </summary>
+              <div className="mt-4 space-y-3">
+                <p className="text-xs text-gray-500">
+                  Override Wine DLL loading order. Common examples: ddraw=native, d3d9=native,builtin
+                </p>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="DLL name (e.g., ddraw)"
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text text-sm"
+                      id="dll-override-key"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Override (e.g., native)"
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text text-sm"
+                      id="dll-override-value"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const keyInput = document.getElementById('dll-override-key') as HTMLInputElement;
+                        const valueInput = document.getElementById('dll-override-value') as HTMLInputElement;
+                        if (keyInput?.value && valueInput?.value) {
+                          setFormData({
+                            ...formData,
+                            settings: {
+                              ...formData.settings,
+                              wine: {
+                                ...formData.settings?.wine,
+                                dlls: {
+                                  ...formData.settings?.wine?.dlls,
+                                  [keyInput.value]: valueInput.value,
+                                },
+                              },
+                            },
+                          });
+                          keyInput.value = '';
+                          valueInput.value = '';
+                        }
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {formData.settings?.wine?.dlls && Object.keys(formData.settings.wine.dlls).length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {Object.entries(formData.settings.wine.dlls).map(([dll, mode]) => (
+                        <div key={dll} className="flex items-center justify-between bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded text-sm">
+                          <span className="font-mono">{dll} = {mode}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newDlls = { ...formData.settings?.wine?.dlls };
+                              delete newDlls[dll];
+                              setFormData({
+                                ...formData,
+                                settings: {
+                                  ...formData.settings,
+                                  wine: {
+                                    ...formData.settings?.wine,
+                                    dlls: newDlls,
+                                  },
+                                },
+                              });
+                            }}
+                            className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </details>
           )}
 
           {/* Wine Debug Channels - only show for Wine platform */}
@@ -1350,6 +1546,285 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   </p>
                 </div>
               )}
+
+              {/* Gamescope Compositor */}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <input
+                    type="checkbox"
+                    id="settings.gamescope.enabled"
+                    checked={formData.settings?.gamescope?.enabled || false}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        settings: {
+                          ...formData.settings,
+                          gamescope: {
+                            ...formData.settings?.gamescope,
+                            enabled: e.target.checked,
+                          },
+                        },
+                      });
+                    }}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  />
+                  <label htmlFor="settings.gamescope.enabled" className="text-sm font-medium text-text">
+                    Use Gamescope compositor (advanced)
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Gamescope is a micro-compositor that provides better control over game rendering, upscaling, and frame limiting
+                </p>
+
+                {formData.settings?.gamescope?.enabled && (
+                  <div className="space-y-4 pl-6 border-l-2 border-blue-500">
+                    {/* Output Resolution (Display) */}
+                    <div>
+                      <label htmlFor="settings.gamescope.width" className="block text-sm font-medium text-muted mb-2">
+                        Output Resolution
+                      </label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <select
+                          id="settings.gamescope.width"
+                          name="settings.gamescope.width"
+                          value={formData.settings?.gamescope?.width || 1920}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value);
+                            const heightMap: Record<number, number> = {
+                              640: 480,
+                              800: 600,
+                              1024: 768,
+                              1280: 720,
+                              1366: 768,
+                              1600: 900,
+                              1920: 1080,
+                              2560: 1440,
+                              3840: 2160,
+                            };
+                            setFormData({
+                              ...formData,
+                              settings: {
+                                ...formData.settings,
+                                gamescope: {
+                                  ...formData.settings?.gamescope,
+                                  width: value,
+                                  height: heightMap[value] || formData.settings?.gamescope?.height || 1080,
+                                },
+                              },
+                            });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        >
+                          <option value="640">640x480 (VGA)</option>
+                          <option value="800">800x600 (SVGA)</option>
+                          <option value="1024">1024x768 (XGA)</option>
+                          <option value="1280">1280x720 (HD)</option>
+                          <option value="1366">1366x768 (WXGA)</option>
+                          <option value="1600">1600x900 (HD+)</option>
+                          <option value="1920">1920x1080 (Full HD)</option>
+                          <option value="2560">2560x1440 (QHD)</option>
+                          <option value="3840">3840x2160 (4K UHD)</option>
+                        </select>
+                        <input
+                          type="number"
+                          id="settings.gamescope.height"
+                          name="settings.gamescope.height"
+                          value={formData.settings?.gamescope?.height || 1080}
+                          onChange={handleChange}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                          placeholder="Height"
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Display resolution (what you see on screen)
+                      </p>
+                    </div>
+
+                    {/* Game Resolution (Internal) */}
+                    <div>
+                      <label htmlFor="settings.gamescope.inputWidth" className="block text-sm font-medium text-muted mb-2">
+                        Game Internal Resolution (optional)
+                      </label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <select
+                          id="settings.gamescope.inputWidth"
+                          name="settings.gamescope.inputWidth"
+                          value={formData.settings?.gamescope?.inputWidth || ''}
+                          onChange={(e) => {
+                            const value = e.target.value ? parseInt(e.target.value) : undefined;
+                            const heightMap: Record<number, number> = {
+                              640: 480,
+                              800: 600,
+                              1024: 768,
+                              1280: 720,
+                              1366: 768,
+                              1600: 900,
+                              1920: 1080,
+                              2560: 1440,
+                              3840: 2160,
+                            };
+                            setFormData({
+                              ...formData,
+                              settings: {
+                                ...formData.settings,
+                                gamescope: {
+                                  ...formData.settings?.gamescope,
+                                  inputWidth: value,
+                                  inputHeight: value ? heightMap[value] : undefined,
+                                },
+                              },
+                            });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        >
+                          <option value="">Same as output</option>
+                          <option value="640">640x480 (VGA)</option>
+                          <option value="800">800x600 (SVGA)</option>
+                          <option value="1024">1024x768 (XGA)</option>
+                          <option value="1280">1280x720 (HD)</option>
+                          <option value="1366">1366x768 (WXGA)</option>
+                          <option value="1600">1600x900 (HD+)</option>
+                          <option value="1920">1920x1080 (Full HD)</option>
+                          <option value="2560">2560x1440 (QHD)</option>
+                          <option value="3840">3840x2160 (4K UHD)</option>
+                        </select>
+                        <input
+                          type="number"
+                          id="settings.gamescope.inputHeight"
+                          name="settings.gamescope.inputHeight"
+                          value={formData.settings?.gamescope?.inputHeight || ''}
+                          onChange={handleChange}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                          placeholder="Height (auto)"
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Internal resolution the game renders at (for upscaling). Leave empty to match output resolution.
+                      </p>
+                    </div>
+
+                    {/* Refresh Rate */}
+                    <div>
+                      <label htmlFor="settings.gamescope.refreshRate" className="block text-sm font-medium text-muted mb-2">
+                        Refresh Rate
+                      </label>
+                      <select
+                        id="settings.gamescope.refreshRate"
+                        name="settings.gamescope.refreshRate"
+                        value={formData.settings?.gamescope?.refreshRate || 60}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                      >
+                        <option value="30">30 Hz</option>
+                        <option value="60">60 Hz</option>
+                        <option value="75">75 Hz</option>
+                        <option value="90">90 Hz</option>
+                        <option value="120">120 Hz</option>
+                        <option value="144">144 Hz</option>
+                        <option value="165">165 Hz</option>
+                        <option value="240">240 Hz</option>
+                      </select>
+                    </div>
+
+                    {/* Upscaler */}
+                    <div>
+                      <label htmlFor="settings.gamescope.upscaler" className="block text-sm font-medium text-muted mb-2">
+                        Upscaler
+                      </label>
+                      <select
+                        id="settings.gamescope.upscaler"
+                        name="settings.gamescope.upscaler"
+                        value={formData.settings?.gamescope?.upscaler || 'auto'}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="fsr">FSR (AMD FidelityFX)</option>
+                        <option value="nis">NIS (NVIDIA Image Scaling)</option>
+                        <option value="linear">Linear</option>
+                        <option value="nearest">Nearest</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Upscaling filter for better image quality when game resolution differs from output
+                      </p>
+                    </div>
+
+                    {/* Fullscreen */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="settings.gamescope.fullscreen"
+                        checked={formData.settings?.gamescope?.fullscreen || false}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            settings: {
+                              ...formData.settings,
+                              gamescope: {
+                                ...formData.settings?.gamescope,
+                                fullscreen: e.target.checked,
+                              },
+                            },
+                          });
+                        }}
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <label htmlFor="settings.gamescope.fullscreen" className="text-sm text-text">
+                        Fullscreen
+                      </label>
+                    </div>
+
+                    {/* Frame Rate Limit */}
+                    <div>
+                      <label htmlFor="settings.gamescope.limitFps" className="block text-sm font-medium text-muted mb-2">
+                        FPS Limit (optional)
+                      </label>
+                      <input
+                        type="number"
+                        id="settings.gamescope.limitFps"
+                        name="settings.gamescope.limitFps"
+                        value={formData.settings?.gamescope?.limitFps || ''}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        placeholder="e.g., 60"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Leave empty for no limit
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* MangoHUD Performance Overlay */}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="settings.mangohud.enabled"
+                    checked={formData.settings?.mangohud?.enabled || false}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        settings: {
+                          ...formData.settings,
+                          mangohud: {
+                            ...formData.settings?.mangohud,
+                            enabled: e.target.checked,
+                          },
+                        },
+                      });
+                    }}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  />
+                  <label htmlFor="settings.mangohud.enabled" className="text-sm font-medium text-text">
+                    Enable MangoHUD performance overlay
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Display FPS, frame time, CPU/GPU usage, and other performance metrics in-game
+                </p>
+              </div>
             </>
           )}
         </div>

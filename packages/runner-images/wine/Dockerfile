@@ -8,72 +8,60 @@ LABEL maintainer="Dillinger Project"
 LABEL description="Wine game runner extending base runner for Windows games"
 LABEL version="2.0.0"
 
-ENV DEBIAN_FRONTEND=noninteractive
-
 #######################################################
 # Install Wine and Windows compatibility layer
 #######################################################
 
-# Add Wine repository for latest stable version
-RUN <<_INSTALL_WINE
-set -e
-echo "**** Adding Wine repository ****"
-dpkg --add-architecture i386
-mkdir -pm755 /etc/apt/keyrings
-wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
-
-# Add WineHQ repository
-wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources || \
-    echo "deb [signed-by=/etc/apt/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/ubuntu/ noble main" > /etc/apt/sources.list.d/winehq.list
-
-echo "**** Installing Wine ****"
-apt-get update
-apt-get install -y --install-recommends \
-    winehq-stable \
-    winetricks
-
-echo "**** Installing 32-bit libraries for Wine ****"
-apt-get install -y --no-install-recommends \
-    libc6:i386 \
-    libstdc++6:i386 \
-    libgcc-s1:i386 \
-    libfreetype6:i386 \
-    libfontconfig1:i386 \
-    libpulse0:i386 \
-    libglib2.0-0:i386 \
-    libx11-6:i386 \
-    libxext6:i386 \
-    libxrender1:i386 \
-    libxrandr2:i386 \
-    libxinerama1:i386 \
-    libxcursor1:i386 \
-    libxi6:i386 \
-    libxfixes3:i386 \
-    libxcomposite1:i386
-
-echo "**** Installing Windows gaming dependencies ****"
-apt-get install -y --no-install-recommends \
-    cabextract \
-    p7zip-full \
-    unzip \
-    zenity
-
-echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
-_INSTALL_WINE
+RUN set -e && \
+    echo "**** Installing Wine ****" && \
+    echo "[multilib]" >> /etc/pacman.conf && \
+    echo "Include = /etc/pacman.d/mirrorlist" >> /etc/pacman.conf && \
+    \
+    pacman -Sy --noconfirm && \
+    \
+    pacman -S --noconfirm \
+        wine \
+        wine-mono \
+        wine-gecko \
+        winetricks \
+        lib32-gnutls \
+        lib32-libldap \
+        lib32-mpg123 \
+        lib32-openal \
+        lib32-v4l-utils \
+        lib32-libpulse \
+        lib32-alsa-plugins \
+        lib32-alsa-lib \
+        lib32-libjpeg-turbo \
+        lib32-libxcomposite \
+        lib32-libxinerama \
+        lib32-ncurses \
+        lib32-opencl-icd-loader \
+        lib32-libxslt \
+        lib32-libva \
+        lib32-gtk3 \
+        lib32-gst-plugins-base-libs \
+        lib32-vulkan-icd-loader \
+        lib32-sdl2 && \
+    \
+    echo "**** Installing Windows gaming dependencies ****" && \
+    pacman -S --noconfirm \
+        cabextract \
+        p7zip \
+        unzip \
+        zenity && \
+    \
+    echo "**** Cleanup ****" && \
+    pacman -Scc --noconfirm
 
 #######################################################
 # Install DXVK for DirectX to Vulkan translation
 #######################################################
 
-RUN <<_INSTALL_DXVK
-set -e
-echo "**** Installing DXVK ****"
-# DXVK can be installed via winetricks or manually
-# For now, we'll prepare the environment for it
-mkdir -p /opt/dxvk
-echo "DXVK can be installed per-prefix using winetricks dxvk"
-_INSTALL_DXVK
+RUN set -e && \
+    echo "**** Installing DXVK ****" && \
+    mkdir -p /opt/dxvk && \
+    echo "DXVK can be installed per-prefix using winetricks dxvk"
 
 #######################################################
 # Configure Wine defaults

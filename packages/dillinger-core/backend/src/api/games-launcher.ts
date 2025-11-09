@@ -74,6 +74,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/:id/launch', async (req: Request, res: Response) => {
   try {
     const gameId = req.params.id;
+    const { mode = 'local' } = req.body; // Extract launch mode (local or streaming)
     if (!gameId) {
       return res.status(400).json({ error: 'Game ID required' });
     }
@@ -135,6 +136,7 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
         game,
         platform,
         sessionId,
+        mode, // Pass launch mode (local or streaming)
       });
 
       // Update session with container info

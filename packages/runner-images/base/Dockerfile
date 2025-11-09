@@ -8,12 +8,11 @@
 #
 # Based on Games on Whales architecture
 
-ARG BASE_IMAGE=ubuntu:25.04
-FROM ${BASE_IMAGE} AS base
+FROM archlinux:latest AS base
 
 LABEL maintainer="Dillinger Project"
 LABEL description="Base runner with X11, GPU, PulseAudio, Gamescope, and Moonlight streaming"
-LABEL version="1.0.0"
+LABEL version="2.0.0"
 
 # Configure default user and environment
 ENV PUID=1000 \
@@ -22,47 +21,55 @@ ENV PUID=1000 \
     UNAME="gameuser" \
     HOME="/home/gameuser" \
     TZ="UTC" \
-    DEBIAN_FRONTEND=noninteractive \
     LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8
-
-ARG TARGETARCH=amd64
-ARG TARGETVARIANT
 
 #######################################################
 # Stage 1: Install base system dependencies
 #######################################################
 
-# Install base packages and gosu for user management
-ARG GOSU_VERSION=1.14
-RUN <<_INSTALL_BASE
-set -e
-echo "**** Update apt database ****"
-apt-get update
-
-echo "**** Install certificates ****"
-apt-get install -y --reinstall --no-install-recommends ca-certificates
-
-echo "**** Install base packages ****"
-apt-get install -y --no-install-recommends \
-    curl wget gnupg2 software-properties-common \
-    fuse libnss3 jq \
-    locales tzdata sudo \
-    psmisc procps net-tools
-
-echo "**** Install gosu for user switching ****"
-wget --progress=dot:giga \
-    -O /usr/bin/gosu \
-    "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-${TARGETARCH}${TARGETVARIANT}"
-chmod +x /usr/bin/gosu
-gosu nobody true && echo "gosu working!"
-
-echo "**** Generate locales ****"
-locale-gen en_US.UTF-8
-
-echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
-_INSTALL_BASE
+# Update system and install base packages + gosu
+RUN set -e && \
+    echo "**** Initialize Arch Linux keyring ****" && \
+    pacman-key --init && \
+    pacman-key --populate archlinux && \
+    \
+    echo "**** Update system ****" && \
+    pacman -Syu --noconfirm && \
+    \
+    echo "**** Install base packages ****" && \
+    pacman -S --noconfirm \
+        base-devel \
+        curl wget \
+        git \
+        jq \
+        sudo \
+        ca-certificates \
+        nss \
+        fuse3 \
+        psmisc \
+        procps-ng \
+        net-tools \
+        inetutils && \
+    \
+    echo "**** Install gosu for user switching ****" && \
+    GOSU_VERSION=1.17 && \
+    ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64) GOSU_ARCH="amd64" ;; \
+        aarch64) GOSU_ARCH="arm64" ;; \
+        *) GOSU_ARCH="amd64" ;; \
+    esac && \
+    wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-${GOSU_ARCH}" && \
+    chmod +x /usr/local/bin/gosu && \
+    gosu nobody true && echo "gosu working!" && \
+    \
+    echo "**** Configure locale ****" && \
+    echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
+    locale-gen && \
+    \
+    echo "**** Cleanup ****" && \
+    pacman -Scc --noconfirm
 
 #######################################################
 # Stage 2: Install display server (X11/Wayland)
@@ -71,27 +78,24 @@ _INSTALL_BASE
 RUN <<_INSTALL_DISPLAY
 set -e
 echo "**** Install X11 and Wayland support ****"
-apt-get update
-apt-get install -y --no-install-recommends \
-    xserver-xorg-core \
-    xorg-video-abi-25 \
-    xserver-xorg-legacy \
-    xwayland \
-    x11-utils \
-    x11-xserver-utils \
-    xauth \
+pacman -S --noconfirm \
+    xorg-server \
+    xorg-xauth \
+    xorg-xinit \
+    xorg-xrandr \
+    xorg-server-xwayland \
+    wayland \
+    wayland-protocols \
     xdotool \
+    xterm \
     kitty \
     nano \
-    xterm \
-    libwayland-server0 \
-    libwayland-client0 \
-    libinput10 \
-    libxkbcommon0 \
-    libgbm1
+    libinput \
+    libxkbcommon \
+    mesa
 
 echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
+pacman -Scc --noconfirm
 _INSTALL_DISPLAY
 
 #######################################################
@@ -101,25 +105,23 @@ _INSTALL_DISPLAY
 RUN <<_INSTALL_GPU
 set -e
 echo "**** Install Mesa and Vulkan drivers ****"
-apt-get update
-apt-get install -y --no-install-recommends \
+pacman -S --noconfirm \
+    mesa \
     mesa-utils \
-    mesa-vulkan-drivers \
-    libgl1-mesa-dri \
-    libgles2 \
-    libegl1 \
-    libgbm1 \
+    vulkan-icd-loader \
     vulkan-tools \
-    libvulkan1 \
-    libglvnd0 \
-    libgl1 \
-    libglx0 \
-    libglapi-mesa \
-    libnvidia-egl-wayland1 \
-    libnvidia-egl-gbm1
+    vulkan-mesa-layers \
+    lib32-mesa \
+    lib32-vulkan-icd-loader \
+    nvidia-utils \
+    lib32-nvidia-utils \
+    libva-mesa-driver \
+    lib32-libva-mesa-driver \
+    mesa-vdpau \
+    lib32-mesa-vdpau
 
 echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
+pacman -Scc --noconfirm
 _INSTALL_GPU
 
 #######################################################
@@ -129,42 +131,34 @@ _INSTALL_GPU
 RUN <<_INSTALL_AUDIO
 set -e
 echo "**** Install PulseAudio ****"
-apt-get update
-apt-get install -y --no-install-recommends \
+pacman -S --noconfirm \
     pulseaudio \
-    pulseaudio-utils \
+    pulseaudio-alsa \
     alsa-utils \
-    alsa-oss \
-    libasound2 \
-    libpulse0
+    alsa-plugins \
+    lib32-alsa-plugins \
+    lib32-libpulse
 
 echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
+pacman -Scc --noconfirm
 _INSTALL_AUDIO
 
 #######################################################
-# Stage 5: Install Gamescope compositor
+# Stage 5: Install Gamescope compositor and MangoHUD
 #######################################################
 
-ARG GAMESCOPE_VERSION="3.15.14"
-ENV GAMESCOPE_VERSION=$GAMESCOPE_VERSION
+RUN set -e && \
+    echo "**** Install Gamescope, MangoHUD and dependencies ****" && \
+    pacman -S --noconfirm \
+        gamescope \
+        mangohud \
+        noto-fonts-cjk \
+        ttf-font-awesome && \
+    echo "**** Cleanup ****" && \
+    pacman -Scc --noconfirm
 
-RUN <<_INSTALL_GAMESCOPE
-set -e
-echo "**** Install Gamescope and dependencies ****"
-apt-get update
-apt-get install -y --no-install-recommends \
-    gamescope \
-    fonts-noto-cjk \
-    fonts-font-awesome
-
-# Add /usr/games/ to PATH for gamescope
-echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
-_INSTALL_GAMESCOPE
-
-# Add gamescope to PATH
-ENV PATH="/usr/games/:${PATH}"
+# Gamescope and MangoHUD are already in PATH on Arch
+ENV PATH="/usr/bin:${PATH}"
 
 #######################################################
 # Stage 6: Install Wolf/Moonlight streaming components
@@ -174,19 +168,18 @@ ENV PATH="/usr/games/:${PATH}"
 RUN <<_INSTALL_MOONLIGHT
 set -e
 echo "**** Install Wolf/Moonlight dependencies ****"
-apt-get update
-apt-get install -y --no-install-recommends \
-    libssl3 \
-    libicu76 \
-    libevdev2 \
-    libudev1 \
-    libcurl4 \
-    libdrm2 \
-    libpci3 \
-    libunwind8
+pacman -S --noconfirm \
+    openssl \
+    icu \
+    libevdev \
+    systemd-libs \
+    curl \
+    libdrm \
+    pciutils \
+    libunwind
 
 echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
+pacman -Scc --noconfirm
 _INSTALL_MOONLIGHT
 
 #######################################################
@@ -196,25 +189,22 @@ _INSTALL_MOONLIGHT
 RUN <<_INSTALL_GSTREAMER
 set -e
 echo "**** Install GStreamer for video/audio streaming ****"
-apt-get update
-apt-get install -y --no-install-recommends \
-    gstreamer1.0-tools \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav \
-    gstreamer1.0-pulseaudio \
-    gstreamer1.0-x \
-    gstreamer1.0-vaapi \
-    gstreamer1.0-gl
+pacman -S --noconfirm \
+    gstreamer \
+    gst-plugins-base \
+    gst-plugins-good \
+    gst-plugins-bad \
+    gst-plugins-ugly \
+    gst-libav \
+    gst-plugin-pipewire \
+    gst-plugin-va
 
 echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
+pacman -Scc --noconfirm
 _INSTALL_GSTREAMER
 
 # Set GStreamer environment for optimal performance
-ENV GST_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/gstreamer-1.0/ \
+ENV GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0/ \
     GST_GL_API=gles2 \
     GST_GL_WINDOW=surfaceless \
     GST_DEBUG=2
@@ -253,9 +243,8 @@ ENV XDG_RUNTIME_DIR=/run/user/gameuser
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Copy helper scripts
-COPY scripts/ /opt/dillinger/scripts/
-RUN chmod +x /opt/dillinger/scripts/*.sh || true
+# Create directory for optional helper scripts
+RUN mkdir -p /opt/dillinger/scripts
 
 #######################################################
 # Configuration and Volumes

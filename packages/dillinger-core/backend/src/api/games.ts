@@ -586,7 +586,9 @@ router.get('/:id/install/status', async (req: Request, res: Response) => {
     try {
       const containerResult = await dockerService.waitForInstallationComplete(installation.containerId);
       
-      if (containerResult.success || containerResult.exitCode !== -1) {
+      // If exitCode is >= 0, the container has finished (successfully or with error)
+      // If exitCode is -1, it's still running or we couldn't determine status
+      if (containerResult.exitCode !== -1) {
         // Installation finished - scan for executables
         console.log(`🎮 Installation completed for ${game.title}, scanning for executables...`);
         

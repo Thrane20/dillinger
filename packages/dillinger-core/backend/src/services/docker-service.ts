@@ -11,6 +11,7 @@ export interface GameLaunchOptions {
   game: Game;
   platform: Platform;
   sessionId: string;
+  mode?: 'local' | 'streaming'; // Launch mode: local (host display) or streaming (Moonlight/Wolf)
 }
 
 export interface GameInstallOptions {
@@ -293,7 +294,7 @@ export class DockerService {
    * Launch a game in a Docker container
    */
   async launchGame(options: GameLaunchOptions): Promise<ContainerInfo> {
-    const { game, platform, sessionId } = options;
+    const { game, platform, sessionId, mode = 'local' } = options;
 
     // Ensure host path detection
     await this.detectHostPath();
@@ -377,8 +378,33 @@ export class DockerService {
       `GAME_ID=${game.id}`,
       `SESSION_ID=${sessionId}`,
       `SAVES_PATH=/data/saves/${game.id}`, // Game-specific saves directory in dillinger_root
+      `ENABLE_MOONLIGHT=${mode === 'streaming' ? 'true' : 'false'}`, // Enable Moonlight/Wolf streaming mode
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
+
+    // Add Wine-specific configuration
+    const wineConfig = game.settings?.wine;
+    if (wineConfig?.useDxvk) {
+      env.push('INSTALL_DXVK=true');
+      // Enable DXVK HUD for verification (shows GPU info, driver, FPS)
+      env.push('DXVK_HUD=devinfo,fps');
+      console.log(`  DXVK enabled (DirectX to Vulkan translation)`);
+    }
+
+    // Add Wine DLL overrides if configured
+    if (wineConfig?.dlls && Object.keys(wineConfig.dlls).length > 0) {
+      const dllOverrides = Object.entries(wineConfig.dlls)
+        .map(([dll, mode]) => `${dll}=${mode}`)
+        .join(';');
+      env.push(`WINE_DLL_OVERRIDES=${dllOverrides}`);
+      console.log(`  Wine DLL overrides: ${dllOverrides}`);
+    }
+
+    // Add Wine compatibility mode if configured
+    if (wineConfig?.compatibilityMode && wineConfig.compatibilityMode !== 'none') {
+      env.push(`WINE_COMPAT_MODE=${wineConfig.compatibilityMode}`);
+      console.log(`  Wine compatibility mode: ${wineConfig.compatibilityMode}`);
+    }
 
     // Add Gamescope configuration if enabled
     const gamescopeConfig = game.settings?.gamescope;
@@ -405,6 +431,13 @@ export class DockerService {
       
       console.log(`  Gamescope enabled: ${gamescopeConfig.width}x${gamescopeConfig.height}@${gamescopeConfig.refreshRate}Hz`);
       console.log(`  Gamescope upscaler: ${gamescopeConfig.upscaler || 'auto'}`);
+    }
+
+    // Add MangoHUD configuration if enabled
+    const mangoHudConfig = game.settings?.mangohud;
+    if (mangoHudConfig?.enabled) {
+      env.push('ENABLE_MANGOHUD=true');
+      console.log(`  MangoHUD overlay enabled`);
     }
 
     // Add Moonlight streaming configuration if enabled
@@ -471,11 +504,8 @@ export class DockerService {
         `GAME_ARGS=${cleanArgs}`
       );
       
-      // Add Wine virtual desktop for fullscreen support
-      if (fullscreen) {
-        env.push(`WINE_VIRTUAL_DESKTOP=${resolution}`);
-        console.log(`  Wine virtual desktop enabled: ${resolution}`);
-      }
+      // Note: Wine virtual desktop disabled due to input handling issues
+      // Users should enable gamescope for fullscreen support instead
       
       // Add xrandr resolution setting if requested
       if (useXrandr) {
@@ -497,7 +527,7 @@ export class DockerService {
     
     // Determine Wine prefix path if this is a Wine game
     // The game files are in the filePath (e.g., "close-combat-iii-the-russian-front")
-    // The Wine prefix is in dillinger_installed/.wine-<slug>
+    // The Wine prefix is in dillinger_installed/wineprefix-<slug>
     const gameIdentifier = game.slug || game.id;
     let winePrefixPath: string | null = null;
     
@@ -514,7 +544,7 @@ export class DockerService {
       const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
       winePrefixPath = path.posix.join(
         this.getHostPath(hostInstallPath),
-        `.wine-${gameIdentifier}`
+        `wineprefix-${gameIdentifier}`
       );
       
       console.log(`  Wine prefix: ${winePrefixPath}`);
@@ -523,8 +553,8 @@ export class DockerService {
     // Build volume binds
     const binds = [
       `dillinger_root:/data:rw`, // Mount dillinger_root volume for saves/state
-      `dillinger_installers:/installers:rw`, // Use named volume for installers
-      `dillinger_installed:/config:rw`, // Use named volume for config
+      `dillinger_installers:/installers:rw`, // Helper volume for finding installers
+      `dillinger_installed:/installed:rw`, // Points to where games are installed
       ...displayConfig.volumes
     ];
     
@@ -582,11 +612,9 @@ export class DockerService {
         console.log(`  Moonlight ports exposed: 47984, 47989, 47999, 48010, 48100, 48200`);
       }
       
-      // For Wine games, the entrypoint script handles execution via env vars
-      // For native games, pass the command directly
-      if (platform.type !== 'wine') {
-        containerConfig.Cmd = cmdArray;
-      }
+      // Pass the command array to the container
+      // The entrypoint script will execute it with gosu
+      containerConfig.Cmd = cmdArray;
       
       const container = await docker.createContainer(containerConfig);
 
@@ -644,7 +672,7 @@ export class DockerService {
       const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
       winePrefixPath = path.posix.join(
         this.getHostPath(hostInstallPath),
-        `.wine-${gameIdentifier}`
+        `wineprefix-${gameIdentifier}`
       );
       console.log(`  Debug Wine prefix: ${winePrefixPath}`);
     }
@@ -738,7 +766,7 @@ export class DockerService {
     const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
     const winePrefixPath = path.posix.join(
       this.getHostPath(hostInstallPath),
-      `.wine-${gameIdentifier}`
+      `wineprefix-${gameIdentifier}`
     );
     
     // The game files are inside the Wine prefix at drive_c/GOG Games/<game>/
@@ -987,7 +1015,7 @@ export class DockerService {
 
     // Use game slug (or ID if no slug) for Wine prefix directory
     const gameIdentifier = game.slug || game.id;
-    const winePrefixPath = path.posix.join(hostInstallPath, `.wine-${gameIdentifier}`);
+    const winePrefixPath = path.posix.join(hostInstallPath, `wineprefix-${gameIdentifier}`);
     
     console.log(`  Wine prefix: ${winePrefixPath}`);
 
@@ -1046,8 +1074,8 @@ export class DockerService {
             `${hostInstallerPath}:/installer/${path.basename(installerPath)}:ro`, // Mount installer as read-only
             `${hostInstallPath}:/install:rw`, // Mount installation target as read-write
             `${winePrefixPath}:/wineprefix:rw`, // Game-specific Wine prefix (prevents interference between games)
-            `dillinger_installers:/installers:rw`, // Use named volume for installers
-            `dillinger_installed:/config:rw`, // Use named volume for config
+            `dillinger_installers:/installers:rw`, // Helper volume for finding installers
+            `dillinger_installed:/installed:rw`, // Points to where games are installed
             ...displayConfig.volumes
           ],
           Devices: displayConfig.devices,
@@ -1059,11 +1087,10 @@ export class DockerService {
         OpenStdin: true,
         AttachStdout: true,
         AttachStderr: true,
-        // Override entrypoint to run installer directly
-        Entrypoint: platform.type === 'wine' ? ['/usr/bin/wine'] : ['/bin/bash', '-c'],
+        // Use default entrypoint but pass installer as command
         Cmd: platform.type === 'wine' 
-          ? [`/installer/${path.basename(installerPath)}`]
-          : [`/installer/${path.basename(installerPath)}`],
+          ? ['wine', `/installer/${path.basename(installerPath)}`]
+          : ['/bin/bash', '-c', `/installer/${path.basename(installerPath)}`],
       });
 
       await container.start();
@@ -1093,6 +1120,19 @@ export class DockerService {
     try {
       const container = docker.getContainer(containerId);
       
+      // First check if container exists
+      try {
+        await container.inspect();
+      } catch (inspectError: any) {
+        if (inspectError.statusCode === 404) {
+          console.log(`⚠️  Installation container ${containerId} no longer exists (auto-removed)`);
+          // Container was auto-removed, assume it finished (we don't know the exit code)
+          // Treat this as a failure since we can't verify success
+          return { success: false, exitCode: 1 };
+        }
+        throw inspectError;
+      }
+      
       // Wait for container to finish
       console.log(`🔍 Monitoring installation container: ${containerId}`);
       const result = await container.wait();
@@ -1103,7 +1143,11 @@ export class DockerService {
         success: result.StatusCode === 0,
         exitCode: result.StatusCode
       };
-    } catch (error) {
+    } catch (error: any) {
+      if (error.statusCode === 404) {
+        console.log(`⚠️  Installation container ${containerId} no longer exists (auto-removed during wait)`);
+        return { success: false, exitCode: 1 };
+      }
       console.error('Error monitoring installation:', error);
       return { success: false, exitCode: -1 };
     }

@@ -7,8 +7,6 @@ LABEL maintainer="Dillinger Project"
 LABEL description="Linux native game runner extending base runner"
 LABEL version="2.0.0"
 
-ENV DEBIAN_FRONTEND=noninteractive
-
 #######################################################
 # Install additional gaming libraries for native Linux games
 #######################################################
@@ -16,43 +14,34 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN <<_INSTALL_NATIVE
 set -e
 echo "**** Installing native Linux gaming libraries ****"
-apt-get update
-apt-get install -y --no-install-recommends \
-    # SDL2 for game input/controllers
-    libsdl2-2.0-0 \
-    libsdl2-image-2.0-0 \
-    libsdl2-mixer-2.0-0 \
-    libsdl2-ttf-2.0-0 \
-    libsdl2-net-2.0-0 \
-    # OpenAL for 3D audio
-    libopenal1 \
-    libopenal-data \
-    # Additional gaming libraries
-    libvorbisfile3 \
-    libtheora0 \
-    libogg0 \
-    libflac12 \
-    libsndfile1 \
-    libglew2.2 \
-    # Common game dependencies
-    libcurl4 \
-    libpng16-16 \
-    libjpeg-turbo8 \
-    zlib1g \
-    libncurses6 \
-    libncursesw6
+pacman -S --noconfirm \
+    sdl2 \
+    sdl2_image \
+    sdl2_mixer \
+    sdl2_ttf \
+    sdl2_net \
+    openal \
+    libvorbis \
+    libtheora \
+    libogg \
+    flac \
+    libsndfile \
+    glew \
+    curl \
+    libpng \
+    libjpeg-turbo \
+    zlib \
+    ncurses
 
 echo "**** Install 32-bit libraries for 32-bit games ****"
-dpkg --add-architecture i386
-apt-get update
-apt-get install -y --no-install-recommends \
-    libsdl2-2.0-0:i386 \
-    libopenal1:i386 \
-    libgl1:i386 \
-    libglu1-mesa:i386
+pacman -S --noconfirm \
+    lib32-sdl2 \
+    lib32-openal \
+    lib32-mesa \
+    lib32-glu
 
 echo "**** Cleanup ****"
-rm -rf /var/lib/apt/lists/*
+pacman -Scc --noconfirm
 _INSTALL_NATIVE
 
 #######################################################

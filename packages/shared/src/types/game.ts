@@ -39,8 +39,10 @@ export interface Game {
     wine?: {
       version?: string; // Wine version for Windows games
       prefix?: string; // Wine prefix configuration
-      dlls?: Record<string, string>; // DLL overrides
+      dlls?: Record<string, string>; // DLL overrides (e.g., {"ddraw": "native", "d3d9": "native,builtin"})
       arch?: 'win32' | 'win64'; // Wine architecture (WINEARCH)
+      useDxvk?: boolean; // Install DXVK (DirectX to Vulkan translation layer) for better performance and MangoHUD compatibility
+      compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10'; // Windows compatibility mode preset
       debug?: {
         // Wine debug channels - controls WINEDEBUG environment variable
         // Each channel can be enabled individually for debugging
@@ -87,6 +89,9 @@ export interface Game {
       inputHeight?: number; // Input resolution height for upscaling
       borderless?: boolean; // Borderless window mode
       limitFps?: number; // Frame rate limit
+    };
+    mangohud?: {
+      enabled?: boolean; // Enable MangoHUD performance overlay
     };
     moonlight?: {
       enabled?: boolean; // Enable Moonlight streaming for this game

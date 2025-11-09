@@ -245,7 +245,7 @@ export default function GamesPage() {
     }
   }
 
-  async function launchGame(gameId: string) {
+  async function launchGame(gameId: string, mode: 'local' | 'streaming' = 'local') {
     setLaunching((prev) => ({ ...prev, [gameId]: true }));
     setError(null);
 
@@ -255,6 +255,9 @@ export default function GamesPage() {
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          mode,
+        }),
       });
 
       if (response.ok) {
@@ -710,9 +713,10 @@ export default function GamesPage() {
                     ) : (
                       <>
                         <button
-                          onClick={() => launchGame(game.id)}
+                          onClick={() => launchGame(game.id, 'local')}
                           disabled={isLaunching}
                           className="bg-green-600 hover:bg-green-700 text-white rounded-md px-3 py-2 transition-colors flex-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                          title="Launch game locally on this machine"
                         >
                           {isLaunching ? (
                           <>
@@ -740,7 +744,37 @@ export default function GamesPage() {
                               d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                             />
                             </svg>
-                            Launch Game
+                            Play Local
+                          </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => launchGame(game.id, 'streaming')}
+                          disabled={isLaunching}
+                          className="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 transition-colors flex-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                          title="Launch game for streaming via Moonlight"
+                        >
+                          {isLaunching ? (
+                          <>
+                            <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                            Launching...
+                          </>
+                          ) : (
+                          <>
+                            <svg
+                            className="inline-block h-4 w-4 mr-2"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                            />
+                            </svg>
+                            Stream
                           </>
                           )}
                         </button>
