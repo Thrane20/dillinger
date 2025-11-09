@@ -747,6 +747,13 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               <option value="proton">Proton (Steam)</option>
               <option value="dosbox">DOSBox</option>
               <option value="scummvm">ScummVM</option>
+              <optgroup label="Commodore Systems">
+                <option value="c64">Commodore 64</option>
+                <option value="c128">Commodore 128</option>
+                <option value="vic20">VIC-20</option>
+                <option value="plus4">Plus/4</option>
+                <option value="pet">PET</option>
+              </optgroup>
             </select>
           </div>
 
@@ -1260,8 +1267,10 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
         )}
 
-        {/* Installation Section */}
-        {mode === 'edit' && !formData._originalGame?.installation?.status && (
+        {/* Installation Section - Only for platforms that require installation (Wine) */}
+        {mode === 'edit' && 
+         formData._originalGame?.platformId === 'windows-wine' && 
+         !formData._originalGame?.installation?.status && (
           <div className="space-y-4 mb-6">
             <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
@@ -1279,7 +1288,25 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
         )}
 
-        {mode === 'edit' && formData._originalGame?.installation?.status === 'installed' && (
+        {/* ROM File Section - For emulator platforms */}
+        {mode === 'edit' && 
+         ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(formData._originalGame?.platformId || '') && (
+          <div className="space-y-4 mb-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">ROM File</h3>
+            <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+              <p className="text-sm text-muted mb-2">
+                <strong>ROM Location:</strong> {formData._originalGame?.filePath || 'Not specified'}
+              </p>
+              <p className="text-xs text-muted">
+                This is a Commodore emulator game. No installation is required - the game runs directly from the ROM file.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {mode === 'edit' && 
+         formData._originalGame?.platformId === 'windows-wine' &&
+         formData._originalGame?.installation?.status === 'installed' && (
           <div className="space-y-4 mb-6">
             <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
@@ -1333,7 +1360,9 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
         )}
 
-        {mode === 'edit' && formData._originalGame?.installation?.status === 'installing' && (
+        {mode === 'edit' && 
+         formData._originalGame?.platformId === 'windows-wine' &&
+         formData._originalGame?.installation?.status === 'installing' && (
           <div className="space-y-4 mb-6">
             <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
             <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
@@ -1347,7 +1376,9 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
         )}
 
-        {mode === 'edit' && formData._originalGame?.installation?.status === 'failed' && (
+        {mode === 'edit' && 
+         formData._originalGame?.platformId === 'windows-wine' &&
+         formData._originalGame?.installation?.status === 'failed' && (
           <div className="space-y-4 mb-6">
             <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
