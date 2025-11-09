@@ -68,6 +68,13 @@ export interface Game {
       workingDirectory?: string; // Working directory relative to game directory
       fullscreen?: boolean; // Request fullscreen mode (uses Wine virtual desktop)
       resolution?: string; // Window/desktop resolution (e.g., "1920x1080")
+      useXrandr?: boolean; // Set display resolution via xrandr before launch
+      xrandrMode?: string; // Custom xrandr mode string (e.g., "1920x1080")
+      useGamescope?: boolean; // Launch via gamescope for better resolution handling
+      gamescopeWidth?: number; // Gamescope internal width
+      gamescopeHeight?: number; // Gamescope internal height
+      gamescopeOutputWidth?: number; // Gamescope output width (host resolution)
+      gamescopeOutputHeight?: number; // Gamescope output height (host resolution)
     };
   };
   installation?: {

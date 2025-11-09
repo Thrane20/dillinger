@@ -395,6 +395,8 @@ export class DockerService {
       // Check if fullscreen/virtual desktop is requested
       const fullscreen = game.settings?.launch?.fullscreen || false;
       const resolution = game.settings?.launch?.resolution || '1920x1080';
+      const useXrandr = game.settings?.launch?.useXrandr || false;
+      const xrandrMode = game.settings?.launch?.xrandrMode || resolution;
       
       // Note: WINEARCH should NOT be set when launching with an existing prefix
       // Wine will auto-detect the architecture from the existing prefix
@@ -410,6 +412,12 @@ export class DockerService {
       if (fullscreen) {
         env.push(`WINE_VIRTUAL_DESKTOP=${resolution}`);
         console.log(`  Wine virtual desktop enabled: ${resolution}`);
+      }
+      
+      // Add xrandr resolution setting if requested
+      if (useXrandr) {
+        env.push(`XRANDR_MODE=${xrandrMode}`);
+        console.log(`  xrandr mode will be set to: ${xrandrMode}`);
       }
       
       console.log(`  WINEDEBUG=${wineDebug}`);
@@ -475,7 +483,7 @@ export class DockerService {
         Env: env,
         WorkingDir: containerWorkingDir,
         HostConfig: {
-          AutoRemove: true, // Auto-remove container when stopped
+          AutoRemove: false, // Keep container for debugging - changed from true
           Binds: binds,
           Devices: displayConfig.devices,
           IpcMode: displayConfig.ipcMode,

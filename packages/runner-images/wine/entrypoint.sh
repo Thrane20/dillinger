@@ -103,6 +103,22 @@ else
     echo -e "${GREEN}✓ Wine prefix already initialized${NC}"
 fi
 
+# Configure Wine virtual desktop if requested
+if [ -n "$WINE_VIRTUAL_DESKTOP" ]; then
+    echo -e "${BLUE}Configuring Wine virtual desktop: $WINE_VIRTUAL_DESKTOP${NC}"
+    
+    # Parse resolution (e.g., "1920x1080")
+    IFS='x' read -r WIDTH HEIGHT <<< "$WINE_VIRTUAL_DESKTOP"
+    
+    # Set registry values for virtual desktop
+    # This ensures the window stays in virtual desktop mode
+    # Use || true to prevent script exit if registry commands fail
+    wine reg add 'HKCU\Software\Wine\Explorer' /v Desktop /t REG_SZ /d Dillinger /f >/dev/null 2>&1 || true
+    wine reg add 'HKCU\Software\Wine\Explorer\Desktops' /v Dillinger /t REG_SZ /d "${WIDTH}x${HEIGHT}" /f >/dev/null 2>&1 || true
+    
+    echo -e "${GREEN}✓ Virtual desktop configured in registry${NC}"
+fi
+
 # Check if we're in installer mode
 if [ "$INSTALLER_MODE" = "true" ]; then
     echo ""
@@ -182,17 +198,70 @@ fi
 
 echo ""
 
+# Set display resolution via xrandr if requested
+if [ -n "$XRANDR_MODE" ]; then
+    echo -e "${BLUE}Setting display resolution via xrandr...${NC}"
+    echo "  Resolution: $XRANDR_MODE"
+    
+    # Get the primary display
+    PRIMARY_DISPLAY=$(xrandr | grep " connected" | grep "primary" | awk '{print $1}')
+    if [ -z "$PRIMARY_DISPLAY" ]; then
+        # If no primary, use first connected display
+        PRIMARY_DISPLAY=$(xrandr | grep " connected" | awk '{print $1}' | head -1)
+    fi
+    
+    if [ -n "$PRIMARY_DISPLAY" ]; then
+        echo "  Display: $PRIMARY_DISPLAY"
+        # Try to set the mode
+        if xrandr --output "$PRIMARY_DISPLAY" --mode "$XRANDR_MODE" 2>/dev/null; then
+            echo -e "${GREEN}✓ Display resolution set to $XRANDR_MODE${NC}"
+        else
+            echo -e "${YELLOW}⚠ Failed to set resolution, trying to add mode...${NC}"
+            # Calculate modeline for the resolution
+            MODELINE=$(cvt ${XRANDR_MODE//x/ } | grep Modeline | sed 's/Modeline //' | tr -d '"')
+            MODE_NAME=$(echo "$MODELINE" | awk '{print $1}')
+            
+            # Add the new mode
+            xrandr --newmode $MODELINE 2>/dev/null || true
+            xrandr --addmode "$PRIMARY_DISPLAY" "$MODE_NAME" 2>/dev/null || true
+            xrandr --output "$PRIMARY_DISPLAY" --mode "$MODE_NAME" 2>/dev/null || echo -e "${YELLOW}⚠ Could not set custom resolution${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ No display found${NC}"
+    fi
+    echo ""
+fi
+
 # Change to game directory
 cd "$(dirname "$GAME_EXECUTABLE")" || true
 
 # Launch the game via Wine
 if [ -n "$WINE_VIRTUAL_DESKTOP" ]; then
     # Use Wine virtual desktop for fullscreen/windowed mode
+    # Wine needs to launch the game directly, the registry settings will handle the virtual desktop
     if [ -n "$GAME_ARGS" ]; then
-        exec wine explorer /desktop=Dillinger,"$WINE_VIRTUAL_DESKTOP" "$GAME_EXECUTABLE" $GAME_ARGS
+        wine "$GAME_EXECUTABLE" $GAME_ARGS &
     else
-        exec wine explorer /desktop=Dillinger,"$WINE_VIRTUAL_DESKTOP" "$GAME_EXECUTABLE"
+        wine "$GAME_EXECUTABLE" &
     fi
+    
+    # Get the PID of the wine process
+    WINE_PID=$!
+    
+    # Wait a moment for the window to appear
+    sleep 2
+    
+    # Try to make the window fullscreen using xdotool
+    # Find the window by searching for any window (the game should be the newest)
+    WINDOW_ID=$(xdotool search --name ".*" | tail -1)
+    if [ -n "$WINDOW_ID" ]; then
+        echo "Making window $WINDOW_ID fullscreen..."
+        xdotool windowactivate "$WINDOW_ID"
+        xdotool key F11 || xdotool windowstate --add FULLSCREEN "$WINDOW_ID" || true
+    fi
+    
+    # Wait for the wine process to finish
+    wait $WINE_PID
 else
     # Standard Wine launch
     if [ -n "$GAME_ARGS" ]; then
