@@ -24,12 +24,12 @@ router.get('/scrapers', async (req, res) => {
     const settings = await settingsService.getScraperSettings();
     const availableScrapers = scraperManager.getAvailableScrapers();
 
-    // Sanitize settings - don't send full credentials to client
+    // Sanitize settings - show client ID but mask client secret
     const sanitizedSettings = {
       igdb: settings.igdb
         ? {
-            clientId: settings.igdb.clientId ? '***' : '',
-            clientSecret: settings.igdb.clientSecret ? '***' : '',
+            clientId: settings.igdb.clientId || '',
+            clientSecret: settings.igdb.clientSecret ? '********' : '',
             configured: !!(settings.igdb.clientId && settings.igdb.clientSecret),
           }
         : { configured: false },
@@ -171,6 +171,92 @@ router.post('/audio', async (req, res) => {
     });
   } catch (error) {
     console.error('Failed to update audio settings:', error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/settings/docker
+ * Get Docker settings
+ */
+router.get('/docker', async (req, res) => {
+  try {
+    const settings = await settingsService.getDockerSettings();
+    res.json({ settings });
+  } catch (error) {
+    console.error('Failed to get Docker settings:', error);
+    res.status(500).json({
+      error: 'Failed to get Docker settings',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/settings/docker
+ * Update Docker settings
+ */
+router.post('/docker', async (req, res) => {
+  try {
+    const { autoRemoveContainers } = req.body;
+
+    await settingsService.updateDockerSettings({ autoRemoveContainers });
+
+    res.json({
+      success: true,
+      message: 'Docker settings updated successfully',
+    });
+  } catch (error) {
+    console.error('Failed to update Docker settings:', error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/settings/maintenance/cleanup-containers
+ * Clean up stopped game containers
+ */
+router.post('/maintenance/cleanup-containers', async (req, res) => {
+  try {
+    const result = await dockerService.cleanupStoppedContainers();
+    
+    res.json({
+      success: true,
+      message: `Cleaned up ${result.removed} stopped container(s)`,
+      removed: result.removed,
+      containers: result.containers,
+    });
+  } catch (error) {
+    console.error('Failed to cleanup containers:', error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/settings/maintenance/cleanup-volumes
+ * Clean up orphaned Docker volumes
+ */
+router.post('/maintenance/cleanup-volumes', async (req, res) => {
+  try {
+    const result = await dockerService.cleanupOrphanedVolumes();
+    
+    res.json({
+      success: true,
+      message: `Cleaned up ${result.removed} orphaned volume(s)`,
+      removed: result.removed,
+      volumes: result.volumes,
+    });
+  } catch (error) {
+    console.error('Failed to cleanup volumes:', error);
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Unknown error',

@@ -215,7 +215,7 @@ ENV GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0/ \
 
 # Create gameuser with proper groups
 RUN useradd -m -s /bin/bash -u 1000 gameuser && \
-    usermod -aG audio,video,input,render gameuser && \
+    usermod -aG audio,video,input,render,disk gameuser && \
     mkdir -p /home/gameuser/.config /home/gameuser/.local/share && \
     chown -R gameuser:gameuser /home/gameuser
 

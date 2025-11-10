@@ -17,10 +17,7 @@ RUN set -e && \
     pacman -Sy --noconfirm && \
     \
     pacman -S --noconfirm \
-        vice \
-        lib32-sdl2 \
-        lib32-alsa-lib \
-        lib32-libpulse && \
+        vice && \
     \
     echo "**** Cleanup ****" && \
     pacman -Scc --noconfirm

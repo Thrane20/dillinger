@@ -1,9 +1,13 @@
 {
-  "count": 1,
-  "lastUpdated": "2025-11-09T06:29:29.004Z",
+  "count": 3,
+  "lastUpdated": "2025-11-10T08:28:49.309Z",
   "byPlatform": {
     "windows-wine": [
       "close-combat-iii-the-russian-front"
+    ],
+    "c64": [
+      "giana-sisters",
+      "international-karate"
     ]
   },
   "byCollection": {},
@@ -16,6 +20,15 @@
     ],
     "strategy": [
       "close-combat-iii-the-russian-front"
+    ],
+    "platform": [
+      "giana-sisters"
+    ],
+    "fighting": [
+      "international-karate"
+    ],
+    "hack and slash/beat 'em up": [
+      "international-karate"
     ]
   },
   "byTag": {
@@ -27,6 +40,15 @@
     ],
     "strategy": [
       "close-combat-iii-the-russian-front"
+    ],
+    "platform": [
+      "giana-sisters"
+    ],
+    "fighting": [
+      "international-karate"
+    ],
+    "hack and slash/beat 'em up": [
+      "international-karate"
     ]
   },
   "search": {
@@ -48,6 +70,18 @@
       ],
       "front": [
         "close-combat-iii-the-russian-front"
+      ],
+      "giana": [
+        "giana-sisters"
+      ],
+      "sisters": [
+        "giana-sisters"
+      ],
+      "international": [
+        "international-karate"
+      ],
+      "karate": [
+        "international-karate"
       ]
     },
     "fuzzy": {
@@ -68,13 +102,28 @@
       ],
       "front": [
         "close-combat-iii-the-russian-front"
+      ],
+      "giana": [
+        "giana-sisters"
+      ],
+      "sisters": [
+        "giana-sisters"
+      ],
+      "international": [
+        "international-karate"
+      ],
+      "karate": [
+        "international-karate"
       ]
     }
   },
   "recent": [
+    "international-karate",
+    "giana-sisters",
     "close-combat-iii-the-russian-front"
   ],
   "popular": [
+    "giana-sisters",
     "close-combat-iii-the-russian-front"
   ]
 }

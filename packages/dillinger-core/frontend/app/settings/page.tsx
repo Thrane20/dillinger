@@ -24,6 +24,13 @@ export default function SettingsPage() {
   const [availableAudioSinks, setAvailableAudioSinks] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [selectedAudioSink, setSelectedAudioSink] = useState('');
   
+  // Docker settings
+  const [autoRemoveContainers, setAutoRemoveContainers] = useState(false);
+  
+  // Maintenance
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
+  
   // UI Settings
   const [backdropFadeDuration, setBackdropFadeDuration] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -35,6 +42,7 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettings();
     loadAudioSettings();
+    loadDockerSettings();
   }, []);
 
   const loadSettings = async () => {
@@ -46,6 +54,12 @@ export default function SettingsPage() {
       }
       const data: GetScraperSettingsResponse = await response.json();
       setSettings(data);
+      
+      // Populate IGDB credentials if they exist
+      if (data.settings?.igdb) {
+        setIgdbClientId(data.settings.igdb.clientId || '');
+        setIgdbClientSecret(data.settings.igdb.clientSecret || '');
+      }
     } catch (error) {
       console.error('Failed to load settings:', error);
       setMessage({ type: 'error', text: 'Failed to load settings' });
@@ -108,9 +122,94 @@ export default function SettingsPage() {
       await loadSettings();
     } catch (error) {
       console.error('Failed to save settings:', error);
-      setMessage({ type: 'error', text: 'Failed to save IGDB settings' });
+      setMessage({ type: 'error', text: 'Failed to save audio settings' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const loadDockerSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/docker`);
+      if (!response.ok) {
+        throw new Error('Failed to load Docker settings');
+      }
+      const data = await response.json();
+      setAutoRemoveContainers(data.settings?.autoRemoveContainers || false);
+    } catch (error) {
+      console.error('Failed to load Docker settings:', error);
+    }
+  };
+
+  const saveDockerSettings = async () => {
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/docker`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ autoRemoveContainers }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save Docker settings');
+      }
+
+      setMessage({ type: 'success', text: 'Docker settings saved successfully!' });
+    } catch (error) {
+      console.error('Failed to save Docker settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save Docker settings' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cleanupContainers = async () => {
+    try {
+      setCleanupLoading(true);
+      setCleanupMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/maintenance/cleanup-containers`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to cleanup containers');
+      }
+
+      const data = await response.json();
+      setCleanupMessage(data.message);
+    } catch (error) {
+      console.error('Failed to cleanup containers:', error);
+      setCleanupMessage('Failed to cleanup containers');
+    } finally {
+      setCleanupLoading(false);
+    }
+  };
+
+  const cleanupVolumes = async () => {
+    try {
+      setCleanupLoading(true);
+      setCleanupMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/maintenance/cleanup-volumes`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to cleanup volumes');
+      }
+
+      const data = await response.json();
+      setCleanupMessage(data.message);
+    } catch (error) {
+      console.error('Failed to cleanup volumes:', error);
+      setCleanupMessage('Failed to cleanup volumes');
+    } finally {
+      setCleanupLoading(false);
     }
   };
 
@@ -238,6 +337,11 @@ export default function SettingsPage() {
                 placeholder="Enter your IGDB Client Secret"
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
+              {igdbClientSecret && igdbClientSecret.startsWith('*') && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Existing secret is hidden. Enter a new value to update it.
+                </p>
+              )}
             </div>
 
             <button
@@ -301,6 +405,80 @@ export default function SettingsPage() {
                 {saving ? 'Saving...' : 'Save Audio Settings'}
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Docker Settings */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">Docker Settings</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Configure how Docker containers are managed for game sessions.
+          </p>
+
+          <div className="space-y-4">
+            <div className="flex items-start">
+              <div className="flex items-center h-5">
+                <input
+                  id="autoRemove"
+                  type="checkbox"
+                  checked={autoRemoveContainers}
+                  onChange={(e) => setAutoRemoveContainers(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+              <div className="ml-3 text-sm">
+                <label htmlFor="autoRemove" className="font-medium text-gray-900 dark:text-gray-100">
+                  Auto-remove containers
+                </label>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Automatically remove game containers when they stop. Disable this to keep containers for debugging.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={saveDockerSettings}
+              disabled={saving}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Saving...' : 'Save Docker Settings'}
+            </button>
+          </div>
+        </div>
+
+        {/* Maintenance */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">Maintenance</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Clean up stopped containers and orphaned volumes to free up disk space.
+          </p>
+
+          {cleanupMessage && (
+            <div className="mb-4 p-4 rounded-lg bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-100">
+              {cleanupMessage}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <button
+              onClick={cleanupContainers}
+              disabled={cleanupLoading}
+              className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {cleanupLoading ? 'Cleaning up...' : 'Clean Up Stopped Containers'}
+            </button>
+
+            <button
+              onClick={cleanupVolumes}
+              disabled={cleanupLoading}
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {cleanupLoading ? 'Cleaning up...' : 'Clean Up Orphaned Volumes'}
+            </button>
+
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              ⚠️ System volumes (dillinger_root, dillinger_installed, dillinger_installers) are protected and will not be removed.
+            </p>
           </div>
         </div>
 

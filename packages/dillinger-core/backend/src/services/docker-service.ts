@@ -328,6 +328,15 @@ export class DockerService {
     let cmdArray: string[];
     let containerWorkingDir: string | undefined;
     
+    // Map platform IDs to VICE emulator commands
+    const viceEmulators: Record<string, string> = {
+      'c64': 'x64sc',           // Commodore 64 (accurate)
+      'c128': 'x128',           // Commodore 128
+      'vic20': 'xvic',          // VIC-20
+      'plus4': 'xplus4',        // Plus/4
+      'pet': 'xpet'             // PET
+    };
+    
     if (platform.type === 'wine') {
       // Convert Windows path to Linux path in Wine prefix
       // Remove drive letter (C:) and convert backslashes to forward slashes
@@ -355,6 +364,32 @@ export class DockerService {
       console.log(`  Converted Linux path: ${gameExecutable}`);
       console.log(`  Wine command: ${cmdArray.join(' ')}`);
       console.log(`  Container working dir: ${containerWorkingDir}`);
+    } else if (viceEmulators[game.platformId]) {
+      // For Commodore emulator games (C64, C128, VIC-20, Plus/4, PET)
+      const emulatorCmd = viceEmulators[game.platformId];
+      
+      if (!emulatorCmd) {
+        throw new Error(`Unknown Commodore platform: ${game.platformId}`);
+      }
+      
+      const romPath = game.filePath; // Path to ROM file (.d64, .crt, .t64, etc.)
+      
+      if (!romPath) {
+        throw new Error('No ROM file specified for Commodore game');
+      }
+      
+      // VICE emulator command: x64sc /roms/game.d64
+      // The ROM file is mounted into /roms inside the container
+      const romFilename = path.basename(romPath);
+      gameExecutable = emulatorCmd;
+      cmdArray = [emulatorCmd, `/roms/${romFilename}`];
+      containerWorkingDir = '/home/gameuser';
+      
+      console.log(`Launching Commodore game: ${game.title}`);
+      console.log(`  Container Image: ${platform.configuration.containerImage}`);
+      console.log(`  Emulator: ${emulatorCmd}`);
+      console.log(`  ROM file: ${romPath}`);
+      console.log(`  Command: ${cmdArray.join(' ')}`);
     } else {
       // For native Linux games, construct the path normally
       gameExecutable = path.posix.join('/game', launchCommand);
@@ -530,6 +565,7 @@ export class DockerService {
     // The Wine prefix is in dillinger_installed/wineprefix-<slug>
     const gameIdentifier = game.slug || game.id;
     let winePrefixPath: string | null = null;
+    let emulatorHomePath: string | null = null;
     
     if (platform.type === 'wine') {
       // Extract the base directory from the game's filePath
@@ -548,6 +584,42 @@ export class DockerService {
       );
       
       console.log(`  Wine prefix: ${winePrefixPath}`);
+    } else if (viceEmulators[game.platformId]) {
+      // For emulator games, create a per-game home directory
+      // This allows each game to have its own VICE config, saves, screenshots, etc.
+      const dillingerRoot = this.storage.getDillingerRoot();
+      const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
+      emulatorHomePath = this.getHostPath(emulatorHomeDir);
+      
+      // Ensure the directory exists with proper permissions
+      try {
+        const fs = await import('fs-extra');
+        const { chmod } = await import('fs/promises');
+        
+        // Create parent directory first if it doesn't exist
+        const parentDir = path.dirname(emulatorHomePath);
+        await fs.ensureDir(parentDir);
+        
+        // Create the game-specific directory
+        await fs.ensureDir(emulatorHomePath);
+        
+        // Pre-create .config/pulse directory for PulseAudio
+        // This prevents Docker from creating it as root when mounting pulse/cookie
+        const pulseDir = path.join(emulatorHomePath, '.config', 'pulse');
+        await fs.ensureDir(pulseDir);
+        
+        // Set permissions so the container user can write to it
+        await chmod(emulatorHomePath, 0o755);
+        await chmod(path.join(emulatorHomePath, '.config'), 0o755);
+        await chmod(pulseDir, 0o755);
+        console.log(`  Emulator home directory: ${emulatorHomePath}`);
+      } catch (error: any) {
+        console.error(`  ✗ Failed to create emulator home directory: ${error.message}`);
+        console.error(`    Path: ${emulatorHomePath}`);
+        console.error(`    Error code: ${error.code}`);
+        // Don't mount if we can't create the directory
+        emulatorHomePath = null;
+      }
     }
 
     // Build volume binds
@@ -555,20 +627,44 @@ export class DockerService {
       `dillinger_root:/data:rw`, // Mount dillinger_root volume for saves/state
       `dillinger_installers:/installers:rw`, // Helper volume for finding installers
       `dillinger_installed:/installed:rw`, // Points to where games are installed
-      ...displayConfig.volumes
     ];
     
-    // For Wine games, mount the Wine prefix; for native games, mount the game directory
+    // For Wine games, mount the Wine prefix
     if (platform.type === 'wine' && winePrefixPath) {
       binds.push(`${winePrefixPath}:/wineprefix:rw`);
       console.log(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
-    } else {
-      // For non-Wine games, mount the game directory
+    } 
+    // For Commodore emulator games, mount the ROM file directory and per-game home
+    else if (viceEmulators[game.platformId] && game.filePath) {
+      const romDir = path.dirname(game.filePath);
+      binds.push(`${romDir}:/roms:ro`);
+      console.log(`  Mounting ROM directory: ${romDir} -> /roms`);
+      
+      // Mount per-game home directory for emulator config and saves
+      // IMPORTANT: Mount this BEFORE displayConfig.volumes so individual files can overlay
+      if (emulatorHomePath) {
+        binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
+        console.log(`  Mounting emulator home: ${emulatorHomePath} -> /home/gameuser`);
+      }
+    } 
+    // For other games, mount the game directory
+    else {
       binds.push(`${this.SESSION_VOLUME}:/game:ro`);
       console.log(`  Mounting game directory: ${this.SESSION_VOLUME} -> /game`);
     }
+    
+    // Add display configuration volumes AFTER game-specific mounts
+    // This allows individual file mounts (like .Xauthority, pulse/cookie) to overlay
+    binds.push(...displayConfig.volumes);
 
     try {
+      // Get Docker settings for auto-remove policy
+      const settingsService = SettingsService.getInstance();
+      const dockerSettings = await settingsService.getDockerSettings();
+      const autoRemove = dockerSettings.autoRemoveContainers !== undefined 
+        ? dockerSettings.autoRemoveContainers 
+        : false; // Default to false (keep containers)
+
       // Create and start the container
       const containerConfig: any = {
         Image: platform.configuration.containerImage || 'dillinger/runner-linux-native:latest',
@@ -576,7 +672,7 @@ export class DockerService {
         Env: env,
         WorkingDir: containerWorkingDir,
         HostConfig: {
-          AutoRemove: false, // Keep container for debugging - changed from true
+          AutoRemove: autoRemove,
           Binds: binds,
           Devices: displayConfig.devices,
           IpcMode: displayConfig.ipcMode,
@@ -667,6 +763,16 @@ export class DockerService {
     // Get Wine prefix for Wine games (same logic as launchGame)
     const gameIdentifier = game.slug || game.id;
     let winePrefixPath: string | null = null;
+    let emulatorHomePath: string | null = null;
+    
+    // Map platform IDs to VICE emulator commands
+    const viceEmulators: Record<string, string> = {
+      'c64': 'x64sc',
+      'c128': 'x128',
+      'vic20': 'xvic',
+      'plus4': 'xplus4',
+      'pet': 'xpet'
+    };
     
     if (platform.type === 'wine') {
       const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
@@ -675,6 +781,37 @@ export class DockerService {
         `wineprefix-${gameIdentifier}`
       );
       console.log(`  Debug Wine prefix: ${winePrefixPath}`);
+    } else if (viceEmulators[game.platformId]) {
+      // For emulator games, prepare the per-game home directory
+      const dillingerRoot = this.storage.getDillingerRoot();
+      const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
+      emulatorHomePath = this.getHostPath(emulatorHomeDir);
+      
+      // Ensure the directory exists
+      try {
+        const fs = await import('fs-extra');
+        const { chmod } = await import('fs/promises');
+        
+        // Create parent directory first if it doesn't exist
+        const parentDir = path.dirname(emulatorHomePath);
+        await fs.ensureDir(parentDir);
+        
+        // Create the game-specific directory
+        await fs.ensureDir(emulatorHomePath);
+        
+        // Pre-create .config/pulse directory for PulseAudio
+        const pulseDir = path.join(emulatorHomePath, '.config', 'pulse');
+        await fs.ensureDir(pulseDir);
+        
+        await chmod(emulatorHomePath, 0o755);
+        await chmod(path.join(emulatorHomePath, '.config'), 0o755);
+        await chmod(pulseDir, 0o755);
+        console.log(`  Debug emulator home: ${emulatorHomePath}`);
+      } catch (error: any) {
+        console.error(`  ✗ Failed to create debug emulator home directory: ${error.message}`);
+        console.error(`    Path: ${emulatorHomePath}`);
+        emulatorHomePath = null;
+      }
     }
 
     // Setup display configuration
@@ -707,6 +844,14 @@ export class DockerService {
     
     if (platform.type === 'wine' && winePrefixPath) {
       binds.push(`${winePrefixPath}:/wineprefix:rw`);
+    } else if (viceEmulators[game.platformId] && emulatorHomePath) {
+      // Mount emulator home for debug session
+      binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
+      // Also mount ROM directory if available
+      if (game.filePath) {
+        const romDir = path.dirname(game.filePath);
+        binds.push(`${romDir}:/roms:ro`);
+      }
     } else {
       binds.push(`${this.SESSION_VOLUME}:/game:ro`);
     }
@@ -1669,6 +1814,28 @@ export class DockerService {
         console.log(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
       }
       
+      // Add input devices for keyboard, mouse, and joystick support
+      if (existsSync('/dev/input')) {
+        devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
+        console.log(`  ✓ Input devices available (keyboard, mouse, joystick)`);
+      }
+      
+      // Add explicit joystick devices (js0, js1, js2, etc.)
+      // These need to be passed individually for proper access in containers
+      for (let i = 0; i < 10; i++) {
+        const jsDevice = `/dev/input/js${i}`;
+        if (existsSync(jsDevice)) {
+          devices.push({ PathOnHost: jsDevice, PathInContainer: jsDevice, CgroupPermissions: 'rwm' });
+          console.log(`  ✓ Joystick device available: ${jsDevice}`);
+        }
+      }
+      
+      // Add uinput for virtual input device creation (needed by some emulators)
+      if (existsSync('/dev/uinput')) {
+        devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
+        console.log(`  ✓ uinput device available`);
+      }
+      
       // Get default PulseAudio sink from settings or environment variable
       // This allows directing audio to a specific output when multiple are available
       const settingsService = SettingsService.getInstance();
@@ -1708,6 +1875,28 @@ export class DockerService {
         console.log(`  ✓ GPU device available`);
       } else {
         console.log(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+      }
+      
+      // Add input devices for keyboard, mouse, and joystick support
+      if (existsSync('/dev/input')) {
+        devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
+        console.log(`  ✓ Input devices available (keyboard, mouse, joystick)`);
+      }
+      
+      // Add explicit joystick devices (js0, js1, js2, etc.)
+      // These need to be passed individually for proper access in containers
+      for (let i = 0; i < 10; i++) {
+        const jsDevice = `/dev/input/js${i}`;
+        if (existsSync(jsDevice)) {
+          devices.push({ PathOnHost: jsDevice, PathInContainer: jsDevice, CgroupPermissions: 'rwm' });
+          console.log(`  ✓ Joystick device available: ${jsDevice}`);
+        }
+      }
+      
+      // Add uinput for virtual input device creation (needed by some emulators)
+      if (existsSync('/dev/uinput')) {
+        devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
+        console.log(`  ✓ uinput device available`);
       }
       
       return {
@@ -1808,6 +1997,112 @@ export class DockerService {
     } catch (error) {
       console.error('Failed to get audio sinks:', error);
       return [];
+    }
+  }
+
+  /**
+   * Clean up stopped game session containers
+   */
+  async cleanupStoppedContainers(): Promise<{ removed: number; containers: string[] }> {
+    try {
+      const containers = await docker.listContainers({
+        all: true,
+        filters: {
+          name: ['dillinger-session-'],
+          status: ['exited', 'dead']
+        }
+      });
+
+      const removed: string[] = [];
+      
+      for (const containerInfo of containers) {
+        try {
+          const container = docker.getContainer(containerInfo.Id);
+          await container.remove({ v: true }); // Remove with volumes
+          removed.push(containerInfo.Names[0]?.replace(/^\//, '') || containerInfo.Id);
+          console.log(`✓ Removed stopped container: ${containerInfo.Id.substring(0, 12)}`);
+        } catch (err) {
+          console.error(`Failed to remove container ${containerInfo.Id}:`, err);
+        }
+      }
+
+      return {
+        removed: removed.length,
+        containers: removed
+      };
+    } catch (error) {
+      console.error('Failed to cleanup stopped containers:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up orphaned Docker volumes (volumes not used by any container)
+   */
+  async cleanupOrphanedVolumes(): Promise<{ removed: number; volumes: string[] }> {
+    try {
+      // Get all volumes
+      const volumeList = await docker.listVolumes();
+      const allVolumes = volumeList.Volumes || [];
+
+      // Get all containers (running and stopped)
+      const containers = await docker.listContainers({ all: true });
+
+      // Collect all volumes in use
+      const volumesInUse = new Set<string>();
+      for (const containerInfo of containers) {
+        const container = docker.getContainer(containerInfo.Id);
+        const inspect = await container.inspect();
+        
+        // Check mounts
+        if (inspect.Mounts) {
+          for (const mount of inspect.Mounts) {
+            if (mount.Type === 'volume' && mount.Name) {
+              volumesInUse.add(mount.Name);
+            }
+          }
+        }
+      }
+
+      // Remove orphaned volumes (except system volumes)
+      const removed: string[] = [];
+      const protectedVolumes = ['dillinger_root', 'dillinger_installed', 'dillinger_installers'];
+
+      for (const vol of allVolumes) {
+        const volumeName = vol.Name;
+        
+        // Skip protected volumes
+        if (protectedVolumes.includes(volumeName)) {
+          continue;
+        }
+
+        // Skip volumes that are in use
+        if (volumesInUse.has(volumeName)) {
+          continue;
+        }
+
+        // Skip non-dillinger volumes
+        if (!volumeName.startsWith('dillinger-session-')) {
+          continue;
+        }
+
+        try {
+          const volume = docker.getVolume(volumeName);
+          await volume.remove();
+          removed.push(volumeName);
+          console.log(`✓ Removed orphaned volume: ${volumeName}`);
+        } catch (err) {
+          console.error(`Failed to remove volume ${volumeName}:`, err);
+        }
+      }
+
+      return {
+        removed: removed.length,
+        volumes: removed
+      };
+    } catch (error) {
+      console.error('Failed to cleanup orphaned volumes:', error);
+      throw error;
     }
   }
 }

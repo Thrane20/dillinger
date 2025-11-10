@@ -204,6 +204,151 @@ async function createDefaultPlatforms(storage: JSONStorageService) {
         }
       },
       isActive: false // Disabled by default until BIOS files are provided
+    },
+    {
+      name: 'Commodore 64',
+      type: 'emulator',
+      description: 'Commodore 64 games through VICE emulator',
+      configuration: {
+        containerImage: 'dillinger/runner-vice:latest',
+        supportedExtensions: ['.d64', '.d81', '.t64', '.prg', '.crt', '.tap', '.g64', '.zip'],
+        requiredFiles: [],
+        defaultSettings: {
+          emulator: {
+            core: 'vice',
+          }
+        }
+      },
+      validation: {
+        fileValidation: ['.d64', '.d81', '.t64', '.prg', '.crt', '.tap', '.g64', '.zip'],
+        pathValidation: '^/.*\\.(d64|d81|t64|prg|crt|tap|g64|zip)$',
+        requiresBios: false
+      },
+      displayStreaming: {
+        method: 'games-on-whales',
+        configuration: {
+          resolution: '1920x1080',
+          framerate: 60,
+          codec: 'h264'
+        }
+      },
+      isActive: true
+    },
+    {
+      name: 'Commodore 128',
+      type: 'emulator',
+      description: 'Commodore 128 games through VICE emulator',
+      configuration: {
+        containerImage: 'dillinger/runner-vice:latest',
+        supportedExtensions: ['.d64', '.d81', '.t64', '.prg', '.crt', '.tap', '.g64', '.zip'],
+        requiredFiles: [],
+        defaultSettings: {
+          emulator: {
+            core: 'vice',
+          }
+        }
+      },
+      validation: {
+        fileValidation: ['.d64', '.d81', '.t64', '.prg', '.crt', '.tap', '.g64', '.zip'],
+        pathValidation: '^/.*\\.(d64|d81|t64|prg|crt|tap|g64|zip)$',
+        requiresBios: false
+      },
+      displayStreaming: {
+        method: 'games-on-whales',
+        configuration: {
+          resolution: '1920x1080',
+          framerate: 60,
+          codec: 'h264'
+        }
+      },
+      isActive: true
+    },
+    {
+      name: 'VIC-20',
+      type: 'emulator',
+      description: 'VIC-20 games through VICE emulator',
+      configuration: {
+        containerImage: 'dillinger/runner-vice:latest',
+        supportedExtensions: ['.d64', '.t64', '.prg', '.crt', '.tap', '.zip'],
+        requiredFiles: [],
+        defaultSettings: {
+          emulator: {
+            core: 'vice',
+          }
+        }
+      },
+      validation: {
+        fileValidation: ['.d64', '.t64', '.prg', '.crt', '.tap', '.zip'],
+        pathValidation: '^/.*\\.(d64|t64|prg|crt|tap|zip)$',
+        requiresBios: false
+      },
+      displayStreaming: {
+        method: 'games-on-whales',
+        configuration: {
+          resolution: '1920x1080',
+          framerate: 60,
+          codec: 'h264'
+        }
+      },
+      isActive: true
+    },
+    {
+      name: 'Commodore Plus/4',
+      type: 'emulator',
+      description: 'Commodore Plus/4 games through VICE emulator',
+      configuration: {
+        containerImage: 'dillinger/runner-vice:latest',
+        supportedExtensions: ['.d64', '.t64', '.prg', '.crt', '.tap', '.zip'],
+        requiredFiles: [],
+        defaultSettings: {
+          emulator: {
+            core: 'vice',
+          }
+        }
+      },
+      validation: {
+        fileValidation: ['.d64', '.t64', '.prg', '.crt', '.tap', '.zip'],
+        pathValidation: '^/.*\\.(d64|t64|prg|crt|tap|zip)$',
+        requiresBios: false
+      },
+      displayStreaming: {
+        method: 'games-on-whales',
+        configuration: {
+          resolution: '1920x1080',
+          framerate: 60,
+          codec: 'h264'
+        }
+      },
+      isActive: true
+    },
+    {
+      name: 'Commodore PET',
+      type: 'emulator',
+      description: 'Commodore PET games through VICE emulator',
+      configuration: {
+        containerImage: 'dillinger/runner-vice:latest',
+        supportedExtensions: ['.d64', '.t64', '.prg', '.tap', '.zip'],
+        requiredFiles: [],
+        defaultSettings: {
+          emulator: {
+            core: 'vice',
+          }
+        }
+      },
+      validation: {
+        fileValidation: ['.d64', '.t64', '.prg', '.tap', '.zip'],
+        pathValidation: '^/.*\\.(d64|t64|prg|tap|zip)$',
+        requiresBios: false
+      },
+      displayStreaming: {
+        method: 'games-on-whales',
+        configuration: {
+          resolution: '1920x1080',
+          framerate: 60,
+          codec: 'h264'
+        }
+      },
+      isActive: true
     }
   ];
 

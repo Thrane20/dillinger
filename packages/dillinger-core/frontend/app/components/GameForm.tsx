@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MagnifyingGlassIcon, FolderIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
@@ -96,6 +96,14 @@ interface SavedGameMetadata {
   };
 }
 
+interface Screenshot {
+  filename: string;
+  path: string;
+  size: number;
+  modified: string;
+  modifiedTimestamp: number;
+}
+
 export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -103,10 +111,12 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [availableImages, setAvailableImages] = useState<string[]>([]);
+  const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [showImageSelector, setShowImageSelector] = useState<'primary' | 'backdrop' | null>(null);
   const [showInstallDialog, setShowInstallDialog] = useState(false);
   const [showShortcutDialog, setShowShortcutDialog] = useState(false);
   const [showFileExplorer, setShowFileExplorer] = useState(false);
+  const [showRomFileExplorer, setShowRomFileExplorer] = useState(false);
   const [showLogsDialog, setShowLogsDialog] = useState(false);
   const [discoveredExecutables, setDiscoveredExecutables] = useState<string[]>([]);
   const [formData, setFormData] = useState<GameFormData>({
@@ -263,6 +273,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   useEffect(() => {
     if (gameId && mode === 'edit') {
       loadAvailableImages(gameId);
+      loadScreenshots(gameId);
     }
   }, [gameId, mode]);
 
@@ -290,6 +301,54 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       }
     } catch (err) {
       console.error('Failed to load available images:', err);
+    }
+  };
+
+  const loadScreenshots = async (id: string) => {
+    try {
+      const response = await fetch(`/api/games/${id}/screenshots`);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data.screenshots) {
+          setScreenshots(result.data.screenshots);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load screenshots:', err);
+    }
+  };
+
+  const formatRelativeTime = (isoDate: string): string => {
+    const now = new Date();
+    const date = new Date(isoDate);
+    const diffMs = now.getTime() - date.getTime();
+    
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffMonths = Math.floor(diffDays / 30);
+    const diffYears = Math.floor(diffDays / 365);
+    
+    if (diffYears > 0) {
+      const remainingMonths = Math.floor((diffDays % 365) / 30);
+      const remainingDays = diffDays % 30;
+      const parts = [`${diffYears} year${diffYears > 1 ? 's' : ''}`];
+      if (remainingMonths > 0) parts.push(`${remainingMonths} month${remainingMonths > 1 ? 's' : ''}`);
+      if (remainingDays > 0 && remainingMonths === 0) parts.push(`${remainingDays} day${remainingDays > 1 ? 's' : ''}`);
+      return parts.join(', ') + ' ago';
+    } else if (diffMonths > 0) {
+      const remainingDays = diffDays % 30;
+      const parts = [`${diffMonths} month${diffMonths > 1 ? 's' : ''}`];
+      if (remainingDays > 0) parts.push(`${remainingDays} day${remainingDays > 1 ? 's' : ''}`);
+      return parts.join(', ') + ' ago';
+    } else if (diffDays > 0) {
+      return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    } else if (diffHours > 0) {
+      return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    } else if (diffMinutes > 0) {
+      return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
+    } else {
+      return 'Just now';
     }
   };
 
@@ -576,6 +635,43 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       }
     }));
     setShowFileExplorer(false);
+  };
+
+  const handleRomFileSelect = async (path: string) => {
+    // Update the game's filePath with the selected ROM file
+    try {
+      const response = await fetch(`http://localhost:3001/api/games/${formData._originalGame?.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...formData._originalGame,
+          filePath: path,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update ROM file path');
+      }
+
+      // Update local state
+      setFormData(prev => ({
+        ...prev,
+        _originalGame: {
+          ...prev._originalGame,
+          filePath: path,
+        }
+      }));
+
+      setSuccessMessage('ROM file path updated successfully');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error('Error updating ROM file:', err);
+      setError('Failed to update ROM file path');
+    } finally {
+      setShowRomFileExplorer(false);
+    }
   };
 
   const handleDebugContainer = async () => {
@@ -1239,31 +1335,159 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   <h3 className="text-xl font-semibold mb-4 text-text">
                     Select {showImageSelector === 'primary' ? 'Primary' : 'Backdrop'} Image
                   </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
-                    {availableImages.map((img, index) => (
-                      <div
-                        key={index}
-                        onClick={() => selectImage(img)}
-                        className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all"
-                      >
-                        <img
-                          src={img}
-                          alt={`Option ${index + 1}`}
-                          className="w-full h-32 object-cover"
-                        />
+                  
+                  {/* Game Screenshots Section */}
+                  {screenshots.length > 0 && (
+                    <div className="mb-6">
+                      <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
+                        Your Screenshots
+                      </h4>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {screenshots.map((screenshot) => (
+                          <div
+                            key={screenshot.filename}
+                            onClick={() => selectImage(screenshot.path)}
+                            className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all group relative"
+                          >
+                            <img
+                              src={screenshot.path}
+                              alt={screenshot.filename}
+                              className="w-full h-32 object-cover"
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center">
+                              <span className="text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity px-2 text-center">
+                                {formatRelativeTime(screenshot.modified)}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
+                  
+                  {/* IGDB Images Section */}
+                  {availableImages.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 bg-purple-500 rounded-full"></span>
+                        IGDB Images
+                      </h4>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {availableImages.map((img, index) => (
+                          <div
+                            key={index}
+                            onClick={() => selectImage(img)}
+                            className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all"
+                          >
+                            <img
+                              src={img}
+                              alt={`Option ${index + 1}`}
+                              className="w-full h-32 object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {availableImages.length === 0 && screenshots.length === 0 && (
+                    <p className="text-center text-muted py-8">No images available</p>
+                  )}
+                  
                   <button
                     type="button"
                     onClick={() => setShowImageSelector(null)}
-                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    className="w-full px-4 py-2 mt-6 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                   >
                     Cancel
                   </button>
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Game Screenshots - Show for emulator games (VICE) */}
+        {mode === 'edit' && 
+         ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(formData._originalGame?.platformId || '') && 
+         screenshots.length > 0 && (
+          <div className="space-y-4 mb-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Screenshots</h3>
+            <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+              <p className="text-sm text-muted mb-3">
+                Screenshots captured from VICE emulator (saved in emulator home directory)
+              </p>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {screenshots.map((screenshot, index) => (
+                  <div 
+                    key={screenshot.filename}
+                    className="flex items-center gap-3 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+                  >
+                    {/* Thumbnail */}
+                    <div className="flex-shrink-0">
+                      <img
+                        src={screenshot.path}
+                        alt={`Screenshot ${index + 1}`}
+                        className="w-32 h-24 object-cover rounded border border-gray-300 dark:border-gray-600"
+                      />
+                    </div>
+                    
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-text truncate">
+                          {screenshot.filename}
+                        </p>
+                        <div className="relative group">
+                          <InformationCircleIcon className="w-4 h-4 text-gray-400 hover:text-blue-500 cursor-help" />
+                          <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block z-10 w-64 p-3 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg shadow-lg">
+                            <p className="font-medium mb-1">
+                              {new Date(screenshot.modified).toLocaleString()}
+                            </p>
+                            <p className="text-gray-300 dark:text-gray-400">
+                              Captured {formatRelativeTime(screenshot.modified)}
+                            </p>
+                            <div className="absolute left-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted mt-1">
+                        {(screenshot.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    
+                    {/* Actions */}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            metadata: { ...prev.metadata, primaryImage: screenshot.path }
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                      >
+                        Set as Primary
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            metadata: { ...prev.metadata, backdropImage: screenshot.path }
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                      >
+                        Set as Backdrop
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -1297,9 +1521,17 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               <p className="text-sm text-muted mb-2">
                 <strong>ROM Location:</strong> {formData._originalGame?.filePath || 'Not specified'}
               </p>
-              <p className="text-xs text-muted">
+              <p className="text-xs text-muted mb-4">
                 This is a Commodore emulator game. No installation is required - the game runs directly from the ROM file.
               </p>
+              <button
+                type="button"
+                onClick={() => setShowRomFileExplorer(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+              >
+                <FolderIcon className="w-5 h-5" />
+                Select ROM
+              </button>
             </div>
           </div>
         )}
@@ -1919,6 +2151,17 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           onSelect={handleFileExplorerSelect}
           selectMode="file"
           title="Select Game Executable"
+        />
+      )}
+
+      {/* File Explorer for selecting ROM files */}
+      {showRomFileExplorer && (
+        <FileExplorer
+          isOpen={showRomFileExplorer}
+          onClose={() => setShowRomFileExplorer(false)}
+          onSelect={handleRomFileSelect}
+          selectMode="file"
+          title="Select ROM File (.d64, .d81, .t64, .prg, .crt, .tap, .g64, .zip)"
         />
       )}
 

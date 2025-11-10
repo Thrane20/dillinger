@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
-import * as fs from 'fs-extra';
+import fs from 'fs-extra';
 import { JSONStorageService } from '../services/storage.js';
 import { DockerService } from '../services/docker-service.js';
 import type { InstallGameRequest, InstallGameResponse } from '@dillinger/shared';
@@ -879,6 +879,163 @@ router.get('/active-containers/logs', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to get active container logs',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/games/:id/screenshots
+ * Get list of screenshots for a game (from emulator-homes directory)
+ */
+router.get('/:id/screenshots', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+    
+    const { game, fileKey } = await findGameAndFileKey(id);
+    
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+    
+    // Construct path to emulator home directory
+    // Use the same logic as docker-service: game.slug || game.id
+    const dillingerRoot = storage.getDillingerRoot();
+    const gameIdentifier = game.slug || game.id;
+    const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
+    
+    // Check if directory exists
+    if (!await fs.pathExists(emulatorHomeDir)) {
+      res.json({
+        success: true,
+        data: {
+          screenshots: [],
+          path: emulatorHomeDir,
+        },
+      });
+      return;
+    }
+    
+    // Read all PNG files from the directory
+    const files = await fs.readdir(emulatorHomeDir);
+    const screenshots = [];
+    
+    for (const file of files) {
+      if (file.toLowerCase().endsWith('.png')) {
+        const filePath = path.join(emulatorHomeDir, file);
+        const stats = await fs.stat(filePath);
+        
+        screenshots.push({
+          filename: file,
+          path: `/api/games/${id}/screenshots/${encodeURIComponent(file)}`,
+          size: stats.size,
+          modified: stats.mtime.toISOString(),
+          modifiedTimestamp: stats.mtime.getTime(),
+        });
+      }
+    }
+    
+    // Sort by modified date (newest first)
+    screenshots.sort((a, b) => b.modifiedTimestamp - a.modifiedTimestamp);
+    
+    res.json({
+      success: true,
+      data: {
+        screenshots,
+        path: emulatorHomeDir,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting screenshots:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get screenshots',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/games/:id/screenshots/:filename
+ * Serve a screenshot image file
+ */
+router.get('/:id/screenshots/:filename', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, filename } = req.params;
+    
+    if (!id || !filename) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID and filename are required',
+      });
+      return;
+    }
+    
+    const { game, fileKey } = await findGameAndFileKey(id);
+    
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+    
+    // Validate filename to prevent directory traversal
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid filename',
+      });
+      return;
+    }
+    
+    // Construct path to screenshot
+    // Use the same logic as docker-service: game.slug || game.id
+    const dillingerRoot = storage.getDillingerRoot();
+    const gameIdentifier = game.slug || game.id;
+    const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
+    const screenshotPath = path.join(emulatorHomeDir, filename);
+    
+    // Check if file exists
+    if (!await fs.pathExists(screenshotPath)) {
+      res.status(404).json({
+        success: false,
+        error: 'Screenshot not found',
+      });
+      return;
+    }
+    
+    // Verify it's a PNG file
+    if (!filename.toLowerCase().endsWith('.png')) {
+      res.status(400).json({
+        success: false,
+        error: 'Only PNG files are supported',
+      });
+      return;
+    }
+    
+    // Set appropriate headers and send file
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+    res.sendFile(screenshotPath);
+  } catch (error) {
+    console.error('Error serving screenshot:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to serve screenshot',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

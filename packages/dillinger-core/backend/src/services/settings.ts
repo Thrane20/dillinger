@@ -13,9 +13,14 @@ export interface AudioSettings {
   defaultSink?: string; // PulseAudio sink identifier (e.g., "alsa_output.pci-0000_03_00.1.hdmi-stereo-extra1")
 }
 
+export interface DockerSettings {
+  autoRemoveContainers?: boolean; // Whether to automatically remove containers after they stop (default: false)
+}
+
 export interface AppSettings {
   scrapers?: ScraperSettings;
   audio?: AudioSettings;
+  docker?: DockerSettings;
   // Future settings can be added here:
   // streaming?: StreamingSettings;
   // library?: LibrarySettings;
@@ -68,6 +73,18 @@ export class SettingsService {
   async updateAudioSettings(settings: Partial<AudioSettings>): Promise<void> {
     this.settings.audio = {
       ...this.settings.audio,
+      ...settings,
+    };
+    await this.save();
+  }
+
+  async getDockerSettings(): Promise<DockerSettings> {
+    return this.settings.docker || { autoRemoveContainers: false };
+  }
+
+  async updateDockerSettings(settings: Partial<DockerSettings>): Promise<void> {
+    this.settings.docker = {
+      ...this.settings.docker,
       ...settings,
     };
     await this.save();
