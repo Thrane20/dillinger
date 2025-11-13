@@ -5,9 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "DILLINGER_ROOT=${DILLINGER_ROOT:-$(pwd)/data} HOST_WORKSPACE_PATH=/mnt/linuxfast/dev/dillinger PORT=3001 tsx watch --clear-screen=false src/index.ts",
+    "dev": "DILLINGER_ROOT=${DILLINGER_ROOT:-$(pwd)/data} HOST_WORKSPACE_PATH=/mnt/linuxfast/dev/dillinger PORT=3001 tsx watch --clear-screen=false --ignore 'data/**' --ignore 'dist/**' src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "DILLINGER_ROOT=${DILLINGER_ROOT:-$(pwd)/data} HOST_WORKSPACE_PATH=/mnt/linuxfast/dev/dillinger PORT=3001 node dist/index.js",
     "test": "jest",
     "type-check": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",

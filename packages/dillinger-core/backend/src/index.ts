@@ -17,6 +17,7 @@ import scrapersRouter from './api/scrapers.js';
 import imagesRouter from './api/images.js';
 import filesystemRouter from './api/filesystem.js';
 import volumesRouter from './api/volumes.js';
+import onlineSourcesRouter from './api/online-sources.js';
 
 const app: Express = express();
 const server = createServer(app);
@@ -140,6 +141,9 @@ app.use('/api/filesystem', filesystemRouter);
 
 // Volume management routes
 app.use('/api/volumes', volumesRouter);
+
+// Online sources routes (GOG, Epic, Steam, etc.)
+app.use('/api/online-sources', onlineSourcesRouter);
 
 // Basic 404 handler for API routes
 app.use('/api/*', (req, res) => {

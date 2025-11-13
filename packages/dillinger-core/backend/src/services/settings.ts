@@ -17,10 +17,20 @@ export interface DockerSettings {
   autoRemoveContainers?: boolean; // Whether to automatically remove containers after they stop (default: false)
 }
 
+export interface GOGSettings {
+  accessCode?: string; // GOG access code for authentication
+}
+
+export interface DownloadSettings {
+  maxConcurrent?: number; // Maximum number of concurrent download worker threads (default: 2)
+}
+
 export interface AppSettings {
   scrapers?: ScraperSettings;
   audio?: AudioSettings;
   docker?: DockerSettings;
+  gog?: GOGSettings;
+  downloads?: DownloadSettings;
   // Future settings can be added here:
   // streaming?: StreamingSettings;
   // library?: LibrarySettings;
@@ -85,6 +95,30 @@ export class SettingsService {
   async updateDockerSettings(settings: Partial<DockerSettings>): Promise<void> {
     this.settings.docker = {
       ...this.settings.docker,
+      ...settings,
+    };
+    await this.save();
+  }
+
+  async getGOGSettings(): Promise<GOGSettings> {
+    return this.settings.gog || {};
+  }
+
+  async updateGOGSettings(settings: Partial<GOGSettings>): Promise<void> {
+    this.settings.gog = {
+      ...this.settings.gog,
+      ...settings,
+    };
+    await this.save();
+  }
+
+  async getDownloadSettings(): Promise<DownloadSettings> {
+    return this.settings.downloads || { maxConcurrent: 2 };
+  }
+
+  async updateDownloadSettings(settings: Partial<DownloadSettings>): Promise<void> {
+    this.settings.downloads = {
+      ...this.settings.downloads,
       ...settings,
     };
     await this.save();

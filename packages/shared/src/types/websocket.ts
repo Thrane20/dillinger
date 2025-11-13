@@ -62,9 +62,31 @@ export interface ContainerStoppedMessage extends WebSocketMessage<ContainerStopp
 }
 
 /**
+ * Download progress message
+ */
+export interface DownloadProgressBody {
+  gameId: string;
+  gogId: string;
+  title: string;
+  totalFiles: number;
+  completedFiles: number;
+  currentFile: string;
+  currentFileProgress: number;
+  totalProgress: number;
+  status: 'downloading' | 'completed' | 'failed';
+  error?: string;
+}
+
+export interface DownloadProgressMessage extends WebSocketMessage<DownloadProgressBody> {
+  type: 'download-progress';
+  body: DownloadProgressBody;
+}
+
+/**
  * Union type of all WebSocket messages
  */
 export type DillingerWebSocketMessage = 
   | LogEntryMessage 
   | ContainerStartedMessage 
-  | ContainerStoppedMessage;
+  | ContainerStoppedMessage
+  | DownloadProgressMessage;

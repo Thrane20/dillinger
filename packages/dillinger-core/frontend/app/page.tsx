@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
+import type { DownloadProgressBody } from '@dillinger/shared';
 
 interface Game {
   id: string;
@@ -32,6 +33,11 @@ interface Game {
       command?: string;
       arguments?: string[];
     };
+  };
+  installation?: {
+    status?: string;
+    downloadProgress?: number;
+    installerPath?: string;
   };
 }
 
@@ -110,8 +116,72 @@ export default function GamesPage() {
     
     window.addEventListener('backdropSettingsChanged', handleSettingsChange);
     
+    // WebSocket connection for download progress
+    // WebSockets cannot be proxied by Next.js, connect directly to backend
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const backendHost = process.env.NEXT_PUBLIC_BACKEND_URL || 'localhost:3001';
+    const wsUrl = `${protocol}//${backendHost}/ws/logs`;
+    const ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => {
+      console.log('[HomePage] WebSocket connected for download progress to', wsUrl);
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        
+        if (message.type === 'download-progress') {
+          const body: DownloadProgressBody = message.body;
+          
+          // Update the specific game with download progress
+          setGames((prevGames) => 
+            prevGames.map((game) => {
+              if (game.id === body.gameId) {
+                let status: string;
+                if (body.status === 'completed') {
+                  status = 'ready_to_install';
+                } else if (body.status === 'failed') {
+                  status = 'download_cancelled';
+                } else {
+                  status = 'downloading';
+                }
+                
+                return {
+                  ...game,
+                  installation: {
+                    ...game.installation,
+                    status,
+                    downloadProgress: body.totalProgress,
+                  },
+                };
+              }
+              return game;
+            })
+          );
+        }
+      } catch (error) {
+        console.error('[HomePage] Error parsing WebSocket message:', error);
+      }
+    };
+    
+    ws.onerror = (error) => {
+      console.error('[HomePage] WebSocket error:', error);
+    };
+    
+    ws.onclose = () => {
+      console.log('[HomePage] WebSocket disconnected');
+    };
+    
+    // Keep a slow polling as fallback (every 10 seconds instead of 2)
+    const pollInterval = setInterval(() => {
+      loadGames(true);
+    }, 10000);
+    
     return () => {
       window.removeEventListener('backdropSettingsChanged', handleSettingsChange);
+      ws.close();
+      clearInterval(pollInterval);
     };
   }, []);
 
@@ -196,21 +266,62 @@ export default function GamesPage() {
     return () => clearInterval(pollInterval);
   }, [sessions]); // Re-run when sessions change
 
-  async function loadGames() {
+  async function loadGames(silent = false) {
     try {
       const response = await fetch('/api/games');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
-          setGames(data.data || []);
+          const games = data.data || [];
+          
+          // Check download status for each game
+          const gamesWithDownloadStatus = await Promise.all(
+            games.map(async (game: any) => {
+              try {
+                const downloadResponse = await fetch(`/api/games/${game.id}/download/status`);
+                if (downloadResponse.ok) {
+                  const downloadData = await downloadResponse.json();
+                  if (downloadData.success && downloadData.status) {
+                    // Only mark as cancelled if status is 'failed' (not completed)
+                    if (downloadData.status.status === 'failed') {
+                      return {
+                        ...game,
+                        installation: {
+                          ...game.installation,
+                          status: 'download_cancelled',
+                          downloadProgress: downloadData.status.totalProgress,
+                        },
+                      };
+                    }
+                    // If completed or paused, show the game as-is (let WebSocket handle completion)
+                  }
+                }
+              } catch (err) {
+                // Ignore errors for individual games
+              }
+              return game;
+            })
+          );
+          
+          setGames(gamesWithDownloadStatus);
+          // Clear any previous errors on successful load
+          if (!silent) {
+            setError(null);
+          }
         }
       } else {
-        setError('Failed to load games from API');
+        if (!silent) {
+          setError('Failed to load games from API');
+        }
       }
     } catch (err) {
-      setError('Failed to load games: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      if (!silent) {
+        setError('Failed to load games: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -242,6 +353,92 @@ export default function GamesPage() {
       }
     } catch (err) {
       setError('Failed to delete game: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  }
+
+  async function resumeDownload(game: any) {
+    if (!game.metadata?.gogId) {
+      setError('Cannot resume: GOG ID not found');
+      return;
+    }
+
+    try {
+      // Resume download by calling the same endpoint
+      const response = await fetch(`/api/online-sources/gog/games/${game.metadata.gogId}/download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          gameId: game.id,
+          title: game.title,
+        }),
+      });
+
+      if (response.ok) {
+        // Update UI to show downloading
+        setGames((prevGames) => 
+          prevGames.map((g) => 
+            g.id === game.id 
+              ? { ...g, installation: { ...g.installation, status: 'downloading' } }
+              : g
+          )
+        );
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to resume download');
+      }
+    } catch (err) {
+      setError('Failed to resume download: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  }
+
+  async function restartDownload(game: any) {
+    if (!game.metadata?.gogId) {
+      setError('Cannot restart: GOG ID not found');
+      return;
+    }
+
+    if (!confirm('This will delete any existing downloaded files and start fresh. Continue?')) {
+      return;
+    }
+
+    try {
+      // First, delete existing downloaded files by calling cancel (which cleans up)
+      await fetch(`/api/games/${game.id}/download`, {
+        method: 'DELETE',
+      });
+
+      // Small delay to let cleanup finish
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Then start a fresh download
+      const response = await fetch(`/api/online-sources/gog/games/${game.metadata.gogId}/download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          gameId: game.id,
+          title: game.title,
+        }),
+      });
+
+      if (response.ok) {
+        // Update UI to show downloading
+        setGames((prevGames) => 
+          prevGames.map((g) => 
+            g.id === game.id 
+              ? { ...g, installation: { ...g.installation, status: 'downloading', downloadProgress: 0 } }
+              : g
+          )
+        );
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to restart download');
+      }
+    } catch (err) {
+      setError('Failed to restart download: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   }
 
@@ -553,11 +750,63 @@ export default function GamesPage() {
                     )}
                   </div>
 
-                  {game.metadata?.description && (
-                    <p className="text-sm text-muted line-clamp-3">{game.metadata.description}</p>
-                  )}
+                {game.metadata?.description && (
+                  <p className="text-sm text-muted line-clamp-3">{game.metadata.description}</p>
+                )}
 
-                  {/* Play Statistics */}
+                {/* Download Progress */}
+                {(game as any).installation?.status === 'downloading' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-blue-600 dark:text-blue-400 font-medium">Downloading...</span>
+                      <span className="text-muted">{(game as any).installation?.downloadProgress || 0}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                      <div 
+                        className="bg-blue-600 h-full transition-all duration-300 rounded-full"
+                        style={{ width: `${(game as any).installation?.downloadProgress || 0}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Download Cancelled */}
+                {(game as any).installation?.status === 'download_cancelled' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-400">
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="font-medium">Download Cancelled - {(game as any).installation?.downloadProgress || 0}%</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => resumeDownload(game)}
+                        className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Resume
+                      </button>
+                      <button
+                        onClick={() => restartDownload(game)}
+                        className="flex-1 px-3 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                      >
+                        Restart
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Ready to Install Badge */}
+                {(game as any).installation?.status === 'ready_to_install' && (
+                  <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium">Ready to Install</span>
+                  </div>
+                )}
+
+                {/* Play Statistics */}
                   <div className="flex items-center gap-2">
                     {(!game.metadata?.playCount || game.metadata.playCount === 0) ? (
                       <div className="text-xs text-muted italic">Never played</div>

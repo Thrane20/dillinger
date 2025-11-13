@@ -1041,4 +1041,78 @@ router.get('/:id/screenshots/:filename', async (req: Request, res: Response): Pr
   }
 });
 
+/**
+ * GET /api/games/:id/download/status
+ * Get download status for a game
+ */
+router.get('/:id/download/status', async (req: Request, res: Response) => {
+  try {
+    const gameId = req.params.id;
+    
+    if (!gameId) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+    
+    // Import DownloadManager
+    const { DownloadManager } = await import('../services/download-manager.js');
+    const downloadManager = DownloadManager.getInstance();
+    
+    // Get download status
+    const status = downloadManager.getDownloadStatus(gameId);
+    
+    res.json({
+      success: true,
+      status,
+    });
+  } catch (error) {
+    console.error('Error getting download status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get download status',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * DELETE /api/games/:id/download
+ * Cancel an active download for a game
+ */
+router.delete('/:id/download', async (req: Request, res: Response) => {
+  try {
+    const gameId = req.params.id;
+    
+    if (!gameId) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+    
+    // Import DownloadManager
+    const { DownloadManager } = await import('../services/download-manager.js');
+    const downloadManager = DownloadManager.getInstance();
+    
+    // Cancel the download
+    await downloadManager.cancelDownload(gameId);
+    
+    res.json({
+      success: true,
+      message: 'Download cancelled',
+    });
+  } catch (error) {
+    console.error('Error cancelling download:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cancel download',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;

@@ -27,6 +27,9 @@ export default function SettingsPage() {
   // Docker settings
   const [autoRemoveContainers, setAutoRemoveContainers] = useState(false);
   
+  // Download settings
+  const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
+  
   // Maintenance
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
@@ -43,6 +46,7 @@ export default function SettingsPage() {
     loadSettings();
     loadAudioSettings();
     loadDockerSettings();
+    loadDownloadSettings();
   }, []);
 
   const loadSettings = async () => {
@@ -141,6 +145,19 @@ export default function SettingsPage() {
     }
   };
 
+  const loadDownloadSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/downloads`);
+      if (!response.ok) {
+        throw new Error('Failed to load download settings');
+      }
+      const data = await response.json();
+      setMaxConcurrentDownloads(data.settings?.maxConcurrent || 2);
+    } catch (error) {
+      console.error('Failed to load download settings:', error);
+    }
+  };
+
   const saveDockerSettings = async () => {
     try {
       setSaving(true);
@@ -162,6 +179,32 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Failed to save Docker settings:', error);
       setMessage({ type: 'error', text: 'Failed to save Docker settings' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveDownloadSettings = async () => {
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/downloads`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ maxConcurrent: maxConcurrentDownloads }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save download settings');
+      }
+
+      setMessage({ type: 'success', text: 'Download settings saved successfully!' });
+    } catch (error) {
+      console.error('Failed to save download settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save download settings' });
     } finally {
       setSaving(false);
     }
@@ -442,6 +485,42 @@ export default function SettingsPage() {
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save Docker Settings'}
+            </button>
+          </div>
+        </div>
+
+        {/* Download Settings */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">Download Settings</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Configure download behavior for GOG installers and other content. Downloads run in separate worker threads to prevent blocking the UI.
+          </p>
+
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="maxConcurrent" className="block text-sm font-medium mb-2">
+                Maximum Concurrent Downloads (1-10)
+              </label>
+              <input
+                type="number"
+                id="maxConcurrent"
+                min="1"
+                max="10"
+                value={maxConcurrentDownloads}
+                onChange={(e) => setMaxConcurrentDownloads(parseInt(e.target.value) || 2)}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Higher values download more files simultaneously but use more system resources. Each download runs in its own worker thread.
+              </p>
+            </div>
+
+            <button
+              onClick={saveDownloadSettings}
+              disabled={saving}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Saving...' : 'Save Download Settings'}
             </button>
           </div>
         </div>

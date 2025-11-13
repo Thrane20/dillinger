@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import LogPanel from './LogPanel';
+import DownloadMonitor from './DownloadMonitor';
 
 interface HealthStatus {
   status: string;
@@ -63,6 +64,9 @@ export default function RightSidebar() {
           </div>
           
           <div className="space-y-4">
+            {/* Download Monitor - Show above logs when there are active downloads */}
+            <DownloadMonitor />
+
             {/* Container Logs - Permanent at top */}
             <div className="p-4 rounded-lg bg-surface/50 border border-border">
               <LogPanel />

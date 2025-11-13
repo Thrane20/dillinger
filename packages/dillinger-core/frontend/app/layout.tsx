@@ -78,6 +78,12 @@ export default function RootLayout({
                       Platforms
                     </a>
                     <a
+                      href="/online_sources"
+                      className="px-3 py-2 rounded-xl transition-colors hover:text-primary hover:bg-primary-soft"
+                    >
+                      Online Sources
+                    </a>
+                    <a
                       href="/settings"
                       className="px-3 py-2 rounded-xl transition-colors hover:text-primary hover:bg-primary-soft"
                     >

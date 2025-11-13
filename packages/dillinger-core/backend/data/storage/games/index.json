@@ -1,13 +1,18 @@
 {
-  "count": 3,
-  "lastUpdated": "2025-11-10T08:28:49.309Z",
+  "count": 6,
+  "lastUpdated": "2025-11-12T08:12:12.271Z",
   "byPlatform": {
     "windows-wine": [
       "close-combat-iii-the-russian-front"
     ],
     "c64": [
       "giana-sisters",
-      "international-karate"
+      "international-karate",
+      "space-taxi",
+      "turrican"
+    ],
+    "linux-native": [
+      "gog-1440426004"
     ]
   },
   "byCollection": {},
@@ -22,13 +27,21 @@
       "close-combat-iii-the-russian-front"
     ],
     "platform": [
-      "giana-sisters"
+      "giana-sisters",
+      "space-taxi",
+      "turrican"
     ],
     "fighting": [
       "international-karate"
     ],
     "hack and slash/beat 'em up": [
       "international-karate"
+    ],
+    "arcade": [
+      "space-taxi"
+    ],
+    "shooter": [
+      "turrican"
     ]
   },
   "byTag": {
@@ -42,13 +55,24 @@
       "close-combat-iii-the-russian-front"
     ],
     "platform": [
-      "giana-sisters"
+      "giana-sisters",
+      "space-taxi",
+      "turrican"
+    ],
+    "gog": [
+      "gog-1440426004"
     ],
     "fighting": [
       "international-karate"
     ],
     "hack and slash/beat 'em up": [
       "international-karate"
+    ],
+    "arcade": [
+      "space-taxi"
+    ],
+    "shooter": [
+      "turrican"
     ]
   },
   "search": {
@@ -77,11 +101,32 @@
       "sisters": [
         "giana-sisters"
       ],
+      "anno": [
+        "gog-1440426004"
+      ],
+      "1404:": [
+        "gog-1440426004"
+      ],
+      "gold": [
+        "gog-1440426004"
+      ],
+      "edition": [
+        "gog-1440426004"
+      ],
       "international": [
         "international-karate"
       ],
       "karate": [
         "international-karate"
+      ],
+      "space": [
+        "space-taxi"
+      ],
+      "taxi": [
+        "space-taxi"
+      ],
+      "turrican": [
+        "turrican"
       ]
     },
     "fuzzy": {
@@ -109,21 +154,46 @@
       "sisters": [
         "giana-sisters"
       ],
+      "anno": [
+        "gog-1440426004"
+      ],
+      "1404:": [
+        "gog-1440426004"
+      ],
+      "gold": [
+        "gog-1440426004"
+      ],
+      "edition": [
+        "gog-1440426004"
+      ],
       "international": [
         "international-karate"
       ],
       "karate": [
         "international-karate"
+      ],
+      "space": [
+        "space-taxi"
+      ],
+      "taxi": [
+        "space-taxi"
+      ],
+      "turrican": [
+        "turrican"
       ]
     }
   },
   "recent": [
+    "space-taxi",
+    "turrican",
+    "gog-1440426004",
     "international-karate",
     "giana-sisters",
     "close-combat-iii-the-russian-front"
   ],
   "popular": [
     "giana-sisters",
-    "close-combat-iii-the-russian-front"
+    "close-combat-iii-the-russian-front",
+    "space-taxi"
   ]
 }

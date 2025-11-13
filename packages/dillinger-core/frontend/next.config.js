@@ -14,8 +14,8 @@ const nextConfig = {
     let backendUrl;
     
     if (process.env.NODE_ENV === 'production') {
-      // Production: Use BACKEND_URL env var or default to localhost:4001
-      backendUrl = process.env.BACKEND_URL || 'http://localhost:4001';
+      // Production: Use BACKEND_URL env var or default to localhost:3001
+      backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
     } else if (process.env.DOCKER_ENV) {
       // Docker development: Use container name
       backendUrl = 'http://backend-dev:3001';

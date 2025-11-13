@@ -264,4 +264,103 @@ router.post('/maintenance/cleanup-volumes', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/settings/gog
+ * Get GOG settings
+ */
+router.get('/gog', async (req, res) => {
+  try {
+    const settings = await settingsService.getGOGSettings();
+    
+    res.json({
+      success: true,
+      settings,
+    });
+  } catch (error) {
+    console.error('Failed to get GOG settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get GOG settings',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * PUT /api/settings/gog
+ * Update GOG settings
+ */
+router.put('/gog', async (req, res) => {
+  try {
+    const { accessCode } = req.body;
+    
+    await settingsService.updateGOGSettings({ accessCode });
+    
+    res.json({
+      success: true,
+      message: 'GOG settings updated successfully',
+    });
+  } catch (error) {
+    console.error('Failed to update GOG settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update GOG settings',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/settings/downloads
+ * Get download settings
+ */
+router.get('/downloads', async (_req, res) => {
+  try {
+    const settings = await settingsService.getDownloadSettings();
+    res.json({
+      success: true,
+      settings,
+    });
+  } catch (error) {
+    console.error('Failed to get download settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get download settings',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * PUT /api/settings/downloads
+ * Update download settings
+ */
+router.put('/downloads', async (req, res) => {
+  try {
+    const { maxConcurrent } = req.body;
+    
+    if (maxConcurrent !== undefined) {
+      // Validate range
+      const validated = Math.max(1, Math.min(maxConcurrent, 10));
+      await settingsService.updateDownloadSettings({ maxConcurrent: validated });
+      
+      // Update the download manager
+      const { DownloadManager } = await import('../services/download-manager.js');
+      DownloadManager.getInstance().setMaxConcurrentDownloads(validated);
+    }
+    
+    res.json({
+      success: true,
+      message: 'Download settings updated successfully',
+    });
+  } catch (error) {
+    console.error('Failed to update download settings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update download settings',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;
