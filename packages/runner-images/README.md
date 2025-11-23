@@ -89,6 +89,39 @@ Runs Commodore computer games via VICE emulator.
 - Load tape images (.t64, .tap)
 - Execute program files (.prg)
 
+### FS-UAE (`fs-uae/`)
+Runs Amiga computer games via FS-UAE emulator.
+
+**Base:** Arch Linux (latest)
+
+**Features:**
+- FS-UAE 3.2.35 emulator
+- X11 display support
+- PulseAudio for audio
+- ROM file support (no installation required)
+- Save state support
+- Accurate Amiga hardware emulation
+- Kickstart ROM support
+
+**Supported systems:**
+- Amiga 500 (OCS chipset)
+- Amiga 500+ (ECS chipset)
+- Amiga 600 (ECS chipset)
+- Amiga 1000 (OCS chipset)
+- Amiga 1200 (AGA chipset)
+- Amiga 3000 (ECS with 68030)
+- Amiga 4000 (AGA with 68040)
+- Amiga CD32 (AGA-based console)
+
+**Example use cases:**
+- Play Amiga disk images (.adf, .adz)
+- Run WHDLoad games (.lha)
+- Load hard disk images (.hdf)
+- Play CD-ROM games (.iso, .cue)
+- Execute IPF copy-protected disks (.ipf)
+
+**Note:** Requires legal Kickstart ROM files (not included) to be placed in the `/bios` directory.
+
 ## Usage
 
 ### Building Images
@@ -102,6 +135,9 @@ docker build -t dillinger/runner-wine:latest ./packages/runner-images/wine
 
 # Build VICE runner
 docker build -t dillinger/runner-vice:latest ./packages/runner-images/vice
+
+# Build FS-UAE runner
+docker build -t dillinger/runner-fs-uae:latest ./packages/runner-images/fs-uae
 ```
 
 ### Running a Game
@@ -182,5 +218,4 @@ Planned runner images:
 - RetroArch (emulation)
 - DOSBox
 - ScummVM
-- Amiga emulator (UAE)
 - PlayStation emulators
