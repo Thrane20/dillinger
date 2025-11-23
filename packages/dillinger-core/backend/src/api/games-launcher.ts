@@ -74,7 +74,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/:id/launch', async (req: Request, res: Response) => {
   try {
     const gameId = req.params.id;
-    const { mode = 'local' } = req.body; // Extract launch mode (local or streaming)
+    const { mode = 'local', platformId } = req.body; // Extract launch mode and optional platformId
     if (!gameId) {
       return res.status(400).json({ error: 'Game ID required' });
     }
@@ -90,8 +90,38 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Game not found' });
     }
 
+    // Import migration utilities
+    const { migrateGameToMultiPlatform, getDefaultPlatformConfig, getPlatformConfig } = await import('@dillinger/shared');
+    
+    // Migrate game to multi-platform format
+    const migratedGame = migrateGameToMultiPlatform(game);
+    
+    // Determine which platform to use
+    let targetPlatformId: string;
+    let platformConfig;
+    
+    if (platformId) {
+      // Use specified platform
+      platformConfig = getPlatformConfig(migratedGame, platformId);
+      if (!platformConfig) {
+        return res.status(404).json({ 
+          error: `Platform ${platformId} not configured for this game` 
+        });
+      }
+      targetPlatformId = platformId;
+    } else {
+      // Use default platform
+      platformConfig = getDefaultPlatformConfig(migratedGame);
+      if (!platformConfig) {
+        return res.status(400).json({ 
+          error: 'No platform configured for this game' 
+        });
+      }
+      targetPlatformId = platformConfig.platformId;
+    }
+
     // Get platform from storage
-    const platform = await storage.readEntity<Platform>('platforms', game.platformId);
+    const platform = await storage.readEntity<Platform>('platforms', targetPlatformId);
     if (!platform) {
       return res.status(404).json({ error: 'Platform not found' });
     }
@@ -117,7 +147,7 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
         startTime: now,
       },
       settings: {
-        gameSettings: game.settings,
+        gameSettings: platformConfig.settings,
         platformSettings: platform.configuration,
       },
       created: now,
@@ -130,10 +160,19 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
     // Also save to game-specific sessions tracking
     await gameSessions.addSession(game.id, sessionId, platform.id);
 
-    // Launch the game container
+    // Launch the game container with platform-specific configuration
     try {
+      // Create a modified game object with platform-specific settings for docker launch
+      const gameForLaunch = {
+        ...game,
+        platformId: targetPlatformId,
+        filePath: platformConfig.filePath || game.filePath,
+        settings: platformConfig.settings,
+        installation: platformConfig.installation,
+      };
+      
       const containerInfo = await docker.launchGame({
-        game,
+        game: gameForLaunch,
         platform,
         sessionId,
         mode, // Pass launch mode (local or streaming)

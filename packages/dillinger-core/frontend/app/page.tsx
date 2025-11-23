@@ -2,44 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
-import type { DownloadProgressBody } from '@dillinger/shared';
+import type { DownloadProgressBody, Game as SharedGame, GamePlatformConfig } from '@dillinger/shared';
 
-interface Game {
-  id: string;
-  title: string;
-  filePath: string;
-  platformId: string;
-  tags: string[];
-  metadata?: {
-    description?: string;
-    genre?: string[];
-    developer?: string;
-    rating?: number;
-    playTime?: number;
-    playCount?: number;
-    lastPlayed?: string;
-    primaryImage?: string;
-    backdropImage?: string;
-    similarGames?: Array<{
-      title: string;
-      slug?: string;
-      gameId?: string;
-      scraperId?: string;
-      scraperType?: string;
-    }>;
-  };
-  settings?: {
-    launch?: {
-      command?: string;
-      arguments?: string[];
-    };
-  };
-  installation?: {
-    status?: string;
-    downloadProgress?: number;
-    installerPath?: string;
-  };
-}
+// Frontend Game interface (same as shared but we re-export for clarity)
+type Game = SharedGame;
 
 interface Session {
   id: string;
@@ -442,7 +408,7 @@ export default function GamesPage() {
     }
   }
 
-  async function launchGame(gameId: string, mode: 'local' | 'streaming' = 'local') {
+  async function launchGame(gameId: string, mode: 'local' | 'streaming' = 'local', platformId?: string) {
     setLaunching((prev) => ({ ...prev, [gameId]: true }));
     setError(null);
 
@@ -454,6 +420,7 @@ export default function GamesPage() {
         },
         body: JSON.stringify({
           mode,
+          platformId, // Optional platform ID for multi-platform games
         }),
       });
 
@@ -684,14 +651,22 @@ export default function GamesPage() {
             const session = sessions[game.id];
             const isLaunching = launching[game.id];
             const isRunning = session && session.status === 'running';
-            // Game is configured if it has a launch command set (either via installation or manual config)
-            // Commodore and Amiga emulator games just need a ROM file (filePath)
-            const isEmulatorGame = ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(game.platformId);
-            const isConfigured = game.platformId && (
-              isEmulatorGame 
-                ? game.filePath // Emulator games just need a ROM file
-                : game.settings?.launch?.command // Other games need a launch command
-            );
+            
+            // Get configured platforms
+            const platforms = game.platforms || [];
+            const hasAnyPlatform = platforms.length > 0;
+            
+            // Check which platforms are configured
+            const configuredPlatforms = platforms.filter(p => {
+              const isEmulatorPlatform = ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(p.platformId);
+              return p.filePath || p.settings?.launch?.command || (isEmulatorPlatform && p.filePath);
+            });
+            
+            const isConfigured = configuredPlatforms.length > 0;
+            const defaultPlatform = game.defaultPlatformId 
+              ? platforms.find(p => p.platformId === game.defaultPlatformId) 
+              : configuredPlatforms[0];
+            
             const primaryImage = game.metadata?.primaryImage;
             
             // Check if any game is currently running
@@ -883,10 +858,32 @@ export default function GamesPage() {
 
                   <div className="pt-2 border-t border-border">
                     <dl className="text-xs space-y-1">
-                      <div className="flex justify-between">
-                        <dt className="text-muted">Platform:</dt>
-                        <dd className="font-medium text-text">{game.platformId || 'Not set'}</dd>
-                      </div>
+                      {/* Show configured platforms */}
+                      {configuredPlatforms.length > 0 ? (
+                        <div>
+                          <dt className="text-muted mb-1">Configured Platforms:</dt>
+                          <dd className="flex flex-wrap gap-1">
+                            {configuredPlatforms.map((platform) => (
+                              <span
+                                key={platform.platformId}
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                                  platform.platformId === game.defaultPlatformId
+                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-100 ring-1 ring-blue-600'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                                }`}
+                              >
+                                {platform.platformId}
+                                {platform.platformId === game.defaultPlatformId && ' ★'}
+                              </span>
+                            ))}
+                          </dd>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between">
+                          <dt className="text-muted">Platform:</dt>
+                          <dd className="font-medium text-text">Not set</dd>
+                        </div>
+                      )}
                       
                       {!isConfigured && (
                         <div className="flex justify-between">
