@@ -850,6 +850,9 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 <option value="plus4">Plus/4</option>
                 <option value="pet">PET</option>
               </optgroup>
+              <optgroup label="Amiga Systems">
+                <option value="amiga">Amiga</option>
+              </optgroup>
             </select>
           </div>
 
@@ -1514,7 +1517,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
 
         {/* ROM File Section - For emulator platforms */}
         {mode === 'edit' && 
-         ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(formData._originalGame?.platformId || '') && (
+         ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga'].includes(formData._originalGame?.platformId || '') && (
           <div className="space-y-4 mb-6">
             <h3 className="text-lg font-semibold text-text border-b pb-2">ROM File</h3>
             <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
@@ -1522,7 +1525,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 <strong>ROM Location:</strong> {formData._originalGame?.filePath || 'Not specified'}
               </p>
               <p className="text-xs text-muted mb-4">
-                This is a Commodore emulator game. No installation is required - the game runs directly from the ROM file.
+                This is {['amiga'].includes(formData._originalGame?.platformId || '') ? 'an Amiga' : 'a Commodore'} emulator game. No installation is required - the game runs directly from the ROM file.
               </p>
               <button
                 type="button"

@@ -349,6 +349,36 @@ async function createDefaultPlatforms(storage: JSONStorageService) {
         }
       },
       isActive: true
+    },
+    {
+      name: 'Amiga',
+      type: 'emulator',
+      description: 'Amiga games through FS-UAE emulator',
+      configuration: {
+        containerImage: 'dillinger/runner-fs-uae:latest',
+        supportedExtensions: ['.adf', '.adz', '.dms', '.ipf', '.hdf', '.vhd', '.lha', '.lzx', '.zip', '.iso', '.cue', '.bin', '.ccd'],
+        requiredFiles: [],
+        defaultSettings: {
+          emulator: {
+            core: 'fs-uae',
+          }
+        }
+      },
+      validation: {
+        fileValidation: ['.adf', '.adz', '.dms', '.ipf', '.hdf', '.vhd', '.lha', '.lzx', '.zip', '.iso', '.cue', '.bin', '.ccd'],
+        pathValidation: '^/.*\\.(adf|adz|dms|ipf|hdf|vhd|lha|lzx|zip|iso|cue|bin|ccd)$',
+        requiresBios: true,
+        biosPath: '/bios'
+      },
+      displayStreaming: {
+        method: 'games-on-whales',
+        configuration: {
+          resolution: '1920x1080',
+          framerate: 60,
+          codec: 'h264'
+        }
+      },
+      isActive: true
     }
   ];
 

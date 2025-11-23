@@ -685,11 +685,11 @@ export default function GamesPage() {
             const isLaunching = launching[game.id];
             const isRunning = session && session.status === 'running';
             // Game is configured if it has a launch command set (either via installation or manual config)
-            // Commodore emulator games just need a ROM file (filePath)
-            const isCommodoreGame = ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(game.platformId);
+            // Commodore and Amiga emulator games just need a ROM file (filePath)
+            const isEmulatorGame = ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga'].includes(game.platformId);
             const isConfigured = game.platformId && (
-              isCommodoreGame 
-                ? game.filePath // Commodore games just need a ROM file
+              isEmulatorGame 
+                ? game.filePath // Emulator games just need a ROM file
                 : game.settings?.launch?.command // Other games need a launch command
             );
             const primaryImage = game.metadata?.primaryImage;

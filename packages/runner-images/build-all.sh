@@ -20,7 +20,7 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 # Build base image first (dependency for all others)
-echo -e "${GREEN}[1/3] Building base image...${NC}"
+echo -e "${GREEN}[1/5] Building base image...${NC}"
 cd base
 docker build -t dillinger/runner-base:latest .
 if [ $? -eq 0 ]; then
@@ -32,7 +32,7 @@ fi
 echo ""
 
 # Build linux-native runner
-echo -e "${GREEN}[2/3] Building linux-native runner...${NC}"
+echo -e "${GREEN}[2/5] Building linux-native runner...${NC}"
 cd ../linux-native
 docker build -t dillinger/runner-linux-native:latest .
 if [ $? -eq 0 ]; then
@@ -44,13 +44,37 @@ fi
 echo ""
 
 # Build wine runner
-echo -e "${GREEN}[3/3] Building wine runner...${NC}"
+echo -e "${GREEN}[3/5] Building wine runner...${NC}"
 cd ../wine
 docker build -t dillinger/runner-wine:latest .
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Wine runner built successfully${NC}"
 else
     echo -e "${RED}✗ Wine runner build failed${NC}"
+    exit 1
+fi
+echo ""
+
+# Build VICE runner
+echo -e "${GREEN}[4/5] Building VICE runner...${NC}"
+cd ../vice
+docker build -t dillinger/runner-vice:latest .
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✓ VICE runner built successfully${NC}"
+else
+    echo -e "${RED}✗ VICE runner build failed${NC}"
+    exit 1
+fi
+echo ""
+
+# Build FS-UAE runner
+echo -e "${GREEN}[5/5] Building FS-UAE runner...${NC}"
+cd ../fs-uae
+docker build -t dillinger/runner-fs-uae:latest .
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✓ FS-UAE runner built successfully${NC}"
+else
+    echo -e "${RED}✗ FS-UAE runner build failed${NC}"
     exit 1
 fi
 echo ""
@@ -63,3 +87,5 @@ echo "Built images:"
 echo "  - dillinger/runner-base:latest"
 echo "  - dillinger/runner-linux-native:latest"
 echo "  - dillinger/runner-wine:latest"
+echo "  - dillinger/runner-vice:latest"
+echo "  - dillinger/runner-fs-uae:latest"
