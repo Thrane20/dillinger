@@ -340,20 +340,27 @@ export function migrateGameToMultiPlatform(game: Game): Game {
   const platforms: GamePlatformConfig[] = [];
   
   if (game.platformId) {
-    platforms.push({
+    const platformConfig: GamePlatformConfig = {
       platformId: game.platformId,
-      filePath: game.filePath,
-      settings: game.settings,
-      installation: game.installation,
-    });
+    };
+    if (game.filePath !== undefined) platformConfig.filePath = game.filePath;
+    if (game.settings !== undefined) platformConfig.settings = game.settings;
+    if (game.installation !== undefined) platformConfig.installation = game.installation;
+    
+    platforms.push(platformConfig);
   }
 
-  return {
+  const migratedGame: Game = {
     ...game,
     platforms,
-    defaultPlatformId: game.platformId,
-    // Keep legacy fields for compatibility but they should not be used
   };
+  
+  // Only set defaultPlatformId if we have a platformId
+  if (game.platformId) {
+    migratedGame.defaultPlatformId = game.platformId;
+  }
+
+  return migratedGame;
 }
 
 /**
@@ -431,10 +438,8 @@ export function setPlatformConfig(
     migratedGame.defaultPlatformId = platformId;
   }
   
-  return {
-    ...migratedGame,
-    updated: new Date().toISOString(),
-  };
+  migratedGame.updated = new Date().toISOString();
+  return migratedGame;
 }
 
 /**
@@ -446,14 +451,14 @@ export function removePlatformConfig(game: Game, platformId: string): Game {
   migratedGame.platforms = migratedGame.platforms.filter(p => p.platformId !== platformId);
   
   // If we removed the default platform, set a new default
-  if (migratedGame.defaultPlatformId === platformId && migratedGame.platforms.length > 0) {
-    migratedGame.defaultPlatformId = migratedGame.platforms[0].platformId;
-  } else if (migratedGame.platforms.length === 0) {
-    migratedGame.defaultPlatformId = undefined;
+  if (migratedGame.defaultPlatformId === platformId) {
+    if (migratedGame.platforms.length > 0 && migratedGame.platforms[0]) {
+      migratedGame.defaultPlatformId = migratedGame.platforms[0].platformId;
+    } else {
+      delete migratedGame.defaultPlatformId;
+    }
   }
   
-  return {
-    ...migratedGame,
-    updated: new Date().toISOString(),
-  };
+  migratedGame.updated = new Date().toISOString();
+  return migratedGame;
 }

@@ -212,18 +212,6 @@ router.post('/', gameValidation, async (req: Request, res: Response) => {
     });
   }
 });
-      data: game,
-      message: 'Game added successfully',
-    });
-  } catch (error) {
-    console.error('Error creating game:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create game',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
 
 // PUT /api/games/:id - Update a game
 router.put('/:id', gameValidation, async (req: Request, res: Response) => {

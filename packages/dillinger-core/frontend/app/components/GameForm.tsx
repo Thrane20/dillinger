@@ -12,7 +12,7 @@ interface GameFormData {
   id?: string;
   title: string;
   slug?: string;
-  platformId: string;
+  platformId: string; // Keep simple - edit one platform at a time
   tags: string;
   metadata: {
     description?: string;
