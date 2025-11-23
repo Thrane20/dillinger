@@ -14,6 +14,7 @@ import {
   getDefaultSchemaVersion,
   normalizeSchemaVersion,
   isSupportedSchemaVersion,
+  SUPPORTED_SCHEMA_VERSIONS,
 } from '../types/schema-version.js';
 import { migrateData, canMigrate } from './schema-migration.js';
 
@@ -84,7 +85,8 @@ export function parseVersionedData<T extends VersionedData>(
   
   // Validate version is supported
   if (!isSupportedSchemaVersion(originalVersion)) {
-    const message = `Unsupported schema version: ${originalVersion}. Supported versions: ${['1.0'].join(', ')}`;
+    const supportedVersionsList = Array.from(SUPPORTED_SCHEMA_VERSIONS).join(', ');
+    const message = `Unsupported schema version: ${originalVersion}. Supported versions: ${supportedVersionsList}`;
     
     if (strict) {
       throw new Error(message);
