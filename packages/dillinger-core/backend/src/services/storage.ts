@@ -5,6 +5,11 @@ import type {
   GameSession,
   GamesIndex,
   SessionsIndex,
+  VersionedData,
+} from '@dillinger/shared';
+import {
+  parseVersionedData,
+  serializeVersionedData,
 } from '@dillinger/shared';
 
 // DILLINGER_ROOT is the base directory for all game data and metadata
@@ -72,20 +77,41 @@ export class JSONStorageService {
 
   /**
    * Write an entity to a JSON file
+   * Automatically adds schema version to the data
    */
   async writeEntity<T>(type: string, id: string, data: T): Promise<void> {
     const filePath = path.join(DATA_PATH, type, `${id}.json`);
-    await fs.writeJson(filePath, data, { spaces: 2 });
+    
+    // Ensure data has schema version
+    const versionedData = serializeVersionedData(data as Partial<VersionedData>);
+    
+    await fs.writeJson(filePath, versionedData, { spaces: 2 });
     await this.updateIndex(type);
   }
 
   /**
    * Read an entity from a JSON file
+   * Automatically validates and normalizes schema version
    */
-  async readEntity<T>(type: string, id: string): Promise<T | null> {
+  async readEntity<T extends VersionedData>(type: string, id: string): Promise<T | null> {
     const filePath = path.join(DATA_PATH, type, `${id}.json`);
     try {
-      return await fs.readJson(filePath);
+      const rawData = await fs.readJson(filePath);
+      
+      // Parse and validate schema version
+      const parseResult = parseVersionedData<T>(rawData, {
+        strict: false, // Don't throw errors, just warn
+        autoMigrate: false, // Don't auto-migrate, just normalize
+      });
+      
+      // Log if migration would be needed
+      if (parseResult.wasMigrated) {
+        console.info(
+          `Data at ${filePath} was normalized from version ${parseResult.originalVersion || 'none'} to ${parseResult.normalizedVersion}`
+        );
+      }
+      
+      return parseResult.data;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return null;
@@ -113,8 +139,9 @@ export class JSONStorageService {
 
   /**
    * List all entities of a given type
+   * Automatically validates schema versions for all entities
    */
-  async listEntities<T>(type: string): Promise<T[]> {
+  async listEntities<T extends VersionedData>(type: string): Promise<T[]> {
     const dirPath = path.join(DATA_PATH, type);
     try {
       const files = await fs.readdir(dirPath);
@@ -128,8 +155,15 @@ export class JSONStorageService {
       for (const file of jsonFiles) {
         try {
           const filePath = path.join(dirPath, file);
-          const entity = await fs.readJson(filePath);
-          entities.push(entity);
+          const rawData = await fs.readJson(filePath);
+          
+          // Parse and validate schema version
+          const parseResult = parseVersionedData<T>(rawData, {
+            strict: false,
+            autoMigrate: false,
+          });
+          
+          entities.push(parseResult.data);
         } catch (error) {
           // Skip files that can't be read (deleted, corrupted, etc.)
           // Only log each unique error once to avoid spam
@@ -256,6 +290,7 @@ export class JSONStorageService {
 
   /**
    * Update index file for performance optimization
+   * Automatically adds schema version to index files
    */
   private async updateIndex(type: string): Promise<void> {
     const entities = await this.listEntities(type);
@@ -263,10 +298,12 @@ export class JSONStorageService {
 
     if (type === 'games') {
       const gamesIndex = this.buildGamesIndex(entities as Game[]);
-      await fs.writeJson(indexPath, gamesIndex, { spaces: 2 });
+      const versionedIndex = serializeVersionedData(gamesIndex);
+      await fs.writeJson(indexPath, versionedIndex, { spaces: 2 });
     } else if (type === 'sessions') {
       const sessionsIndex = this.buildSessionsIndex(entities as GameSession[]);
-      await fs.writeJson(indexPath, sessionsIndex, { spaces: 2 });
+      const versionedIndex = serializeVersionedData(sessionsIndex);
+      await fs.writeJson(indexPath, versionedIndex, { spaces: 2 });
     } else {
       // Basic index for other entity types
       const basicIndex = {
@@ -274,7 +311,8 @@ export class JSONStorageService {
         lastUpdated: new Date().toISOString(),
         ids: entities.map((entity: any) => entity.id),
       };
-      await fs.writeJson(indexPath, basicIndex, { spaces: 2 });
+      const versionedIndex = serializeVersionedData(basicIndex);
+      await fs.writeJson(indexPath, versionedIndex, { spaces: 2 });
     }
   }
 

@@ -1,4 +1,6 @@
-export interface Game {
+import type { VersionedData } from './schema-version.js';
+
+export interface Game extends VersionedData {
   id: string; // UUID v4
   slug?: string; // URL-friendly identifier (auto-generated from title or manually set)
   title: string; // Display name
@@ -123,7 +125,7 @@ export type MoonlightQuality = 'low' | 'medium' | 'high' | 'ultra';
 export type VideoCodec = 'h264' | 'h265' | 'av1';
 export type AudioCodec = 'opus' | 'aac';
 
-export interface Platform {
+export interface Platform extends VersionedData {
   id: string; // UUID v4
   name: string; // Display name
   type: PlatformType; // Platform execution type
@@ -173,7 +175,7 @@ export interface Platform {
 
 export type SessionStatus = 'starting' | 'running' | 'paused' | 'stopped' | 'error';
 
-export interface GameSession {
+export interface GameSession extends VersionedData {
   id: string; // UUID v4
   gameId: string; // Reference to Game entity
   platformId: string; // Reference to Platform entity
@@ -207,7 +209,7 @@ export interface GameSession {
 export type SortField = 'title' | 'lastPlayed' | 'rating' | 'created';
 export type SortDirection = 'asc' | 'desc';
 
-export interface Collection {
+export interface Collection extends VersionedData {
   id: string; // UUID v4
   name: string; // Collection display name
   description?: string; // Collection description
@@ -235,7 +237,7 @@ export interface Collection {
 export type MetadataSource = 'igdb' | 'manual' | 'file';
 export type CacheStatus = 'fetching' | 'complete' | 'error' | 'stale';
 
-export interface MetadataCache {
+export interface MetadataCache extends VersionedData {
   gameId: string; // Reference to Game entity
   source: MetadataSource; // Metadata source
   data: {
@@ -273,7 +275,7 @@ export interface MetadataCache {
 }
 
 // Index file types for performance optimization
-export interface GamesIndex {
+export interface GamesIndex extends VersionedData {
   count: number; // Total number of games
   lastUpdated: string; // ISO timestamp
   byPlatform: Record<string, string[]>; // Platform ID -> Game IDs
@@ -288,7 +290,7 @@ export interface GamesIndex {
   popular: string[]; // Most played Game IDs (by play time)
 }
 
-export interface SessionsIndex {
+export interface SessionsIndex extends VersionedData {
   count: number; // Total number of sessions
   lastUpdated: string; // ISO timestamp
   active: string[]; // Currently running session IDs

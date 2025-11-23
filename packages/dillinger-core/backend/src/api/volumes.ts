@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { JSONStorageService } from '../services/storage.js';
 import { DockerService } from '../services/docker-service.js';
+import type { Volume } from '@dillinger/shared';
 
 const execAsync = promisify(exec);
 const router: Router = express.Router();
@@ -14,17 +15,6 @@ router.use((req: Request, res: Response, next) => {
   console.log(`[Volumes API] ${req.method} ${req.path}`);
   next();
 });
-
-interface Volume {
-  id: string;
-  name: string;
-  dockerVolumeName: string;
-  hostPath: string;
-  createdAt: string;
-  type: 'docker' | 'bind';
-  status: 'active' | 'error';
-  lastVerified?: string;
-}
 
 /**
  * GET /api/volumes

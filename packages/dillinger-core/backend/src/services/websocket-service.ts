@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server as HTTPServer } from 'http';
-import type { LogEntryMessage, ContainerStartedMessage, ContainerStoppedMessage, DillingerWebSocketMessage } from '@dillinger/shared';
+import type { DillingerWebSocketMessage } from '@dillinger/shared';
 import { DockerService } from './docker-service.js';
 import { JSONStorageService } from './storage.js';
 
