@@ -22,6 +22,8 @@ RUN set -e && \
         zlib \
         sdl2 \
         openal \
+        libpulse \
+        alsa-plugins \
         libmpeg2 \
         freetype2 \
         glew \
@@ -37,16 +39,26 @@ RUN set -e && \
     echo "**** Installing FS-UAE binary ****" && \
     cd /tmp && \
     tar xf fs-uae.tar.xz && \
-    cd FS-UAE_3.2.35_Linux_x86-64 && \
-    cp -r * /usr/local/ && \
+    cd FS-UAE && \
+    mkdir -p /opt/fs-uae && \
+    cp -r * /opt/fs-uae/ && \
+    \
+    # Copy data to standard system location
+    mkdir -p /usr/share/fs-uae && \
+    cp /opt/fs-uae/Linux/x86-64/fs-uae.dat /usr/share/fs-uae/ && \
+    if [ -d "/opt/fs-uae/Locale" ]; then cp -r /opt/fs-uae/Locale /usr/share/fs-uae/; fi && \
     \
     # Create symlinks for main executables
-    ln -sf /usr/local/bin/fs-uae /usr/bin/fs-uae && \
-    ln -sf /usr/local/bin/fs-uae-device-helper /usr/bin/fs-uae-device-helper && \
+    ln -sf /opt/fs-uae/Linux/x86-64/fs-uae /usr/bin/fs-uae && \
+    ln -sf /opt/fs-uae/Linux/x86-64/fs-uae-device-helper /usr/bin/fs-uae-device-helper && \
+    \
+    # Configure OpenAL to use PulseAudio
+    mkdir -p /etc/openal && \
+    echo "drivers = pulse" > /etc/openal/alsoft.conf && \
     \
     echo "**** Cleanup ****" && \
     cd / && \
-    rm -rf /tmp/fs-uae.tar.xz /tmp/FS-UAE_3.2.35_Linux_x86-64
+    rm -rf /tmp/fs-uae.tar.xz /tmp/FS-UAE
 
 #######################################################
 # Configure FS-UAE defaults

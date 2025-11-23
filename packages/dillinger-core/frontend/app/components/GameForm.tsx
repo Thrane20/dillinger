@@ -851,7 +851,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 <option value="pet">PET</option>
               </optgroup>
               <optgroup label="Amiga Systems">
-                <option value="amiga">Amiga</option>
+                <option value="amiga">Amiga (Generic)</option>
+                <option value="amiga500">Amiga 500</option>
+                <option value="amiga500plus">Amiga 500+</option>
+                <option value="amiga600">Amiga 600</option>
+                <option value="amiga1200">Amiga 1200</option>
+                <option value="amiga3000">Amiga 3000</option>
+                <option value="amiga4000">Amiga 4000</option>
+                <option value="cd32">Amiga CD32</option>
               </optgroup>
             </select>
           </div>
@@ -1517,7 +1524,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
 
         {/* ROM File Section - For emulator platforms */}
         {mode === 'edit' && 
-         ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga'].includes(formData._originalGame?.platformId || '') && (
+         ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(formData._originalGame?.platformId || '') && (
           <div className="space-y-4 mb-6">
             <h3 className="text-lg font-semibold text-text border-b pb-2">ROM File</h3>
             <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
@@ -1525,7 +1532,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 <strong>ROM Location:</strong> {formData._originalGame?.filePath || 'Not specified'}
               </p>
               <p className="text-xs text-muted mb-4">
-                This is {['amiga'].includes(formData._originalGame?.platformId || '') ? 'an Amiga' : 'a Commodore'} emulator game. No installation is required - the game runs directly from the ROM file.
+                This is {['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(formData._originalGame?.platformId || '') ? 'an Amiga' : 'a Commodore'} emulator game. No installation is required - the game runs directly from the ROM file.
               </p>
               <button
                 type="button"
@@ -1648,7 +1655,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
         )}
 
-        {/* Launch Settings */}
+        {/* Launch Settings - Hide for emulator platforms that use ROMs */}
+        {!['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(formData.platformId) && (
         <div className="space-y-4 mb-6">
           <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
 
@@ -1812,6 +1820,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   </p>
                 </div>
               )}
+            </>
+          )}
 
               {/* Gamescope Compositor */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
@@ -2091,9 +2101,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   Display FPS, frame time, CPU/GPU usage, and other performance metrics in-game
                 </p>
               </div>
-            </>
-          )}
         </div>
+      )}
 
         {/* Buttons */}
         <div className="flex gap-4 mt-6">

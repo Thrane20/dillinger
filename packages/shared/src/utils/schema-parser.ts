@@ -70,7 +70,7 @@ export function parseVersionedData<T extends VersionedData>(
   // If no version, assume 1.0 per requirements
   if (!originalVersion) {
     const defaultVersion = getDefaultSchemaVersion();
-    console.info(`No schema version found in data, assuming version ${defaultVersion}`);
+    // console.info(`No schema version found in data, assuming version ${defaultVersion}`);
     
     return {
       data: {

@@ -18,6 +18,7 @@ import imagesRouter from './api/images.js';
 import filesystemRouter from './api/filesystem.js';
 import volumesRouter from './api/volumes.js';
 import onlineSourcesRouter from './api/online-sources.js';
+import platformsRouter from './api/platforms.js';
 
 const app: Express = express();
 const server = createServer(app);
@@ -117,9 +118,11 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // API routes will be added here as we implement them
-// TODO: Add platforms routes
 // TODO: Add sessions routes
 // TODO: Add collections routes
+
+// Platform routes
+app.use('/api/platforms', platformsRouter);
 
 // Game CRUD routes
 app.use('/api/games', gamesRouter);

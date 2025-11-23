@@ -339,7 +339,14 @@ export class DockerService {
 
     // Map platform IDs to Amiga emulator commands
     const amigaEmulators: Record<string, string> = {
-      'amiga': 'fs-uae'         // Amiga via FS-UAE
+      'amiga': 'fs-uae',        // Amiga (A500 default)
+      'amiga500': 'fs-uae',     // Amiga 500
+      'amiga500plus': 'fs-uae', // Amiga 500+
+      'amiga600': 'fs-uae',     // Amiga 600
+      'amiga1200': 'fs-uae',    // Amiga 1200
+      'amiga3000': 'fs-uae',    // Amiga 3000
+      'amiga4000': 'fs-uae',    // Amiga 4000
+      'cd32': 'fs-uae'          // Amiga CD32
     };
     
     if (platform.type === 'wine') {
@@ -416,9 +423,29 @@ export class DockerService {
       cmdArray = [emulatorCmd, `/roms/${romFilename}`];
       containerWorkingDir = '/home/gameuser';
       
+      // Determine Amiga model from platform ID
+      let amigaModel = 'A500'; // Default
+      switch (game.platformId) {
+        case 'amiga500': amigaModel = 'A500'; break;
+        case 'amiga500plus': amigaModel = 'A500+'; break;
+        case 'amiga600': amigaModel = 'A600'; break;
+        case 'amiga1200': amigaModel = 'A1200'; break;
+        case 'amiga3000': amigaModel = 'A3000'; break;
+        case 'amiga4000': amigaModel = 'A4000'; break;
+        case 'cd32': amigaModel = 'CD32'; break;
+      }
+      
+      // Add model to environment variables
+      // This will be picked up by the entrypoint script to generate Default.fs-uae
+      // Note: We add it to the environment map so it gets included in the env array later
+      environment['FSUAE_AMIGA_MODEL'] = amigaModel;
+      
       console.log(`Launching Amiga game: ${game.title}`);
+      console.log(`  Platform ID: ${game.platformId}`);
+      console.log(`  Amiga Model: ${amigaModel}`);
       console.log(`  Container Image: ${platform.configuration.containerImage}`);
       console.log(`  Emulator: ${emulatorCmd}`);
+      console.log(`  Model: ${amigaModel}`);
       console.log(`  ROM file: ${romPath}`);
       console.log(`  Command: ${cmdArray.join(' ')}`);
     } else {
@@ -676,6 +703,24 @@ export class DockerService {
       if (emulatorHomePath) {
         binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
         console.log(`  Mounting emulator home: ${emulatorHomePath} -> /home/gameuser`);
+      }
+
+      // Mount BIOS directory for Amiga
+      if (amigaEmulators[game.platformId]) {
+         const dillingerRoot = this.storage.getDillingerRoot();
+         const biosPath = path.join(dillingerRoot, 'bios', 'amiga');
+         
+         // Ensure directory exists to prevent Docker from creating it as root
+         try {
+           const fs = await import('fs-extra');
+           await fs.ensureDir(biosPath);
+         } catch (err) {
+           console.warn(`Could not ensure BIOS directory exists: ${biosPath}`, err);
+         }
+
+         const hostBiosPath = this.getHostPath(biosPath);
+         binds.push(`${hostBiosPath}:/bios:ro`);
+         console.log(`  Mounting BIOS directory: ${hostBiosPath} -> /bios`);
       }
     } 
     // For other games, mount the game directory

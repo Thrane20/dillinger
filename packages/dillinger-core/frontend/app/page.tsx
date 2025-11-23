@@ -686,7 +686,7 @@ export default function GamesPage() {
             const isRunning = session && session.status === 'running';
             // Game is configured if it has a launch command set (either via installation or manual config)
             // Commodore and Amiga emulator games just need a ROM file (filePath)
-            const isEmulatorGame = ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga'].includes(game.platformId);
+            const isEmulatorGame = ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(game.platformId);
             const isConfigured = game.platformId && (
               isEmulatorGame 
                 ? game.filePath // Emulator games just need a ROM file
