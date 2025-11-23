@@ -336,6 +336,11 @@ export class DockerService {
       'plus4': 'xplus4',        // Plus/4
       'pet': 'xpet'             // PET
     };
+
+    // Map platform IDs to Amiga emulator commands
+    const amigaEmulators: Record<string, string> = {
+      'amiga': 'fs-uae'         // Amiga via FS-UAE
+    };
     
     if (platform.type === 'wine') {
       // Convert Windows path to Linux path in Wine prefix
@@ -386,6 +391,32 @@ export class DockerService {
       containerWorkingDir = '/home/gameuser';
       
       console.log(`Launching Commodore game: ${game.title}`);
+      console.log(`  Container Image: ${platform.configuration.containerImage}`);
+      console.log(`  Emulator: ${emulatorCmd}`);
+      console.log(`  ROM file: ${romPath}`);
+      console.log(`  Command: ${cmdArray.join(' ')}`);
+    } else if (amigaEmulators[game.platformId]) {
+      // For Amiga emulator games
+      const emulatorCmd = amigaEmulators[game.platformId];
+      
+      if (!emulatorCmd) {
+        throw new Error(`Unknown Amiga platform: ${game.platformId}`);
+      }
+      
+      const romPath = game.filePath; // Path to ROM file (.adf, .lha, etc.)
+      
+      if (!romPath) {
+        throw new Error('No ROM file specified for Amiga game');
+      }
+      
+      // FS-UAE emulator command: fs-uae /roms/game.adf
+      // The ROM file is mounted into /roms inside the container
+      const romFilename = path.basename(romPath);
+      gameExecutable = emulatorCmd;
+      cmdArray = [emulatorCmd, `/roms/${romFilename}`];
+      containerWorkingDir = '/home/gameuser';
+      
+      console.log(`Launching Amiga game: ${game.title}`);
       console.log(`  Container Image: ${platform.configuration.containerImage}`);
       console.log(`  Emulator: ${emulatorCmd}`);
       console.log(`  ROM file: ${romPath}`);
@@ -584,9 +615,9 @@ export class DockerService {
       );
       
       console.log(`  Wine prefix: ${winePrefixPath}`);
-    } else if (viceEmulators[game.platformId]) {
-      // For emulator games, create a per-game home directory
-      // This allows each game to have its own VICE config, saves, screenshots, etc.
+    } else if (viceEmulators[game.platformId] || amigaEmulators[game.platformId]) {
+      // For emulator games (VICE Commodore or FS-UAE Amiga), create a per-game home directory
+      // This allows each game to have its own emulator config, saves, screenshots, etc.
       const dillingerRoot = this.storage.getDillingerRoot();
       const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
       emulatorHomePath = this.getHostPath(emulatorHomeDir);
@@ -634,8 +665,8 @@ export class DockerService {
       binds.push(`${winePrefixPath}:/wineprefix:rw`);
       console.log(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
     } 
-    // For Commodore emulator games, mount the ROM file directory and per-game home
-    else if (viceEmulators[game.platformId] && game.filePath) {
+    // For Commodore and Amiga emulator games, mount the ROM file directory and per-game home
+    else if ((viceEmulators[game.platformId] || amigaEmulators[game.platformId]) && game.filePath) {
       const romDir = path.dirname(game.filePath);
       binds.push(`${romDir}:/roms:ro`);
       console.log(`  Mounting ROM directory: ${romDir} -> /roms`);
