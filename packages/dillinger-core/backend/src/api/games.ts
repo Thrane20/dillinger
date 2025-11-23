@@ -6,7 +6,14 @@ import * as path from 'path';
 import fs from 'fs-extra';
 import { JSONStorageService } from '../services/storage.js';
 import { DockerService } from '../services/docker-service.js';
-import type { InstallGameRequest, InstallGameResponse } from '@dillinger/shared';
+import type { InstallGameRequest, InstallGameResponse, Game } from '@dillinger/shared';
+import { 
+  migrateGameToMultiPlatform, 
+  getPlatformConfig, 
+  getDefaultPlatformConfig,
+  setPlatformConfig,
+  removePlatformConfig 
+} from '@dillinger/shared';
 import { DILLINGER_ROOT } from '../services/settings.js';
 
 const router = Router();
@@ -65,11 +72,13 @@ const gameValidation = [
 // GET /api/games - List all games
 router.get('/', async (_req: Request, res: Response) => {
   try {
-    const games = await storage.listEntities('games');
+    const games = await storage.listEntities<Game>('games');
+    // Migrate all games to multi-platform format
+    const migratedGames = games.map(migrateGameToMultiPlatform);
     res.json({
       success: true,
-      data: games,
-      count: games.length,
+      data: migratedGames,
+      count: migratedGames.length,
     });
   } catch (error) {
     console.error('Error listing games:', error);
@@ -103,9 +112,12 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
+    // Migrate to multi-platform format
+    const migratedGame = migrateGameToMultiPlatform(game);
+
     res.json({
       success: true,
-      data: game,
+      data: migratedGame,
     });
   } catch (error) {
     console.error('Error getting game:', error);
@@ -136,6 +148,8 @@ router.post('/', gameValidation, async (req: Request, res: Response) => {
       slug,
       filePath,
       platformId,
+      platforms,
+      defaultPlatformId,
       collectionIds = [],
       tags = [],
       metadata = {},
@@ -145,13 +159,11 @@ router.post('/', gameValidation, async (req: Request, res: Response) => {
     // Generate slug if not provided
     const gameSlug = slug || slugify(title);
 
-    // Create new game object
-    const game = {
+    // Create new game object - handle both old and new formats
+    const game: Game = {
       id: uuidv4(),
       slug: gameSlug,
       title,
-      filePath,
-      platformId,
       collectionIds,
       tags,
       metadata,
@@ -159,16 +171,47 @@ router.post('/', gameValidation, async (req: Request, res: Response) => {
         size: 0, // TODO: Get actual file size
         lastModified: new Date().toISOString(),
       },
+      // New multi-platform format
+      platforms: platforms || [],
+      defaultPlatformId,
+      // Legacy format (for backward compatibility)
+      filePath,
+      platformId,
       settings,
       created: new Date().toISOString(),
       updated: new Date().toISOString(),
     };
 
+    // If using old format (platformId provided but no platforms), convert to new format
+    if (platformId && (!platforms || platforms.length === 0)) {
+      game.platforms = [{
+        platformId,
+        filePath,
+        settings,
+      }];
+      game.defaultPlatformId = platformId;
+    }
+
     // Save to storage
     await storage.writeEntity('games', game.id, game);
 
+    // Return migrated game
+    const migratedGame = migrateGameToMultiPlatform(game);
+
     res.status(201).json({
       success: true,
+      data: migratedGame,
+      message: 'Game added successfully',
+    });
+  } catch (error) {
+    console.error('Error creating game:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create game',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
       data: game,
       message: 'Game added successfully',
     });
@@ -409,6 +452,246 @@ router.delete('/:id', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete game',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST /api/games/:id/platforms - Add a platform configuration to a game
+router.post('/:id/platforms', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { platformId, filePath, settings, installation } = req.body;
+
+    if (!id || !platformId) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID and platformId are required',
+      });
+      return;
+    }
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    // Add or update platform configuration
+    const updatedGame = setPlatformConfig(game, platformId, {
+      platformId,
+      filePath,
+      settings,
+      installation,
+    });
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    res.json({
+      success: true,
+      data: updatedGame,
+      message: 'Platform configuration added successfully',
+    });
+  } catch (error) {
+    console.error('Error adding platform configuration:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add platform configuration',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// PUT /api/games/:id/platforms/:platformId - Update a platform configuration
+router.put('/:id/platforms/:platformId', async (req: Request, res: Response) => {
+  try {
+    const { id, platformId } = req.params;
+    const { filePath, settings, installation } = req.body;
+
+    if (!id || !platformId) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID and platformId are required',
+      });
+      return;
+    }
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    // Check if platform exists
+    const existingConfig = getPlatformConfig(game, platformId);
+    if (!existingConfig) {
+      res.status(404).json({
+        success: false,
+        error: `Platform ${platformId} not configured for this game`,
+      });
+      return;
+    }
+
+    // Update platform configuration
+    const updatedGame = setPlatformConfig(game, platformId, {
+      platformId,
+      filePath: filePath !== undefined ? filePath : existingConfig.filePath,
+      settings: settings !== undefined ? { ...existingConfig.settings, ...settings } : existingConfig.settings,
+      installation: installation !== undefined ? { ...existingConfig.installation, ...installation } : existingConfig.installation,
+    });
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    res.json({
+      success: true,
+      data: updatedGame,
+      message: 'Platform configuration updated successfully',
+    });
+  } catch (error) {
+    console.error('Error updating platform configuration:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update platform configuration',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// DELETE /api/games/:id/platforms/:platformId - Remove a platform configuration
+router.delete('/:id/platforms/:platformId', async (req: Request, res: Response) => {
+  try {
+    const { id, platformId } = req.params;
+
+    if (!id || !platformId) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID and platformId are required',
+      });
+      return;
+    }
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    // Remove platform configuration
+    const updatedGame = removePlatformConfig(game, platformId);
+
+    // If no platforms left, delete the entire game
+    if (updatedGame.platforms.length === 0) {
+      await storage.deleteEntity('games', fileKey);
+      
+      // Clean up associated directories
+      if (game.slug) {
+        const metadataPath = path.join(DILLINGER_ROOT, 'storage', 'metadata', game.slug);
+        try {
+          if (await fs.pathExists(metadataPath)) {
+            await fs.remove(metadataPath);
+          }
+        } catch (error) {
+          console.warn(`Failed to delete metadata directory for ${game.slug}:`, error);
+        }
+      }
+
+      const savesPath = path.join(DILLINGER_ROOT, 'saves', game.id);
+      try {
+        if (await fs.pathExists(savesPath)) {
+          await fs.remove(savesPath);
+        }
+      } catch (error) {
+        console.warn(`Failed to delete saves directory for ${game.id}:`, error);
+      }
+
+      res.json({
+        success: true,
+        message: 'Last platform removed - game deleted',
+        gameDeleted: true,
+      });
+      return;
+    }
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    res.json({
+      success: true,
+      data: updatedGame,
+      message: 'Platform configuration removed successfully',
+      gameDeleted: false,
+    });
+  } catch (error) {
+    console.error('Error removing platform configuration:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to remove platform configuration',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// PUT /api/games/:id/default-platform - Set default platform
+router.put('/:id/default-platform', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { platformId } = req.body;
+
+    if (!id || !platformId) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID and platformId are required',
+      });
+      return;
+    }
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    const migratedGame = migrateGameToMultiPlatform(game);
+
+    // Check if platform exists
+    if (!migratedGame.platforms.find(p => p.platformId === platformId)) {
+      res.status(404).json({
+        success: false,
+        error: `Platform ${platformId} not configured for this game`,
+      });
+      return;
+    }
+
+    // Update default platform
+    const updatedGame = {
+      ...migratedGame,
+      defaultPlatformId: platformId,
+      updated: new Date().toISOString(),
+    };
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    res.json({
+      success: true,
+      data: updatedGame,
+      message: 'Default platform updated successfully',
+    });
+  } catch (error) {
+    console.error('Error updating default platform:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update default platform',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

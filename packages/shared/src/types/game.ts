@@ -1,42 +1,9 @@
 import type { VersionedData } from './schema-version.js';
 
-export interface Game extends VersionedData {
-  id: string; // UUID v4
-  slug?: string; // URL-friendly identifier (auto-generated from title or manually set)
-  title: string; // Display name
-  filePath: string; // Absolute path to executable/ROM
+// Platform-specific configuration for a game
+export interface GamePlatformConfig {
   platformId: string; // Reference to Platform entity
-  collectionIds: string[]; // Array of Collection UUIDs
-  tags: string[]; // User-defined tags
-  metadata?: {
-    igdbId?: number; // IGDB API ID for metadata linking
-    metadataId?: string; // Reference to SavedGameMetadata ID
-    description?: string; // Game description
-    genre?: string[]; // Game genres
-    developer?: string; // Developer name
-    publisher?: string; // Publisher name
-    releaseDate?: string; // ISO date string
-    rating?: number; // User rating 1-10
-    playTime?: number; // Total hours played (calculated from session durations)
-    playCount?: number; // Number of times the game has been launched
-    lastPlayed?: string; // ISO timestamp of last launch
-    coverArt?: string; // Local file path to cover image
-    screenshots?: string[]; // Array of local screenshot paths
-    primaryImage?: string; // Primary display image (from scraped metadata or coverArt)
-    backdropImage?: string; // Background image for hover effects
-    similarGames?: Array<{
-      title: string;
-      slug?: string;
-      gameId?: string;
-      scraperId?: string;
-      scraperType?: string;
-    }>;
-  };
-  fileInfo: {
-    size: number; // File size in bytes
-    lastModified: string; // ISO timestamp
-    checksum?: string; // File integrity hash
-  };
+  filePath?: string; // Absolute path to executable/ROM (platform-specific)
   settings?: {
     wine?: {
       version?: string; // Wine version for Windows games
@@ -113,6 +80,58 @@ export interface Game extends VersionedData {
     installMethod?: 'manual' | 'automated'; // How the game was installed
     containerId?: string; // Active installation container ID
     error?: string; // Error message if installation failed
+  };
+}
+
+export interface Game extends VersionedData {
+  id: string; // UUID v4
+  slug?: string; // URL-friendly identifier (auto-generated from title or manually set)
+  title: string; // Display name
+  
+  // Multi-platform support
+  platforms: GamePlatformConfig[]; // Platform-specific configurations
+  defaultPlatformId?: string; // Default platform for quick launch
+  
+  // Deprecated fields (kept for backward compatibility during migration)
+  /** @deprecated Use platforms array instead */
+  platformId?: string; // Reference to Platform entity
+  /** @deprecated Use platforms[].filePath instead */
+  filePath?: string; // Absolute path to executable/ROM
+  /** @deprecated Use platforms[].settings instead */
+  settings?: GamePlatformConfig['settings'];
+  /** @deprecated Use platforms[].installation instead */
+  installation?: GamePlatformConfig['installation'];
+  
+  collectionIds: string[]; // Array of Collection UUIDs
+  tags: string[]; // User-defined tags
+  metadata?: {
+    igdbId?: number; // IGDB API ID for metadata linking
+    metadataId?: string; // Reference to SavedGameMetadata ID
+    description?: string; // Game description
+    genre?: string[]; // Game genres
+    developer?: string; // Developer name
+    publisher?: string; // Publisher name
+    releaseDate?: string; // ISO date string
+    rating?: number; // User rating 1-10
+    playTime?: number; // Total hours played (calculated from session durations)
+    playCount?: number; // Number of times the game has been launched
+    lastPlayed?: string; // ISO timestamp of last launch
+    coverArt?: string; // Local file path to cover image
+    screenshots?: string[]; // Array of local screenshot paths
+    primaryImage?: string; // Primary display image (from scraped metadata or coverArt)
+    backdropImage?: string; // Background image for hover effects
+    similarGames?: Array<{
+      title: string;
+      slug?: string;
+      gameId?: string;
+      scraperId?: string;
+      scraperType?: string;
+    }>;
+  };
+  fileInfo: {
+    size: number; // File size in bytes
+    lastModified: string; // ISO timestamp
+    checksum?: string; // File integrity hash
   };
   created: string; // ISO timestamp
   updated: string; // ISO timestamp
@@ -303,5 +322,138 @@ export interface SessionsIndex extends VersionedData {
       gameId: string;
       totalHours: number;
     }>;
+  };
+}
+
+// Utility functions for multi-platform support
+
+/**
+ * Migrates a legacy game (single platform) to the new multi-platform format
+ */
+export function migrateGameToMultiPlatform(game: Game): Game {
+  // If already migrated (has platforms array), return as-is
+  if (game.platforms && game.platforms.length > 0) {
+    return game;
+  }
+
+  // Migrate from legacy format
+  const platforms: GamePlatformConfig[] = [];
+  
+  if (game.platformId) {
+    platforms.push({
+      platformId: game.platformId,
+      filePath: game.filePath,
+      settings: game.settings,
+      installation: game.installation,
+    });
+  }
+
+  return {
+    ...game,
+    platforms,
+    defaultPlatformId: game.platformId,
+    // Keep legacy fields for compatibility but they should not be used
+  };
+}
+
+/**
+ * Gets platform configuration for a specific platform ID
+ */
+export function getPlatformConfig(game: Game, platformId: string): GamePlatformConfig | undefined {
+  const migratedGame = migrateGameToMultiPlatform(game);
+  return migratedGame.platforms.find(p => p.platformId === platformId);
+}
+
+/**
+ * Gets the default platform configuration
+ */
+export function getDefaultPlatformConfig(game: Game): GamePlatformConfig | undefined {
+  const migratedGame = migrateGameToMultiPlatform(game);
+  
+  if (migratedGame.defaultPlatformId) {
+    const config = migratedGame.platforms.find(p => p.platformId === migratedGame.defaultPlatformId);
+    if (config) return config;
+  }
+  
+  // Fall back to first platform if no default set
+  return migratedGame.platforms[0];
+}
+
+/**
+ * Gets all configured platform IDs for a game
+ */
+export function getConfiguredPlatforms(game: Game): string[] {
+  const migratedGame = migrateGameToMultiPlatform(game);
+  return migratedGame.platforms
+    .filter(p => {
+      // A platform is configured if it has a filePath or launch command
+      return p.filePath || p.settings?.launch?.command;
+    })
+    .map(p => p.platformId);
+}
+
+/**
+ * Checks if a game has a platform configured
+ */
+export function hasPlatformConfigured(game: Game, platformId: string): boolean {
+  return getConfiguredPlatforms(game).includes(platformId);
+}
+
+/**
+ * Adds or updates a platform configuration
+ */
+export function setPlatformConfig(
+  game: Game,
+  platformId: string,
+  config: Partial<GamePlatformConfig>
+): Game {
+  const migratedGame = migrateGameToMultiPlatform(game);
+  
+  const existingIndex = migratedGame.platforms.findIndex(p => p.platformId === platformId);
+  
+  if (existingIndex >= 0) {
+    // Update existing platform
+    migratedGame.platforms[existingIndex] = {
+      ...migratedGame.platforms[existingIndex],
+      ...config,
+      platformId, // Ensure platformId doesn't change
+    };
+  } else {
+    // Add new platform
+    migratedGame.platforms.push({
+      platformId,
+      ...config,
+    });
+  }
+  
+  // Set as default if it's the first platform
+  if (!migratedGame.defaultPlatformId && migratedGame.platforms.length === 1) {
+    migratedGame.defaultPlatformId = platformId;
+  }
+  
+  return {
+    ...migratedGame,
+    updated: new Date().toISOString(),
+  };
+}
+
+/**
+ * Removes a platform configuration
+ */
+export function removePlatformConfig(game: Game, platformId: string): Game {
+  const migratedGame = migrateGameToMultiPlatform(game);
+  
+  migratedGame.platforms = migratedGame.platforms.filter(p => p.platformId !== platformId);
+  
+  // If we removed the default platform, set a new default
+  if (migratedGame.defaultPlatformId === platformId && migratedGame.platforms.length > 0) {
+    migratedGame.defaultPlatformId = migratedGame.platforms[0].platformId;
+  } else if (migratedGame.platforms.length === 0) {
+    migratedGame.defaultPlatformId = undefined;
+  }
+  
+  return {
+    ...migratedGame,
+    updated: new Date().toISOString(),
   };
 }
