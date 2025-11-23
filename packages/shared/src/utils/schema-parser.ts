@@ -15,6 +15,7 @@ import {
   normalizeSchemaVersion,
   isSupportedSchemaVersion,
 } from '../types/schema-version.js';
+import { migrateData, canMigrate } from './schema-migration.js';
 
 /**
  * Parse result containing the parsed data and metadata
@@ -108,17 +109,48 @@ export function parseVersionedData<T extends VersionedData>(
   const needsMigration = autoMigrate && originalVersion !== CURRENT_SCHEMA_VERSION;
   
   if (needsMigration) {
-    // Future: Apply migration logic here
-    // For now, just update the version field
-    return {
-      data: {
-        ...data,
-        schemaVersion: CURRENT_SCHEMA_VERSION,
-      } as T,
-      originalVersion,
-      normalizedVersion: CURRENT_SCHEMA_VERSION,
-      wasMigrated: true,
-    };
+    // Check if migration is possible
+    if (!canMigrate(originalVersion, CURRENT_SCHEMA_VERSION)) {
+      const message = `Cannot migrate data from version ${originalVersion} to ${CURRENT_SCHEMA_VERSION}: no migration path available`;
+      
+      if (strict) {
+        throw new Error(message);
+      }
+      
+      console.warn(message);
+      return {
+        data: data as T,
+        originalVersion,
+        normalizedVersion: originalVersion,
+        wasMigrated: false,
+      };
+    }
+    
+    // Apply migration
+    try {
+      const migratedData = migrateData<T>(data, originalVersion, CURRENT_SCHEMA_VERSION);
+      
+      return {
+        data: migratedData,
+        originalVersion,
+        normalizedVersion: CURRENT_SCHEMA_VERSION,
+        wasMigrated: true,
+      };
+    } catch (error) {
+      const message = `Migration failed from version ${originalVersion} to ${CURRENT_SCHEMA_VERSION}: ${(error as Error).message}`;
+      
+      if (strict) {
+        throw new Error(message);
+      }
+      
+      console.error(message);
+      return {
+        data: data as T,
+        originalVersion,
+        normalizedVersion: originalVersion,
+        wasMigrated: false,
+      };
+    }
   }
   
   // Data is valid and no migration needed

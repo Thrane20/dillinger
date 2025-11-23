@@ -11,3 +11,4 @@ export * from './utils/validation.js';
 export * from './utils/slug.js';
 export * from './utils/time.js';
 export * from './utils/schema-parser.js';
+export * from './utils/schema-migration.js';

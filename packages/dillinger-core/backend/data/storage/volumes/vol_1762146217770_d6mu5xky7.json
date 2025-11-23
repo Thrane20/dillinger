@@ -1,4 +1,5 @@
 {
+  "schemaVersion": "1.0",
   "id": "vol_1762146217770_d6mu5xky7",
   "name": "installers",
   "dockerVolumeName": "dillinger_installers",

@@ -1,5 +1,7 @@
 {
   "$schema": "../../../schema/platform-v1.0.json",
+  "schemaVersion": "1.0",
+  "schemaVersion": "1.0",
   "id": "c64",
   "name": "Commodore 64",
   "type": "emulator",

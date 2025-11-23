@@ -1,5 +1,6 @@
 {
   "$schema": "../../../schema/platform-v1.0.json",
+  "schemaVersion": "1.0",
   "id": "plus4",
   "name": "Commodore Plus/4",
   "type": "emulator",
