@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import type { GamePlatformConfig } from '@dillinger/shared';
 import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
@@ -12,7 +13,9 @@ interface GameFormData {
   id?: string;
   title: string;
   slug?: string;
-  platformId: string; // Keep simple - edit one platform at a time
+  platformId: string; // Currently selected platform ID
+  platforms: GamePlatformConfig[]; // All configured platforms
+  filePath?: string; // Current platform's file path (ROM/executable)
   tags: string;
   metadata: {
     description?: string;
@@ -118,11 +121,13 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [showFileExplorer, setShowFileExplorer] = useState(false);
   const [showRomFileExplorer, setShowRomFileExplorer] = useState(false);
   const [showLogsDialog, setShowLogsDialog] = useState(false);
-  const [discoveredExecutables, setDiscoveredExecutables] = useState<string[]>([]);
+  const [showAddPlatform, setShowAddPlatform] = useState(false);
   const [formData, setFormData] = useState<GameFormData>({
     title: '',
     slug: '',
     platformId: '',
+    platforms: [],
+    filePath: '',
     tags: '',
     metadata: {
       description: '',
@@ -160,12 +165,32 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             if (result.success && result.data) {
               const game = result.data;
               
+              // Determine active platform and settings
+              const activePlatformId = game.defaultPlatformId || game.platformId || '';
+              let platforms = game.platforms || [];
+              
+              // Backwards compatibility: if no platforms array but we have legacy fields, create one
+              if (platforms.length === 0 && game.platformId) {
+                platforms = [{
+                  platformId: game.platformId,
+                  settings: game.settings,
+                  filePath: game.filePath,
+                  installation: game.installation
+                }];
+              }
+              
+              const activePlatform = platforms.find((p: any) => p.platformId === activePlatformId) || platforms[0];
+              const activeSettings = activePlatform?.settings || game.settings;
+              const activeFilePath = activePlatform?.filePath || game.filePath || '';
+
               // Store original game data to preserve scraper metadata
               setFormData({
                 id: game.id,
                 title: game.title || '',
                 slug: game.slug || '',
-                platformId: game.platformId || '',
+                platformId: activePlatformId,
+                platforms,
+                filePath: activeFilePath,
                 tags: Array.isArray(game.tags) ? game.tags.join(', ') : '',
                 metadata: {
                   description: game.metadata?.description || '',
@@ -182,35 +207,35 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 },
                 settings: {
                   wine: {
-                    arch: game.settings?.wine?.arch || 'win64',
-                    useDxvk: game.settings?.wine?.useDxvk || false,
-                    compatibilityMode: game.settings?.wine?.compatibilityMode || 'none',
-                    dlls: game.settings?.wine?.dlls || {},
-                    debug: game.settings?.wine?.debug || {},
+                    arch: activeSettings?.wine?.arch || 'win64',
+                    useDxvk: activeSettings?.wine?.useDxvk || false,
+                    compatibilityMode: activeSettings?.wine?.compatibilityMode || 'none',
+                    dlls: activeSettings?.wine?.dlls || {},
+                    debug: activeSettings?.wine?.debug || {},
                   },
                   launch: {
-                    command: game.settings?.launch?.command || '',
-                    arguments: game.settings?.launch?.arguments || [],
-                    environment: game.settings?.launch?.environment || {},
-                    workingDirectory: game.settings?.launch?.workingDirectory || '',
-                    fullscreen: game.settings?.launch?.fullscreen || false,
-                    resolution: game.settings?.launch?.resolution || '1920x1080',
-                    useXrandr: game.settings?.launch?.useXrandr || false,
-                    xrandrMode: game.settings?.launch?.xrandrMode || '',
+                    command: activeSettings?.launch?.command || '',
+                    arguments: activeSettings?.launch?.arguments || [],
+                    environment: activeSettings?.launch?.environment || {},
+                    workingDirectory: activeSettings?.launch?.workingDirectory || '',
+                    fullscreen: activeSettings?.launch?.fullscreen || false,
+                    resolution: activeSettings?.launch?.resolution || '1920x1080',
+                    useXrandr: activeSettings?.launch?.useXrandr || false,
+                    xrandrMode: activeSettings?.launch?.xrandrMode || '',
                   },
                   gamescope: {
-                    enabled: game.settings?.gamescope?.enabled || false,
-                    width: game.settings?.gamescope?.width || 1920,
-                    height: game.settings?.gamescope?.height || 1080,
-                    refreshRate: game.settings?.gamescope?.refreshRate || 60,
-                    fullscreen: game.settings?.gamescope?.fullscreen || false,
-                    upscaler: game.settings?.gamescope?.upscaler || 'auto',
-                    inputWidth: game.settings?.gamescope?.inputWidth || undefined,
-                    inputHeight: game.settings?.gamescope?.inputHeight || undefined,
-                    limitFps: game.settings?.gamescope?.limitFps || undefined,
+                    enabled: activeSettings?.gamescope?.enabled || false,
+                    width: activeSettings?.gamescope?.width || 1920,
+                    height: activeSettings?.gamescope?.height || 1080,
+                    refreshRate: activeSettings?.gamescope?.refreshRate || 60,
+                    fullscreen: activeSettings?.gamescope?.fullscreen || false,
+                    upscaler: activeSettings?.gamescope?.upscaler || 'auto',
+                    inputWidth: activeSettings?.gamescope?.inputWidth || undefined,
+                    inputHeight: activeSettings?.gamescope?.inputHeight || undefined,
+                    limitFps: activeSettings?.gamescope?.limitFps || undefined,
                   },
                   mangohud: {
-                    enabled: game.settings?.mangohud?.enabled || false,
+                    enabled: activeSettings?.mangohud?.enabled || false,
                   },
                 },
                 _originalGame: game, // Store full original data
@@ -238,8 +263,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             
             if (result.success) {
               if (result.status === 'installed' && result.executables) {
-                setDiscoveredExecutables(result.executables);
-                
                 // NOTE: We don't update filePath here - it should remain the game directory path
                 // The launch command is already set from the shortcut/executable selection
                 
@@ -375,9 +398,28 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       // Preserve scraper metadata when updating
       const preservedMetadata = formData._originalGame?.metadata || {};
       
+      // Update the current platform in the platforms array before submitting
+      const platforms = [...formData.platforms];
+      const currentPlatformIndex = platforms.findIndex(p => p.platformId === formData.platformId);
+      
+      if (currentPlatformIndex >= 0) {
+        platforms[currentPlatformIndex] = {
+          ...platforms[currentPlatformIndex],
+          settings: formData.settings,
+          filePath: formData.filePath,
+        };
+      } else if (formData.platformId) {
+        platforms.push({
+          platformId: formData.platformId,
+          settings: formData.settings,
+          filePath: formData.filePath,
+        });
+      }
+
       const payload = {
         title: formData.title,
-        platformId: formData.platformId,
+        platforms,
+        defaultPlatformId: formData.platformId,
         tags,
         collectionIds: formData._originalGame?.collectionIds || [],
         metadata: {
@@ -495,21 +537,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     }
   };
 
-  const handleWineDebugChange = (channel: string, enabled: boolean) => {
-    setFormData((prev) => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        wine: {
-          ...prev.settings?.wine,
-          debug: {
-            ...prev.settings?.wine?.debug,
-            [channel]: enabled,
-          },
-        },
-      },
-    }));
-  };
+
 
   const selectImage = (imageUrl: string) => {
     if (showImageSelector === 'primary') {
@@ -637,102 +665,172 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     setShowFileExplorer(false);
   };
 
-  const handleRomFileSelect = async (path: string) => {
-    // Update the game's filePath with the selected ROM file
-    try {
-      const response = await fetch(`http://localhost:3001/api/games/${formData._originalGame?.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...formData._originalGame,
-          filePath: path,
-        }),
-      });
+  const handleRomFileSelect = (path: string) => {
+    // Update local state
+    setFormData(prev => ({
+      ...prev,
+      filePath: path,
+    }));
+    
+    setShowRomFileExplorer(false);
+  };
 
-      if (!response.ok) {
-        throw new Error('Failed to update ROM file path');
+
+
+
+
+  const switchPlatform = (newPlatformId: string) => {
+    if (newPlatformId === formData.platformId) return;
+
+    setFormData(prev => {
+      // 1. Save current settings to the current platform in the platforms array
+      const updatedPlatforms = [...prev.platforms];
+      const currentPlatformIndex = updatedPlatforms.findIndex(p => p.platformId === prev.platformId);
+      
+      if (currentPlatformIndex >= 0) {
+        updatedPlatforms[currentPlatformIndex] = {
+          ...updatedPlatforms[currentPlatformIndex],
+          settings: prev.settings,
+          filePath: prev.filePath,
+        };
+      } else if (prev.platformId) {
+        // If current platform wasn't in the array (e.g. newly added), add it
+        updatedPlatforms.push({
+          platformId: prev.platformId,
+          settings: prev.settings,
+          filePath: prev.filePath,
+        });
       }
 
-      // Update local state
-      setFormData(prev => ({
+      // 2. Find new platform config
+      const newPlatformConfig = updatedPlatforms.find(p => p.platformId === newPlatformId);
+      
+      // 3. Return new state
+      return {
         ...prev,
-        _originalGame: {
-          ...prev._originalGame,
-          filePath: path,
+        platforms: updatedPlatforms,
+        platformId: newPlatformId,
+        settings: newPlatformConfig?.settings || {
+          wine: { arch: 'win64', debug: {} },
+          launch: { command: '', arguments: [], environment: {}, workingDirectory: '' },
+        },
+        filePath: newPlatformConfig?.filePath || '',
+      };
+    });
+  };
+
+  const handleAddPlatform = (platformId: string) => {
+    if (!platformId) return;
+    
+    // Check if already exists
+    if (formData.platforms.some(p => p.platformId === platformId)) {
+      switchPlatform(platformId);
+      setShowAddPlatform(false);
+      return;
+    }
+
+    setFormData(prev => {
+      // Save current platform state first
+      const updatedPlatforms = [...prev.platforms];
+      const currentPlatformIndex = updatedPlatforms.findIndex(p => p.platformId === prev.platformId);
+      
+      if (currentPlatformIndex >= 0) {
+        updatedPlatforms[currentPlatformIndex] = {
+          ...updatedPlatforms[currentPlatformIndex],
+          settings: prev.settings,
+          filePath: prev.filePath,
+        };
+      } else if (prev.platformId) {
+        updatedPlatforms.push({
+          platformId: prev.platformId,
+          settings: prev.settings,
+          filePath: prev.filePath,
+        });
+      }
+
+      // Add new platform
+      const newPlatform: GamePlatformConfig = {
+        platformId,
+        settings: {
+          wine: { arch: 'win64', debug: {} },
+          launch: { command: '', arguments: [], environment: {}, workingDirectory: '' },
+        },
+        filePath: '',
+      };
+      
+      updatedPlatforms.push(newPlatform);
+
+      return {
+        ...prev,
+        platforms: updatedPlatforms,
+        platformId,
+        settings: newPlatform.settings,
+        filePath: newPlatform.filePath || '',
+      };
+    });
+    
+    setShowAddPlatform(false);
+  };
+
+  const handleRemovePlatform = (platformId: string) => {
+    if (!confirm('Are you sure you want to remove this platform configuration?')) return;
+
+    setFormData(prev => {
+      const updatedPlatforms = prev.platforms.filter(p => p.platformId !== platformId);
+      
+      // If we removed the current platform, switch to another one
+      let newPlatformId = prev.platformId;
+      let newSettings = prev.settings;
+      let newFilePath = prev.filePath;
+      
+      if (prev.platformId === platformId) {
+        if (updatedPlatforms.length > 0) {
+          newPlatformId = updatedPlatforms[0].platformId;
+          newSettings = updatedPlatforms[0].settings;
+          newFilePath = updatedPlatforms[0].filePath;
+        } else {
+          newPlatformId = '';
+          newSettings = {
+            wine: { arch: 'win64', debug: {} },
+            launch: { command: '', arguments: [], environment: {}, workingDirectory: '' },
+          };
+          newFilePath = '';
         }
-      }));
-
-      setSuccessMessage('ROM file path updated successfully');
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      console.error('Error updating ROM file:', err);
-      setError('Failed to update ROM file path');
-    } finally {
-      setShowRomFileExplorer(false);
-    }
+      }
+      
+      return {
+        ...prev,
+        platforms: updatedPlatforms,
+        platformId: newPlatformId,
+        settings: newSettings,
+        filePath: newFilePath,
+      };
+    });
   };
 
-  const handleDebugContainer = async () => {
-    if (!formData._originalGame?.id) {
-      console.error('No game ID available for debug container');
-      return;
-    }
-
-    try {
-      const response = await fetch(`http://localhost:3001/api/launch/${formData._originalGame.id}/debug`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to launch debug container');
-      }
-
-      const data = await response.json();
-      
-      // Show the docker exec command in an alert/dialog
-      alert(
-        `Debug container started!\n\n` +
-        `Container ID: ${data.container.containerId.substring(0, 12)}\n\n` +
-        `To attach to the container, run this command in your terminal:\n\n` +
-        `${data.container.execCommand}\n\n` +
-        `The container will keep running until you stop it manually.`
-      );
-    } catch (error) {
-      console.error('Error launching debug container:', error);
-      alert('Failed to launch debug container. Check console for details.');
-    }
-  };
-
-  const handleRunRegistrySetup = async () => {
-    if (!formData._originalGame?.id) {
-      console.error('No game ID available for registry setup');
-      return;
-    }
-
-    try {
-      const response = await fetch(`http://localhost:3001/api/launch/${formData._originalGame.id}/registry-setup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const data = await response.json();
-      
-      if (response.ok && data.success) {
-        alert(`✓ Registry Setup Complete\n\n${data.message}`);
-      } else {
-        alert(`Registry Setup\n\n${data.message || 'Failed to run registry setup'}`);
-      }
-    } catch (error) {
-      console.error('Error running registry setup:', error);
-      alert('Failed to run registry setup. Check console for details.');
-    }
+  const getPlatformName = (id: string) => {
+    const names: Record<string, string> = {
+      'linux-native': 'Native (Linux)',
+      'windows-wine': 'Wine (Windows)',
+      'proton': 'Proton',
+      'dosbox': 'DOSBox',
+      'scummvm': 'ScummVM',
+      'c64': 'Commodore 64',
+      'c128': 'Commodore 128',
+      'vic20': 'VIC-20',
+      'plus4': 'Plus/4',
+      'pet': 'PET',
+      'amiga': 'Amiga',
+      'amiga500': 'Amiga 500',
+      'amiga500plus': 'Amiga 500+',
+      'amiga600': 'Amiga 600',
+      'amiga1200': 'Amiga 1200',
+      'amiga3000': 'Amiga 3000',
+      'amiga4000': 'Amiga 4000',
+      'cd32': 'Amiga CD32',
+      'mame': 'Arcade (MAME)',
+    };
+    return names[id] || id;
   };
 
   return (
@@ -825,1003 +923,323 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             />
           </div>
 
-          {/* Platform */}
+          {/* Platforms */}
           <div>
-            <label htmlFor="platformId" className="block text-sm font-medium text-muted mb-2">
-              Platform
+            <label className="block text-sm font-medium text-muted mb-2">
+              Platforms
             </label>
-            <select
-              id="platformId"
-              name="platformId"
-              value={formData.platformId}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-            >
-              <option value="">Select a platform...</option>
-              <option value="linux-native">Native (Linux)</option>
-              <option value="windows-wine">Wine (Windows)</option>
-              <option value="proton">Proton (Steam)</option>
-              <option value="dosbox">DOSBox</option>
-              <option value="scummvm">ScummVM</option>
-              <optgroup label="Commodore Systems">
-                <option value="c64">Commodore 64</option>
-                <option value="c128">Commodore 128</option>
-                <option value="vic20">VIC-20</option>
-                <option value="plus4">Plus/4</option>
-                <option value="pet">PET</option>
-              </optgroup>
-              <optgroup label="Amiga Systems">
-                <option value="amiga">Amiga (Generic)</option>
-                <option value="amiga500">Amiga 500</option>
-                <option value="amiga500plus">Amiga 500+</option>
-                <option value="amiga600">Amiga 600</option>
-                <option value="amiga1200">Amiga 1200</option>
-                <option value="amiga3000">Amiga 3000</option>
-                <option value="amiga4000">Amiga 4000</option>
-                <option value="cd32">Amiga CD32</option>
-              </optgroup>
-            </select>
-          </div>
-
-          {/* Wine Architecture - only show for Wine platform */}
-          {formData.platformId === 'windows-wine' && (
-            <div>
-              <label htmlFor="settings.wine.arch" className="block text-sm font-medium text-muted mb-2">
-                Wine Architecture
-              </label>
-              <select
-                id="settings.wine.arch"
-                name="settings.wine.arch"
-                value={formData.settings?.wine?.arch || 'win64'}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              >
-                <option value="win64">64-bit (win64) - Default for modern games</option>
-                <option value="win32">32-bit (win32) - For older games</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1">
-                Older GOG games often require 32-bit (win32) architecture
-              </p>
-            </div>
-          )}
-
-          {/* DXVK - only show for Wine platform */}
-          {formData.platformId === 'windows-wine' && (
-            <div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="settings.wine.useDxvk"
-                  checked={formData.settings?.wine?.useDxvk || false}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...formData.settings,
-                        wine: {
-                          ...formData.settings?.wine,
-                          useDxvk: e.target.checked,
-                        },
-                      },
-                    });
-                  }}
-                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                />
-                <label htmlFor="settings.wine.useDxvk" className="text-sm font-medium text-text">
-                  Use DXVK (DirectX to Vulkan translation)
-                </label>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Required for MangoHUD to work with DirectX games. Improves performance and enables Vulkan-based overlays.
-              </p>
-            </div>
-          )}
-
-          {/* Wine Compatibility Mode - only show for Wine platform */}
-          {formData.platformId === 'windows-wine' && (
-            <div>
-              <label htmlFor="settings.wine.compatibilityMode" className="block text-sm font-medium text-muted mb-2">
-                Windows Compatibility Mode
-              </label>
-              <select
-                id="settings.wine.compatibilityMode"
-                name="settings.wine.compatibilityMode"
-                value={formData.settings?.wine?.compatibilityMode || 'none'}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              >
-                <option value="none">None (Default)</option>
-                <option value="legacy">Legacy Games (Win98 era, DirectDraw optimized)</option>
-                <option value="win98">Windows 98</option>
-                <option value="winxp">Windows XP</option>
-                <option value="win7">Windows 7</option>
-                <option value="win10">Windows 10</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1">
-                For old games (1995-2000), try "Legacy Games" mode which optimizes DirectDraw/DirectSound settings
-              </p>
-            </div>
-          )}
-
-          {/* Wine DLL Overrides - Advanced section */}
-          {formData.platformId === 'windows-wine' && (
-            <details className="border border-gray-300 dark:border-gray-600 rounded-md p-4">
-              <summary className="text-sm font-medium text-muted cursor-pointer hover:text-text">
-                Advanced: DLL Overrides
-              </summary>
-              <div className="mt-4 space-y-3">
-                <p className="text-xs text-gray-500">
-                  Override Wine DLL loading order. Common examples: ddraw=native, d3d9=native,builtin
-                </p>
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="DLL name (e.g., ddraw)"
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text text-sm"
-                      id="dll-override-key"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Override (e.g., native)"
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text text-sm"
-                      id="dll-override-value"
-                    />
+            
+            <div className="space-y-3">
+              {/* List of configured platforms */}
+              <div className="flex flex-wrap gap-2">
+                {formData.platforms.map(p => (
+                  <div key={p.platformId} className="relative group">
                     <button
                       type="button"
-                      onClick={() => {
-                        const keyInput = document.getElementById('dll-override-key') as HTMLInputElement;
-                        const valueInput = document.getElementById('dll-override-value') as HTMLInputElement;
-                        if (keyInput?.value && valueInput?.value) {
-                          setFormData({
-                            ...formData,
-                            settings: {
-                              ...formData.settings,
-                              wine: {
-                                ...formData.settings?.wine,
-                                dlls: {
-                                  ...formData.settings?.wine?.dlls,
-                                  [keyInput.value]: valueInput.value,
-                                },
-                              },
-                            },
-                          });
-                          keyInput.value = '';
-                          valueInput.value = '';
-                        }
-                      }}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                      onClick={() => switchPlatform(p.platformId)}
+                      className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        formData.platformId === p.platformId
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
                     >
-                      Add
+                      {getPlatformName(p.platformId)}
                     </button>
-                  </div>
-                  {formData.settings?.wine?.dlls && Object.keys(formData.settings.wine.dlls).length > 0 && (
-                    <div className="mt-3 space-y-1">
-                      {Object.entries(formData.settings.wine.dlls).map(([dll, mode]) => (
-                        <div key={dll} className="flex items-center justify-between bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded text-sm">
-                          <span className="font-mono">{dll} = {mode}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newDlls = { ...formData.settings?.wine?.dlls };
-                              delete newDlls[dll];
-                              setFormData({
-                                ...formData,
-                                settings: {
-                                  ...formData.settings,
-                                  wine: {
-                                    ...formData.settings?.wine,
-                                    dlls: newDlls,
-                                  },
-                                },
-                              });
-                            }}
-                            className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </details>
-          )}
-
-          {/* Wine Debug Channels - only show for Wine platform */}
-          {formData.platformId === 'windows-wine' && (
-            <div>
-              <label className="block text-sm font-medium text-muted mb-2">
-                Wine Debug Channels (for troubleshooting)
-              </label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-800">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.relay || false}
-                    onChange={(e) => handleWineDebugChange('relay', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">relay (function calls)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.seh || false}
-                    onChange={(e) => handleWineDebugChange('seh', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">seh (exceptions)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.tid || false}
-                    onChange={(e) => handleWineDebugChange('tid', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">tid (thread IDs)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.timestamp || false}
-                    onChange={(e) => handleWineDebugChange('timestamp', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">timestamp</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.heap || false}
-                    onChange={(e) => handleWineDebugChange('heap', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">heap (memory)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.file || false}
-                    onChange={(e) => handleWineDebugChange('file', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">file (I/O)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.module || false}
-                    onChange={(e) => handleWineDebugChange('module', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">module (loading)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.win || false}
-                    onChange={(e) => handleWineDebugChange('win', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">win (windows)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.d3d || false}
-                    onChange={(e) => handleWineDebugChange('d3d', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">d3d (Direct3D)</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.opengl || false}
-                    onChange={(e) => handleWineDebugChange('opengl', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm">opengl</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer col-span-2 md:col-span-1">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.wine?.debug?.all || false}
-                    onChange={(e) => handleWineDebugChange('all', e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                  />
-                  <span className="text-sm font-semibold text-red-600 dark:text-red-400">all (very verbose!)</span>
-                </label>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Enable debug channels to troubleshoot Wine issues. Warning: This can generate a lot of log output.
-              </p>
-            </div>
-          )}
-
-          {/* Tags */}
-          <div>
-            <label htmlFor="tags" className="block text-sm font-medium text-muted mb-2">
-              Tags
-            </label>
-            <input
-              type="text"
-              id="tags"
-              name="tags"
-              value={formData.tags}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="action, rpg, multiplayer (comma-separated)"
-            />
-          </div>
-        </div>
-
-        {/* Metadata Section */}
-        <div className="space-y-4 mb-6">
-          <h3 className="text-lg font-semibold text-text border-b pb-2">Game Information</h3>
-
-          {/* Description */}
-          <div>
-            <label htmlFor="metadata.description" className="block text-sm font-medium text-muted mb-2">
-              Description
-            </label>
-            <textarea
-              id="metadata.description"
-              name="metadata.description"
-              value={formData.metadata.description}
-              onChange={handleChange}
-              rows={4}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="Brief description of the game"
-            />
-          </div>
-
-          {/* Genre */}
-          <div>
-            <label htmlFor="metadata.genre" className="block text-sm font-medium text-muted mb-2">
-              Genre
-            </label>
-            <input
-              type="text"
-              id="metadata.genre"
-              name="metadata.genre"
-              value={formData.metadata.genre}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="Action, RPG, Strategy (comma-separated)"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Developer */}
-            <div>
-              <label htmlFor="metadata.developer" className="block text-sm font-medium text-muted mb-2">
-                Developer
-              </label>
-              <input
-                type="text"
-                id="metadata.developer"
-                name="metadata.developer"
-                value={formData.metadata.developer}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                placeholder="Game developer"
-              />
-            </div>
-
-            {/* Publisher */}
-            <div>
-              <label htmlFor="metadata.publisher" className="block text-sm font-medium text-muted mb-2">
-                Publisher
-              </label>
-              <input
-                type="text"
-                id="metadata.publisher"
-                name="metadata.publisher"
-                value={formData.metadata.publisher}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                placeholder="Game publisher"
-              />
-            </div>
-
-            {/* Release Date */}
-            <div>
-              <label htmlFor="metadata.releaseDate" className="block text-sm font-medium text-muted mb-2">
-                Release Date
-              </label>
-              <input
-                type="date"
-                id="metadata.releaseDate"
-                name="metadata.releaseDate"
-                value={formData.metadata.releaseDate}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              />
-            </div>
-
-            {/* Rating */}
-            <div>
-              <label htmlFor="metadata.rating" className="block text-sm font-medium text-muted mb-2">
-                Rating (1-10)
-              </label>
-              <input
-                type="number"
-                id="metadata.rating"
-                name="metadata.rating"
-                min="1"
-                max="10"
-                value={formData.metadata.rating || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                placeholder="1-10"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Image Selection */}
-        {availableImages.length > 0 && (
-          <div className="space-y-4 mb-6">
-            <h3 className="text-lg font-semibold text-text border-b pb-2">Display Images</h3>
-            
-            {/* Primary Image */}
-            <div>
-              <label className="block text-sm font-medium text-muted mb-2">
-                Primary Image (Tile Display)
-              </label>
-              <div className="flex items-center gap-4">
-                {formData.metadata.primaryImage && (
-                  <img
-                    src={formData.metadata.primaryImage}
-                    alt="Primary"
-                    className="w-24 h-24 object-cover rounded border-2 border-blue-500"
-                  />
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowImageSelector('primary')}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                >
-                  {formData.metadata.primaryImage ? 'Change' : 'Select'} Primary Image
-                </button>
-                {formData.metadata.primaryImage && (
-                  <button
-                    type="button"
-                    onClick={() => setFormData(prev => ({
-                      ...prev,
-                      metadata: { ...prev.metadata, primaryImage: '' }
-                    }))}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Backdrop Image */}
-            <div>
-              <label className="block text-sm font-medium text-muted mb-2">
-                Backdrop Image (Hover Effect)
-              </label>
-              <div className="flex items-center gap-4">
-                {formData.metadata.backdropImage && (
-                  <img
-                    src={formData.metadata.backdropImage}
-                    alt="Backdrop"
-                    className="w-32 h-18 object-cover rounded border-2 border-purple-500"
-                  />
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowImageSelector('backdrop')}
-                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
-                >
-                  {formData.metadata.backdropImage ? 'Change' : 'Select'} Backdrop Image
-                </button>
-                {formData.metadata.backdropImage && (
-                  <button
-                    type="button"
-                    onClick={() => setFormData(prev => ({
-                      ...prev,
-                      metadata: { ...prev.metadata, backdropImage: '' }
-                    }))}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Image Selector Modal */}
-            {showImageSelector && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
-                  <h3 className="text-xl font-semibold mb-4 text-text">
-                    Select {showImageSelector === 'primary' ? 'Primary' : 'Backdrop'} Image
-                  </h3>
-                  
-                  {/* Game Screenshots Section */}
-                  {screenshots.length > 0 && (
-                    <div className="mb-6">
-                      <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
-                        <span className="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
-                        Your Screenshots
-                      </h4>
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {screenshots.map((screenshot) => (
-                          <div
-                            key={screenshot.filename}
-                            onClick={() => selectImage(screenshot.path)}
-                            className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all group relative"
-                          >
-                            <img
-                              src={screenshot.path}
-                              alt={screenshot.filename}
-                              className="w-full h-32 object-cover"
-                            />
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center">
-                              <span className="text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity px-2 text-center">
-                                {formatRelativeTime(screenshot.modified)}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* IGDB Images Section */}
-                  {availableImages.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
-                        <span className="inline-block w-2 h-2 bg-purple-500 rounded-full"></span>
-                        IGDB Images
-                      </h4>
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {availableImages.map((img, index) => (
-                          <div
-                            key={index}
-                            onClick={() => selectImage(img)}
-                            className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all"
-                          >
-                            <img
-                              src={img}
-                              alt={`Option ${index + 1}`}
-                              className="w-full h-32 object-cover"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {availableImages.length === 0 && screenshots.length === 0 && (
-                    <p className="text-center text-muted py-8">No images available</p>
-                  )}
-                  
-                  <button
-                    type="button"
-                    onClick={() => setShowImageSelector(null)}
-                    className="w-full px-4 py-2 mt-6 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Game Screenshots - Show for emulator games (VICE) */}
-        {mode === 'edit' && 
-         ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(formData._originalGame?.platformId || '') && 
-         screenshots.length > 0 && (
-          <div className="space-y-4 mb-6">
-            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Screenshots</h3>
-            <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-              <p className="text-sm text-muted mb-3">
-                Screenshots captured from VICE emulator (saved in emulator home directory)
-              </p>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {screenshots.map((screenshot, index) => (
-                  <div 
-                    key={screenshot.filename}
-                    className="flex items-center gap-3 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
-                  >
-                    {/* Thumbnail */}
-                    <div className="flex-shrink-0">
-                      <img
-                        src={screenshot.path}
-                        alt={`Screenshot ${index + 1}`}
-                        className="w-32 h-24 object-cover rounded border border-gray-300 dark:border-gray-600"
-                      />
-                    </div>
-                    
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-text truncate">
-                          {screenshot.filename}
-                        </p>
-                        <div className="relative group">
-                          <InformationCircleIcon className="w-4 h-4 text-gray-400 hover:text-blue-500 cursor-help" />
-                          <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block z-10 w-64 p-3 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg shadow-lg">
-                            <p className="font-medium mb-1">
-                              {new Date(screenshot.modified).toLocaleString()}
-                            </p>
-                            <p className="text-gray-300 dark:text-gray-400">
-                              Captured {formatRelativeTime(screenshot.modified)}
-                            </p>
-                            <div className="absolute left-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
-                          </div>
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted mt-1">
-                        {(screenshot.size / 1024).toFixed(1)} KB
-                      </p>
-                    </div>
-                    
-                    {/* Actions */}
-                    <div className="flex gap-2">
+                    {formData.platforms.length > 1 && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setFormData(prev => ({
-                            ...prev,
-                            metadata: { ...prev.metadata, primaryImage: screenshot.path }
-                          }));
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemovePlatform(p.platformId);
                         }}
-                        className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                        title="Remove platform"
                       >
-                        Set as Primary
+                        <TrashIcon className="w-3 h-3" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => ({
-                            ...prev,
-                            metadata: { ...prev.metadata, backdropImage: screenshot.path }
-                          }));
-                        }}
-                        className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
-                      >
-                        Set as Backdrop
-                      </button>
-                    </div>
+                    )}
                   </div>
                 ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Installation Section - Only for platforms that require installation (Wine) */}
-        {mode === 'edit' && 
-         formData._originalGame?.platformId === 'windows-wine' && 
-         !formData._originalGame?.installation?.status && (
-          <div className="space-y-4 mb-6">
-            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <p className="text-sm text-muted mb-3">
-                This game hasn't been installed yet. Click the button below to run the installer.
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowInstallDialog(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Install Game
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ROM File Section - For emulator platforms */}
-        {mode === 'edit' && 
-         ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(formData._originalGame?.platformId || '') && (
-          <div className="space-y-4 mb-6">
-            <h3 className="text-lg font-semibold text-text border-b pb-2">ROM File</h3>
-            <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-              <p className="text-sm text-muted mb-2">
-                <strong>ROM Location:</strong> {formData._originalGame?.filePath || 'Not specified'}
-              </p>
-              <p className="text-xs text-muted mb-4">
-                This is {['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(formData._originalGame?.platformId || '') ? 'an Amiga' : 'a Commodore'} emulator game. No installation is required - the game runs directly from the ROM file.
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowRomFileExplorer(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-              >
-                <FolderIcon className="w-5 h-5" />
-                Select ROM
-              </button>
-            </div>
-          </div>
-        )}
-
-        {mode === 'edit' && 
-         formData._originalGame?.platformId === 'windows-wine' &&
-         formData._originalGame?.installation?.status === 'installed' && (
-          <div className="space-y-4 mb-6">
-            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
-            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-              <p className="text-sm text-green-700 dark:text-green-300">
-                ✓ Game installed at: {formData._originalGame.installation.installPath}
-                {formData._originalGame.slug && formData._originalGame.platformId === 'windows-wine' && (
-                  <>
-                    <br />
-                    <span className="ml-4 text-xs">
-                      Wine prefix: {formData._originalGame.installation.installPath}/.wine-{formData._originalGame.slug}
-                    </span>
-                  </>
-                )}
-              </p>
-              {formData._originalGame.installation.installedAt && (
-                <p className="text-xs text-muted mt-1">
-                  Installed: {new Date(formData._originalGame.installation.installedAt).toLocaleString()}
-                </p>
-              )}
-              {discoveredExecutables.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-xs font-medium text-green-700 dark:text-green-300 mb-1">
-                    Discovered Executables:
-                  </p>
-                  <ul className="text-xs text-muted space-y-1">
-                    {discoveredExecutables.map((exe, index) => (
-                      <li key={index} className="font-mono">
-                        {index === 0 && '→ '}{exe} {index === 0 && '(auto-selected)'}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleDebugContainer}
-                  className="px-3 py-1.5 bg-yellow-600 text-white text-sm rounded-md hover:bg-yellow-700 transition-colors"
-                >
-                  🐛 Debug Container
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRunRegistrySetup}
-                  className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 transition-colors"
-                >
-                  🔧 Registry Setup
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {mode === 'edit' && 
-         formData._originalGame?.platformId === 'windows-wine' &&
-         formData._originalGame?.installation?.status === 'installing' && (
-          <div className="space-y-4 mb-6">
-            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-              <p className="text-sm text-yellow-700 dark:text-yellow-300">
-                ⏳ Installation in progress... Follow the installer wizard on your display.
-              </p>
-              <p className="text-xs text-muted mt-1">
-                Container ID: {formData._originalGame.installation.containerId}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {mode === 'edit' && 
-         formData._originalGame?.platformId === 'windows-wine' &&
-         formData._originalGame?.installation?.status === 'failed' && (
-          <div className="space-y-4 mb-6">
-            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Installation</h3>
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-              <p className="text-sm text-red-700 dark:text-red-300 mb-2">
-                ✗ Installation failed
-              </p>
-              {formData._originalGame.installation.error && (
-                <p className="text-xs text-muted">
-                  Error: {formData._originalGame.installation.error}
-                </p>
-              )}
-              <div className="flex gap-2 mt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowInstallDialog(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  Retry Installation
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowLogsDialog(true)}
-                  className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  View Logs
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Launch Settings - Hide for emulator platforms that use ROMs */}
-        {!['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(formData.platformId) && (
-        <div className="space-y-4 mb-6">
-          <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
-
-          <div>
-            <label htmlFor="settings.launch.command" className="block text-sm font-medium text-muted mb-2">
-              Launch Command
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                id="settings.launch.command"
-                name="settings.launch.command"
-                value={formData.settings?.launch?.command || ''}
-                onChange={handleChange}
-                className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                placeholder="./start.sh or game.exe"
-              />
-              {formData._originalGame?.installation?.status === 'installed' && formData._originalGame?.installation?.installPath && (
-                <>
+                
+                {/* Add Platform Button */}
+                <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setShowShortcutDialog(true)}
-                    className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-1"
-                    title="Search for shortcut files"
+                    onClick={() => setShowAddPlatform(!showAddPlatform)}
+                    className="px-3 py-2 border border-dashed border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-500 hover:text-blue-600 hover:border-blue-500 transition-colors flex items-center gap-1"
                   >
-                    <MagnifyingGlassIcon className="w-4 h-4" />
-                    Shortcuts
+                    <PlusIcon className="w-4 h-4" />
+                    Add Platform
                   </button>
+                  
+                  {/* Add Platform Dropdown */}
+                  {showAddPlatform && (
+                    <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 z-20 max-h-60 overflow-y-auto">
+                      <div className="p-2 space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => handleAddPlatform('linux-native')}
+                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Native (Linux)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPlatform('windows-wine')}
+                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Wine (Windows)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPlatform('mame')}
+                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Arcade (MAME)
+                        </button>
+                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Commodore</p>
+                        {['c64', 'c128', 'vic20', 'plus4', 'pet'].map(id => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => handleAddPlatform(id)}
+                            className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                          >
+                            {getPlatformName(id)}
+                          </button>
+                        ))}
+                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Amiga</p>
+                        {['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].map(id => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => handleAddPlatform(id)}
+                            className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                          >
+                            {getPlatformName(id)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {formData.platforms.length === 0 && (
+                <p className="text-sm text-red-500">
+                  Please add at least one platform configuration.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Rom File Selection - Show for emulator platforms */}
+          {['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
+            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+              <h3 className="text-lg font-semibold text-text border-b pb-2">
+                Rom File ({getPlatformName(formData.platformId)})
+              </h3>
+              
+              <div>
+                <label htmlFor="filePath" className="block text-sm font-medium text-muted mb-2">
+                  ROM File Path
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="filePath"
+                    name="filePath"
+                    value={formData.filePath || ''}
+                    onChange={handleChange}
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                    placeholder="/path/to/game.d64"
+                  />
                   <button
                     type="button"
-                    onClick={() => setShowFileExplorer(true)}
+                    onClick={() => setShowRomFileExplorer(true)}
                     className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
-                    title="Browse installation directory"
+                    title="Browse for ROM file"
                   >
                     <FolderIcon className="w-4 h-4" />
                     Browse
                   </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="settings.launch.workingDirectory" className="block text-sm font-medium text-muted mb-2">
-              Working Directory
-            </label>
-            <input
-              type="text"
-              id="settings.launch.workingDirectory"
-              name="settings.launch.workingDirectory"
-              value={formData.settings?.launch?.workingDirectory || ''}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="Relative path from game directory"
-            />
-          </div>
-
-          {/* Display Options - only show for Wine platform */}
-          {formData.platformId === 'windows-wine' && (
-            <>
-              <div className="col-span-2">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.settings?.launch?.fullscreen || false}
-                    onChange={(e) => {
-                      setFormData((prev) => ({
-                        ...prev,
-                        settings: {
-                          ...prev.settings,
-                          launch: {
-                            ...prev.settings?.launch,
-                            fullscreen: e.target.checked,
-                          },
-                        },
-                      }));
-                    }}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-muted">
-                    Launch in fullscreen (Wine virtual desktop)
-                  </span>
-                </label>
-                <p className="text-xs text-gray-500 mt-1 ml-6">
-                  Creates a virtual desktop for better window management and fullscreen support
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Select the ROM or disk image file for this game
                 </p>
               </div>
+            </div>
+          )}
 
-              {formData.settings?.launch?.fullscreen && (
-                <div>
-                  <label htmlFor="settings.launch.resolution" className="block text-sm font-medium text-muted mb-2">
-                    Resolution
-                  </label>
-                  <select
-                    id="settings.launch.resolution"
-                    name="settings.launch.resolution"
-                    value={formData.settings?.launch?.resolution || '1920x1080'}
-                    onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                  >
-                    <option value="1920x1080">1920x1080 (Full HD)</option>
-                    <option value="2560x1440">2560x1440 (QHD)</option>
-                    <option value="3840x2160">3840x2160 (4K)</option>
-                    <option value="1600x900">1600x900</option>
-                    <option value="1440x900">1440x900</option>
-                    <option value="1366x768">1366x768</option>
-                    <option value="1280x1024">1280x1024</option>
-                    <option value="1280x720">1280x720 (HD)</option>
-                    <option value="1024x768">1024x768</option>
-                    <option value="800x600">800x600</option>
-                  </select>
-                </div>
-              )}
+          {/* Launch Settings - Hide for emulator platforms that use ROMs */}
+          {!['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
+            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+              <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
 
-              {formData.settings?.launch?.fullscreen && (
-                <div className="col-span-2">
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.settings?.launch?.useXrandr || false}
-                      onChange={(e) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          settings: {
-                            ...prev.settings,
-                            launch: {
-                              ...prev.settings?.launch,
-                              useXrandr: e.target.checked,
-                            },
-                          },
-                        }));
-                      }}
-                      className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm font-medium text-muted">
-                      Set display resolution before launch (xrandr)
-                    </span>
-                  </label>
-                  <p className="text-xs text-gray-500 mt-1 ml-6">
-                    Automatically changes your display resolution to match the game. Useful for older games that don't handle resolution scaling well.
-                  </p>
-                </div>
-              )}
-
-              {formData.settings?.launch?.fullscreen && formData.settings?.launch?.useXrandr && (
-                <div>
-                  <label htmlFor="settings.launch.xrandrMode" className="block text-sm font-medium text-muted mb-2">
-                    xrandr Resolution
-                  </label>
+              <div>
+                <label htmlFor="settings.launch.command" className="block text-sm font-medium text-muted mb-2">
+                  Launch Command
+                </label>
+                <div className="flex gap-2">
                   <input
                     type="text"
-                    id="settings.launch.xrandrMode"
-                    name="settings.launch.xrandrMode"
-                    value={formData.settings?.launch?.xrandrMode || formData.settings?.launch?.resolution || '1920x1080'}
+                    id="settings.launch.command"
+                    name="settings.launch.command"
+                    value={formData.settings?.launch?.command || ''}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                    placeholder="e.g., 1920x1080"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                    placeholder="./start.sh or game.exe"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Display resolution to set via xrandr (defaults to game resolution above)
-                  </p>
+                  {formData._originalGame?.installation?.status === 'installed' && formData._originalGame?.installation?.installPath && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowShortcutDialog(true)}
+                        className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-1"
+                        title="Search for shortcut files"
+                      >
+                        <MagnifyingGlassIcon className="w-4 h-4" />
+                        Shortcuts
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowFileExplorer(true)}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
+                        title="Browse installation directory"
+                      >
+                        <FolderIcon className="w-4 h-4" />
+                        Browse
+                      </button>
+                    </>
+                  )}
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="settings.launch.workingDirectory" className="block text-sm font-medium text-muted mb-2">
+                  Working Directory
+                </label>
+                <input
+                  type="text"
+                  id="settings.launch.workingDirectory"
+                  name="settings.launch.workingDirectory"
+                  value={formData.settings?.launch?.workingDirectory || ''}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                  placeholder="Relative path from game directory"
+                />
+              </div>
+
+              {/* Display Options - only show for Wine platform */}
+              {formData.platformId === 'windows-wine' && (
+                <>
+                  <div className="col-span-2">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.settings?.launch?.fullscreen || false}
+                        onChange={(e) => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            settings: {
+                              ...prev.settings,
+                              launch: {
+                                ...prev.settings?.launch,
+                                fullscreen: e.target.checked,
+                              },
+                            },
+                          }));
+                        }}
+                        className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-muted">
+                        Launch in fullscreen (Wine virtual desktop)
+                      </span>
+                    </label>
+                    <p className="text-xs text-gray-500 mt-1 ml-6">
+                      Creates a virtual desktop for better window management and fullscreen support
+                    </p>
+                  </div>
+
+                  {formData.settings?.launch?.fullscreen && (
+                    <div>
+                      <label htmlFor="settings.launch.resolution" className="block text-sm font-medium text-muted mb-2">
+                        Resolution
+                      </label>
+                      <select
+                        id="settings.launch.resolution"
+                        name="settings.launch.resolution"
+                        value={formData.settings?.launch?.resolution || '1920x1080'}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                      >
+                        <option value="1920x1080">1920x1080 (Full HD)</option>
+                        <option value="2560x1440">2560x1440 (QHD)</option>
+                        <option value="3840x2160">3840x2160 (4K)</option>
+                        <option value="1600x900">1600x900</option>
+                        <option value="1440x900">1440x900</option>
+                        <option value="1366x768">1366x768</option>
+                        <option value="1280x1024">1280x1024</option>
+                        <option value="1280x720">1280x720 (HD)</option>
+                        <option value="1024x768">1024x768</option>
+                        <option value="800x600">800x600</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {formData.settings?.launch?.fullscreen && (
+                    <div className="col-span-2">
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.settings?.launch?.useXrandr || false}
+                          onChange={(e) => {
+                            setFormData((prev) => ({
+                              ...prev,
+                              settings: {
+                                ...prev.settings,
+                                launch: {
+                                  ...prev.settings?.launch,
+                                  useXrandr: e.target.checked,
+                                },
+                              },
+                            }));
+                          }}
+                          className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-muted">
+                          Set display resolution before launch (xrandr)
+                        </span>
+                      </label>
+                      <p className="text-xs text-gray-500 mt-1 ml-6">
+                        Automatically changes your display resolution to match the game. Useful for older games that don't handle resolution scaling well.
+                      </p>
+                    </div>
+                  )}
+
+                  {formData.settings?.launch?.fullscreen && formData.settings?.launch?.useXrandr && (
+                    <div>
+                      <label htmlFor="settings.launch.xrandrMode" className="block text-sm font-medium text-muted mb-2">
+                        xrandr Resolution
+                      </label>
+                      <input
+                        type="text"
+                        id="settings.launch.xrandrMode"
+                        name="settings.launch.xrandrMode"
+                        value={formData.settings?.launch?.xrandrMode || formData.settings?.launch?.resolution || '1920x1080'}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        placeholder="e.g., 1920x1080"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Display resolution to set via xrandr (defaults to game resolution above)
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
-            </>
-          )}
 
               {/* Gamescope Compositor */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
@@ -2101,89 +1519,432 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   Display FPS, frame time, CPU/GPU usage, and other performance metrics in-game
                 </p>
               </div>
-        </div>
-      )}
+            </div>
+          )}
 
-        {/* Buttons */}
-        <div className="flex gap-4 mt-6">
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            {isSubmitting ? (mode === 'edit' ? 'Saving...' : 'Adding...') : (mode === 'edit' ? 'Save Changes' : 'Add Game')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (onCancel) {
-                onCancel();
-              } else {
-                router.push('/');
-              }
+          {/* Metadata Section */}
+          <div className="space-y-4 mb-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Information</h3>
+
+            {/* Description */}
+            <div>
+              <label htmlFor="metadata.description" className="block text-sm font-medium text-muted mb-2">
+                Description
+              </label>
+              <textarea
+                id="metadata.description"
+                name="metadata.description"
+                value={formData.metadata.description}
+                onChange={handleChange}
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                placeholder="Brief description of the game"
+              />
+            </div>
+
+            {/* Genre */}
+            <div>
+              <label htmlFor="metadata.genre" className="block text-sm font-medium text-muted mb-2">
+                Genre
+              </label>
+              <input
+                type="text"
+                id="metadata.genre"
+                name="metadata.genre"
+                value={formData.metadata.genre}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                placeholder="Action, RPG, Strategy (comma-separated)"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Developer */}
+              <div>
+                <label htmlFor="metadata.developer" className="block text-sm font-medium text-muted mb-2">
+                  Developer
+                </label>
+                <input
+                  type="text"
+                  id="metadata.developer"
+                  name="metadata.developer"
+                  value={formData.metadata.developer}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                  placeholder="Game developer"
+                />
+              </div>
+
+              {/* Publisher */}
+              <div>
+                <label htmlFor="metadata.publisher" className="block text-sm font-medium text-muted mb-2">
+                  Publisher
+                </label>
+                <input
+                  type="text"
+                  id="metadata.publisher"
+                  name="metadata.publisher"
+                  value={formData.metadata.publisher}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                  placeholder="Game publisher"
+                />
+              </div>
+
+              {/* Release Date */}
+              <div>
+                <label htmlFor="metadata.releaseDate" className="block text-sm font-medium text-muted mb-2">
+                  Release Date
+                </label>
+                <input
+                  type="date"
+                  id="metadata.releaseDate"
+                  name="metadata.releaseDate"
+                  value={formData.metadata.releaseDate}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                />
+              </div>
+
+              {/* Rating */}
+              <div>
+                <label htmlFor="metadata.rating" className="block text-sm font-medium text-muted mb-2">
+                  Rating (1-10)
+                </label>
+                <input
+                  type="number"
+                  id="metadata.rating"
+                  name="metadata.rating"
+                  min="1"
+                  max="10"
+                  value={formData.metadata.rating || ''}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                  placeholder="1-10"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Image Selection */}
+          {availableImages.length > 0 && (
+            <div className="space-y-4 mb-6">
+              <h3 className="text-lg font-semibold text-text border-b pb-2">Display Images</h3>
+              
+              {/* Primary Image */}
+              <div>
+                <label className="block text-sm font-medium text-muted mb-2">
+                  Primary Image (Tile Display)
+                </label>
+                <div className="flex items-center gap-4">
+                  {formData.metadata.primaryImage && (
+                    <img
+                      src={formData.metadata.primaryImage}
+                      alt="Primary"
+                      className="w-24 h-24 object-cover rounded border-2 border-blue-500"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowImageSelector('primary')}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                  >
+                    {formData.metadata.primaryImage ? 'Change' : 'Select'} Primary Image
+                  </button>
+                  {formData.metadata.primaryImage && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({
+                        ...prev,
+                        metadata: { ...prev.metadata, primaryImage: '' }
+                      }))}
+                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Backdrop Image */}
+              <div>
+                <label className="block text-sm font-medium text-muted mb-2">
+                  Backdrop Image (Hover Effect)
+                </label>
+                <div className="flex items-center gap-4">
+                  {formData.metadata.backdropImage && (
+                    <img
+                      src={formData.metadata.backdropImage}
+                      alt="Backdrop"
+                      className="w-32 h-18 object-cover rounded border-2 border-purple-500"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowImageSelector('backdrop')}
+                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                  >
+                    {formData.metadata.backdropImage ? 'Change' : 'Select'} Backdrop Image
+                  </button>
+                  {formData.metadata.backdropImage && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({
+                        ...prev,
+                        metadata: { ...prev.metadata, backdropImage: '' }
+                      }))}
+                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Image Selector Modal */}
+              {showImageSelector && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
+                    <h3 className="text-xl font-semibold mb-4 text-text">
+                      Select {showImageSelector === 'primary' ? 'Primary' : 'Backdrop'} Image
+                    </h3>
+                    
+                    {/* Game Screenshots Section */}
+                    {screenshots.length > 0 && (
+                      <div className="mb-6">
+                        <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
+                          Your Screenshots
+                        </h4>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                          {screenshots.map((screenshot) => (
+                            <div
+                              key={screenshot.filename}
+                              onClick={() => selectImage(screenshot.path)}
+                              className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all group relative"
+                            >
+                              <img
+                                src={screenshot.path}
+                                alt={screenshot.filename}
+                                className="w-full h-32 object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center">
+                                <span className="text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity px-2 text-center">
+                                  {formatRelativeTime(screenshot.modified)}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* IGDB Images Section */}
+                    {availableImages.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 bg-purple-500 rounded-full"></span>
+                          IGDB Images
+                        </h4>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                          {availableImages.map((img, index) => (
+                            <div
+                              key={index}
+                              onClick={() => selectImage(img)}
+                              className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all"
+                            >
+                              <img
+                                src={img}
+                                alt={`Option ${index + 1}`}
+                                className="w-full h-32 object-cover"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {availableImages.length === 0 && screenshots.length === 0 && (
+                      <p className="text-center text-muted py-8">No images available</p>
+                    )}
+                    
+                    <button
+                      type="button"
+                      onClick={() => setShowImageSelector(null)}
+                      className="w-full px-4 py-2 mt-6 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Game Screenshots - Show for emulator games (VICE) */}
+          {mode === 'edit' && 
+           ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(formData.platformId) && 
+           screenshots.length > 0 && (
+            <div className="space-y-4 mb-6">
+              <h3 className="text-lg font-semibold text-text border-b pb-2">Game Screenshots</h3>
+              <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <p className="text-sm text-muted mb-3">
+                  Screenshots captured from VICE emulator (saved in emulator home directory)
+                </p>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {screenshots.map((screenshot, index) => (
+                    <div 
+                      key={screenshot.filename}
+                      className="flex items-center gap-3 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+                    >
+                      {/* Thumbnail */}
+                      <div className="flex-shrink-0">
+                        <img
+                          src={screenshot.path}
+                          alt={`Screenshot ${index + 1}`}
+                          className="w-32 h-24 object-cover rounded border border-gray-300 dark:border-gray-600"
+                        />
+                      </div>
+                      
+                      {/* Info */}
+                      <div className="flex-1 min-w0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-text truncate">
+                            {screenshot.filename}
+                          </p>
+                          <div className="relative group">
+                            <InformationCircleIcon className="w-4 h-4 text-gray-400 hover:text-blue-500 cursor-help" />
+                            <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block z-10 w-64 p-3 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg shadow-lg">
+                              <p className="font-medium mb-1">
+                                {new Date(screenshot.modified).toLocaleString()}
+                              </p>
+                              <p className="text-gray-300 dark:text-gray-400">
+                                Captured {formatRelativeTime(screenshot.modified)}
+                              </p>
+                              <div className="absolute left-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted mt-1">
+                          {(screenshot.size / 1024).toFixed(1)} KB
+                        </p>
+                      </div>
+                      
+                      {/* Actions */}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              metadata: { ...prev.metadata, primaryImage: screenshot.path }
+                            }));
+                          }}
+                          className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        >
+                          Set as Primary
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              metadata: { ...prev.metadata, backdropImage: screenshot.path }
+                            }));
+                          }}
+                          className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                        >
+                          Set as Backdrop
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div className="flex gap-4 mt-6">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSubmitting ? (mode === 'edit' ? 'Saving...' : 'Adding...') : (mode === 'edit' ? 'Save Changes' : 'Add Game')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (onCancel) {
+                  onCancel();
+                } else {
+                  router.push('/');
+                }
+              }}
+              className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+
+        {/* Installation Dialog */}
+        {showInstallDialog && gameId && formData.platformId && (
+          <InstallGameDialog
+            gameId={gameId}
+            platformId={formData.platformId}
+            onClose={() => setShowInstallDialog(false)}
+            onSuccess={() => {
+              setSuccessMessage('Installation started! Follow the wizard on your display.');
+              // Reload the game data to show installation status
+              window.location.reload();
             }}
-            className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
+          />
+        )}
+
+        {/* Shortcut Selector Dialog */}
+        {showShortcutDialog && gameId && formData._originalGame?.installation?.installPath && (
+          <ShortcutSelectorDialog
+            gameId={gameId}
+            installPath={formData._originalGame.installation.installPath}
+            isOpen={showShortcutDialog}
+            onClose={() => setShowShortcutDialog(false)}
+            onSelectShortcut={handleSelectShortcut}
+            onBrowseManually={handleBrowseInstallDirectory}
+          />
+        )}
+
+        {/* File Explorer for browsing installation directory */}
+        {showFileExplorer && formData._originalGame?.installation?.installPath && (
+          <FileExplorer
+            isOpen={showFileExplorer}
+            onClose={() => setShowFileExplorer(false)}
+            onSelect={handleFileExplorerSelect}
+            selectMode="file"
+            title="Select Game Executable"
+          />
+        )}
+
+        {/* File Explorer for selecting ROM files */}
+        {showRomFileExplorer && (
+          <FileExplorer
+            isOpen={showRomFileExplorer}
+            onClose={() => setShowRomFileExplorer(false)}
+            onSelect={handleRomFileSelect}
+            selectMode="file"
+            title="Select ROM File (.d64, .d81, .t64, .prg, .crt, .tap, .g64, .zip)"
+          />
+        )}
+
+        {/* Container Logs Dialog */}
+        {showLogsDialog && gameId && (
+          <ContainerLogsDialog
+            gameId={gameId}
+            onClose={() => setShowLogsDialog(false)}
+          />
+        )}
       </div>
-
-      {/* Installation Dialog */}
-      {showInstallDialog && gameId && formData.platformId && (
-        <InstallGameDialog
-          gameId={gameId}
-          platformId={formData.platformId}
-          onClose={() => setShowInstallDialog(false)}
-          onSuccess={() => {
-            setSuccessMessage('Installation started! Follow the wizard on your display.');
-            // Reload the game data to show installation status
-            window.location.reload();
-          }}
-        />
-      )}
-
-      {/* Shortcut Selector Dialog */}
-      {showShortcutDialog && gameId && formData._originalGame?.installation?.installPath && (
-        <ShortcutSelectorDialog
-          gameId={gameId}
-          installPath={formData._originalGame.installation.installPath}
-          isOpen={showShortcutDialog}
-          onClose={() => setShowShortcutDialog(false)}
-          onSelectShortcut={handleSelectShortcut}
-          onBrowseManually={handleBrowseInstallDirectory}
-        />
-      )}
-
-      {/* File Explorer for browsing installation directory */}
-      {showFileExplorer && formData._originalGame?.installation?.installPath && (
-        <FileExplorer
-          isOpen={showFileExplorer}
-          onClose={() => setShowFileExplorer(false)}
-          onSelect={handleFileExplorerSelect}
-          selectMode="file"
-          title="Select Game Executable"
-        />
-      )}
-
-      {/* File Explorer for selecting ROM files */}
-      {showRomFileExplorer && (
-        <FileExplorer
-          isOpen={showRomFileExplorer}
-          onClose={() => setShowRomFileExplorer(false)}
-          onSelect={handleRomFileSelect}
-          selectMode="file"
-          title="Select ROM File (.d64, .d81, .t64, .prg, .crt, .tap, .g64, .zip)"
-        />
-      )}
-
-      {/* Container Logs Dialog */}
-      {showLogsDialog && gameId && (
-        <ContainerLogsDialog
-          gameId={gameId}
-          onClose={() => setShowLogsDialog(false)}
-        />
-      )}
     </form>
   );
 }

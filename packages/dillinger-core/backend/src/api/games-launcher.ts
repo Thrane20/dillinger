@@ -415,6 +415,10 @@ router.post('/:id/debug', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Game not found' });
     }
 
+    if (!game.platformId) {
+      return res.status(400).json({ error: 'Game has no platform configured' });
+    }
+
     // Get platform from storage
     const platform = await storage.readEntity<Platform>('platforms', game.platformId);
     if (!platform) {
@@ -474,6 +478,10 @@ router.post('/:id/registry-setup', async (req: Request, res: Response) => {
     // Check if game is installed
     if (game.installation?.status !== 'installed') {
       return res.status(400).json({ error: 'Game must be installed first' });
+    }
+
+    if (!game.platformId) {
+      return res.status(400).json({ error: 'Game has no platform configured' });
     }
 
     // Get platform from storage

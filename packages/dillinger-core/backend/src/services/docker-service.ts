@@ -376,7 +376,7 @@ export class DockerService {
       console.log(`  Converted Linux path: ${gameExecutable}`);
       console.log(`  Wine command: ${cmdArray.join(' ')}`);
       console.log(`  Container working dir: ${containerWorkingDir}`);
-    } else if (viceEmulators[game.platformId]) {
+    } else if (game.platformId && viceEmulators[game.platformId]) {
       // For Commodore emulator games (C64, C128, VIC-20, Plus/4, PET)
       const emulatorCmd = viceEmulators[game.platformId];
       
@@ -402,7 +402,7 @@ export class DockerService {
       console.log(`  Emulator: ${emulatorCmd}`);
       console.log(`  ROM file: ${romPath}`);
       console.log(`  Command: ${cmdArray.join(' ')}`);
-    } else if (amigaEmulators[game.platformId]) {
+    } else if (game.platformId && amigaEmulators[game.platformId]) {
       // For Amiga emulator games
       const emulatorCmd = amigaEmulators[game.platformId];
       
@@ -628,9 +628,10 @@ export class DockerService {
     if (platform.type === 'wine') {
       // Extract the base directory from the game's filePath
       // filePath is like "close-combat-iii-the-russian-front" or "games/my-game"
-      const gameBasePath = game.filePath.split('/')[0]; // Get first segment
-      const installBasePath = game.filePath.includes('/') 
-        ? game.filePath.substring(0, game.filePath.lastIndexOf('/'))
+      const filePath = game.filePath || '';
+      const gameBasePath = filePath.split('/')[0]; // Get first segment
+      const installBasePath = filePath.includes('/') 
+        ? filePath.substring(0, filePath.lastIndexOf('/'))
         : '';
       
       // For now, assume Wine prefix is in /mnt/linuxfast/dillinger_installed
@@ -642,7 +643,7 @@ export class DockerService {
       );
       
       console.log(`  Wine prefix: ${winePrefixPath}`);
-    } else if (viceEmulators[game.platformId] || amigaEmulators[game.platformId]) {
+    } else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId])) {
       // For emulator games (VICE Commodore or FS-UAE Amiga), create a per-game home directory
       // This allows each game to have its own emulator config, saves, screenshots, etc.
       const dillingerRoot = this.storage.getDillingerRoot();
@@ -693,7 +694,7 @@ export class DockerService {
       console.log(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
     } 
     // For Commodore and Amiga emulator games, mount the ROM file directory and per-game home
-    else if ((viceEmulators[game.platformId] || amigaEmulators[game.platformId]) && game.filePath) {
+    else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId]) && game.filePath) {
       const romDir = path.dirname(game.filePath);
       binds.push(`${romDir}:/roms:ro`);
       console.log(`  Mounting ROM directory: ${romDir} -> /roms`);
@@ -857,7 +858,7 @@ export class DockerService {
         `wineprefix-${gameIdentifier}`
       );
       console.log(`  Debug Wine prefix: ${winePrefixPath}`);
-    } else if (viceEmulators[game.platformId]) {
+    } else if (game.platformId && viceEmulators[game.platformId]) {
       // For emulator games, prepare the per-game home directory
       const dillingerRoot = this.storage.getDillingerRoot();
       const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
@@ -920,7 +921,7 @@ export class DockerService {
     
     if (platform.type === 'wine' && winePrefixPath) {
       binds.push(`${winePrefixPath}:/wineprefix:rw`);
-    } else if (viceEmulators[game.platformId] && emulatorHomePath) {
+    } else if (game.platformId && viceEmulators[game.platformId] && emulatorHomePath) {
       // Mount emulator home for debug session
       binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
       // Also mount ROM directory if available

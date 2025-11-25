@@ -307,6 +307,7 @@ router.post('/save', async (req, res) => {
       slug: gameData.slug || slug,
       filePath: '', // Empty until user configures launch
       platformId: '', // Empty until user configures platform
+      platforms: [],
       collectionIds: [],
       tags: gameData.genres || [],
       metadata: {
