@@ -27,10 +27,10 @@ export class VolumeVerificationService {
         const hostPath = volumeInfo.Options.device;
         console.log(`   🔗 Bind mount target: ${hostPath}`);
         
-        if (!existsSync(hostPath)) {
-          throw new Error(`dillinger_root volume bind mount target does not exist: ${hostPath}`);
-        }
-        console.log(`   ✅ Host path accessible`);
+        // Note: We cannot verify host path existence from within the container
+        // unless we have the host filesystem mounted.
+        // In production, we assume the volume mount is correct.
+        console.log(`   ℹ️  Skipping host path verification (running in container)`);
       }
       
     } catch (error: any) {

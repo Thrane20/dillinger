@@ -1,7 +1,9 @@
 # Dependencies
 node_modules/
-.pnp
-.pnp.js
+**/node_modules/
+.pnpm
+.pnpm.js
+.pnpm-store/
 
 # Build outputs
 dist/
@@ -32,6 +34,7 @@ coverage/
 # Temporary files
 tmp/
 temp/
+packages/dillinger-core/backend/data/
 
 # Editor files
 .vscode/

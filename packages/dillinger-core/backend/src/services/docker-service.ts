@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import type { Game, Platform } from '@dillinger/shared';
 import { JSONStorageService } from './storage.js';
 import { SettingsService } from './settings.js';
+import { logger } from './logger.js';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -43,6 +44,8 @@ export class DockerService {
   // When running in a devcontainer, /workspaces/dillinger maps to a host path
   // We need to detect this and use the host path for Docker volumes
   private workspaceHostPath: string | null = null;
+  private installVolumeHostPath: string | null = null;
+  private mounts: any[] = []; // Store all mounts for path translation
 
   private constructor() {
     this.storage = JSONStorageService.getInstance();
@@ -54,6 +57,42 @@ export class DockerService {
       DockerService.instance = new DockerService();
     }
     return DockerService.instance;
+  }
+
+  /**
+   * Get the host path for the dillinger_installed volume
+   * This is needed for mounting subdirectories (Wine prefixes)
+   */
+  private async getInstallVolumeHostPath(): Promise<string> {
+    if (this.installVolumeHostPath) {
+      return this.installVolumeHostPath;
+    }
+
+    // Try env var first
+    if (process.env.DILLINGER_INSTALLED_HOST_PATH) {
+      this.installVolumeHostPath = process.env.DILLINGER_INSTALLED_HOST_PATH;
+      logger.info(`Using configured install volume path: ${this.installVolumeHostPath}`);
+      return this.installVolumeHostPath;
+    }
+
+    // Try to inspect the volume
+    try {
+      const volume = docker.getVolume('dillinger_installed');
+      const info = await volume.inspect();
+      if (info.Mountpoint) {
+        this.installVolumeHostPath = info.Mountpoint;
+        logger.info(`Detected dillinger_installed volume at: ${this.installVolumeHostPath}`);
+        return this.installVolumeHostPath;
+      }
+    } catch (err) {
+      // Volume might not exist or other error
+      logger.warn('Could not inspect dillinger_installed volume, falling back to default path');
+    }
+
+    // Fallback to default
+    this.installVolumeHostPath = '/mnt/linuxfast/dillinger_installed';
+    logger.info(`Using default install volume path: ${this.installVolumeHostPath}`);
+    return this.installVolumeHostPath;
   }
 
   /**
@@ -109,7 +148,7 @@ export class DockerService {
     // First, try environment variable override
     if (process.env.HOST_WORKSPACE_PATH) {
       this.workspaceHostPath = process.env.HOST_WORKSPACE_PATH;
-      console.log(`✓ Using HOST_WORKSPACE_PATH from env: ${this.workspaceHostPath}`);
+      logger.info(`✓ Using HOST_WORKSPACE_PATH from env: ${this.workspaceHostPath}`);
       return;
     }
     
@@ -118,13 +157,14 @@ export class DockerService {
       const os = await import('os');
       const hostname = os.hostname();
       
-      console.log(`Detecting host path for container: ${hostname}`);
+      logger.info(`Detecting host path for container: ${hostname}`);
       
       // Inspect the current container to find the workspace mount
       const container = docker.getContainer(hostname);
       const info = await container.inspect();
       
-      console.log(`Found ${info.Mounts?.length || 0} mounts in container`);
+      this.mounts = info.Mounts || []; // Store mounts for general translation
+      logger.info(`Found ${info.Mounts?.length || 0} mounts in container`);
       
       // Find the mount for /workspaces/dillinger
       const workspaceMount = info.Mounts?.find((mount: any) => 
@@ -133,18 +173,18 @@ export class DockerService {
       
       if (workspaceMount) {
         this.workspaceHostPath = workspaceMount.Source;
-        console.log(`✓ Detected host workspace path: ${this.workspaceHostPath}`);
+        logger.info(`✓ Detected host workspace path: ${this.workspaceHostPath}`);
       } else {
         this.workspaceHostPath = ''; // Mark as checked but not found
-        console.log('⚠ Not running in devcontainer, using container paths directly');
-        console.log('Available mounts:', info.Mounts?.map((m: any) => m.Destination).join(', '));
+        logger.warn('⚠ Not running in devcontainer, using container paths directly');
+        logger.info('Available mounts: ' + info.Mounts?.map((m: any) => m.Destination).join(', '));
       }
     } catch (error: any) {
       // Not running in a container or can't detect - use paths as-is
       this.workspaceHostPath = ''; // Mark as checked but not found
-      console.log('⚠ Could not detect host path, using container paths');
-      console.log('Error details:', error.message);
-      console.log('💡 Tip: Set HOST_WORKSPACE_PATH environment variable to override');
+      logger.warn('⚠ Could not detect host path, using container paths');
+      logger.error('Error details: ' + error.message);
+      logger.info('💡 Tip: Set HOST_WORKSPACE_PATH environment variable to override');
     }
   }
   
@@ -156,9 +196,31 @@ export class DockerService {
       // Replace the container workspace path with the host workspace path
       const relativePath = containerPath.substring('/workspaces/dillinger'.length);
       const hostPath = this.workspaceHostPath + relativePath;
-      console.log(`  Path translation: ${containerPath} -> ${hostPath}`);
+      logger.debug(`  Path translation: ${containerPath} -> ${hostPath}`);
       return hostPath;
     }
+
+    // General path translation based on detected mounts
+    if (this.mounts && this.mounts.length > 0) {
+      // Sort mounts by destination length (descending) to match longest prefix first
+      const sortedMounts = [...this.mounts].sort((a, b) => b.Destination.length - a.Destination.length);
+      
+      for (const mount of sortedMounts) {
+        // Check if container path starts with mount destination
+        // Ensure we match directory boundaries (e.g. /data matches /data/foo but not /database)
+        if (containerPath === mount.Destination || containerPath.startsWith(mount.Destination + '/')) {
+          const relativePath = containerPath.substring(mount.Destination.length);
+          // If it's a named volume, we can't easily map it to a host path unless we know where volumes are stored
+          // But if Source is a path (bind mount), we can use it
+          if (mount.Type === 'bind' || mount.Source.startsWith('/')) {
+             const hostPath = mount.Source + relativePath;
+             logger.debug(`  Path translation (mount): ${containerPath} -> ${hostPath}`);
+             return hostPath;
+          }
+        }
+      }
+    }
+
     return containerPath;
   }
 
@@ -174,9 +236,9 @@ export class DockerService {
     // Convert to host path if running in devcontainer
     const hostGamePath = this.getHostPath(absoluteGamePath);
 
-    console.log(`Setting session volume to: ${absoluteGamePath}`);
+    logger.info(`Setting session volume to: ${absoluteGamePath}`);
     if (hostGamePath !== absoluteGamePath) {
-      console.log(`  Host path: ${hostGamePath}`);
+      logger.info(`  Host path: ${hostGamePath}`);
     }
 
     try {
@@ -185,14 +247,14 @@ export class DockerService {
       try {
         await volume.inspect();
         // Volume exists, remove it first
-        console.log(`Removing existing ${this.SESSION_VOLUME} volume`);
+        logger.info(`Removing existing ${this.SESSION_VOLUME} volume`);
         
         try {
           await volume.remove();
         } catch (removeErr: any) {
           if (removeErr.statusCode === 409) {
             // Volume is in use, find and remove containers using it
-            console.log(`Volume in use, cleaning up containers...`);
+            logger.info(`Volume in use, cleaning up containers...`);
             await this.cleanupVolumeContainers();
             
             // Try removing volume again
@@ -209,7 +271,7 @@ export class DockerService {
       }
 
       // Create new volume with bind mount to game directory
-      console.log(`Creating ${this.SESSION_VOLUME} volume bound to ${hostGamePath}`);
+      logger.info(`Creating ${this.SESSION_VOLUME} volume bound to ${hostGamePath}`);
       await docker.createVolume({
         Name: this.SESSION_VOLUME,
         Driver: 'local',
@@ -220,9 +282,9 @@ export class DockerService {
         }
       });
 
-      console.log(`✓ Session volume configured for ${gamePath}`);
+      logger.info(`✓ Session volume configured for ${gamePath}`);
     } catch (error) {
-      console.error('Error setting session volume:', error);
+      logger.error('Error setting session volume:', error);
       throw new Error(`Failed to configure session volume: ${error}`);
     }
   }
@@ -237,9 +299,9 @@ export class DockerService {
     // Convert to host path if running in devcontainer
     const hostPath = this.getHostPath(absolutePath);
 
-    console.log(`Setting session volume to absolute path: ${absolutePath}`);
+    logger.info(`Setting session volume to absolute path: ${absolutePath}`);
     if (hostPath !== absolutePath) {
-      console.log(`  Host path: ${hostPath}`);
+      logger.info(`  Host path: ${hostPath}`);
     }
 
     try {
@@ -248,14 +310,14 @@ export class DockerService {
       try {
         await volume.inspect();
         // Volume exists, remove it first
-        console.log(`Removing existing ${this.SESSION_VOLUME} volume`);
+        logger.info(`Removing existing ${this.SESSION_VOLUME} volume`);
         
         try {
           await volume.remove();
         } catch (removeErr: any) {
           if (removeErr.statusCode === 409) {
             // Volume is in use, find and remove containers using it
-            console.log(`Volume in use, cleaning up containers...`);
+            logger.info(`Volume in use, cleaning up containers...`);
             await this.cleanupVolumeContainers();
             
             // Try removing volume again
@@ -272,7 +334,7 @@ export class DockerService {
       }
 
       // Create new volume with bind mount to absolute path
-      console.log(`Creating ${this.SESSION_VOLUME} volume bound to ${hostPath}`);
+      logger.info(`Creating ${this.SESSION_VOLUME} volume bound to ${hostPath}`);
       await docker.createVolume({
         Name: this.SESSION_VOLUME,
         Driver: 'local',
@@ -283,9 +345,9 @@ export class DockerService {
         }
       });
 
-      console.log(`✓ Session volume configured for ${absolutePath}`);
+      logger.info(`✓ Session volume configured for ${absolutePath}`);
     } catch (error) {
-      console.error('Error setting session volume:', error);
+      logger.error('Error setting session volume:', error);
       throw new Error(`Failed to configure session volume: ${error}`);
     }
   }
@@ -370,12 +432,12 @@ export class DockerService {
       // Working directory doesn't matter - WINEPREFIX handles it
       containerWorkingDir = '/wineprefix';
       
-      console.log(`Launching game: ${game.title}`);
-      console.log(`  Container Image: ${platform.configuration.containerImage}`);
-      console.log(`  Original Windows path: ${launchCommand}`);
-      console.log(`  Converted Linux path: ${gameExecutable}`);
-      console.log(`  Wine command: ${cmdArray.join(' ')}`);
-      console.log(`  Container working dir: ${containerWorkingDir}`);
+      logger.info(`Launching game: ${game.title}`);
+      logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+      logger.info(`  Original Windows path: ${launchCommand}`);
+      logger.info(`  Converted Linux path: ${gameExecutable}`);
+      logger.info(`  Wine command: ${cmdArray.join(' ')}`);
+      logger.info(`  Container working dir: ${containerWorkingDir}`);
     } else if (game.platformId && viceEmulators[game.platformId]) {
       // For Commodore emulator games (C64, C128, VIC-20, Plus/4, PET)
       const emulatorCmd = viceEmulators[game.platformId];
@@ -397,11 +459,11 @@ export class DockerService {
       cmdArray = [emulatorCmd, `/roms/${romFilename}`];
       containerWorkingDir = '/home/gameuser';
       
-      console.log(`Launching Commodore game: ${game.title}`);
-      console.log(`  Container Image: ${platform.configuration.containerImage}`);
-      console.log(`  Emulator: ${emulatorCmd}`);
-      console.log(`  ROM file: ${romPath}`);
-      console.log(`  Command: ${cmdArray.join(' ')}`);
+      logger.info(`Launching Commodore game: ${game.title}`);
+      logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+      logger.info(`  Emulator: ${emulatorCmd}`);
+      logger.info(`  ROM file: ${romPath}`);
+      logger.info(`  Command: ${cmdArray.join(' ')}`);
     } else if (game.platformId && amigaEmulators[game.platformId]) {
       // For Amiga emulator games
       const emulatorCmd = amigaEmulators[game.platformId];
@@ -440,14 +502,14 @@ export class DockerService {
       // Note: We add it to the environment map so it gets included in the env array later
       environment['FSUAE_AMIGA_MODEL'] = amigaModel;
       
-      console.log(`Launching Amiga game: ${game.title}`);
-      console.log(`  Platform ID: ${game.platformId}`);
-      console.log(`  Amiga Model: ${amigaModel}`);
-      console.log(`  Container Image: ${platform.configuration.containerImage}`);
-      console.log(`  Emulator: ${emulatorCmd}`);
-      console.log(`  Model: ${amigaModel}`);
-      console.log(`  ROM file: ${romPath}`);
-      console.log(`  Command: ${cmdArray.join(' ')}`);
+      logger.info(`Launching Amiga game: ${game.title}`);
+      logger.info(`  Platform ID: ${game.platformId}`);
+      logger.info(`  Amiga Model: ${amigaModel}`);
+      logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+      logger.info(`  Emulator: ${emulatorCmd}`);
+      logger.info(`  Model: ${amigaModel}`);
+      logger.info(`  ROM file: ${romPath}`);
+      logger.info(`  Command: ${cmdArray.join(' ')}`);
     } else {
       // For native Linux games, construct the path normally
       gameExecutable = path.posix.join('/game', launchCommand);
@@ -459,11 +521,11 @@ export class DockerService {
       cmdArray = [gameExecutable, ...cleanArgs];
       containerWorkingDir = '/game';
       
-      console.log(`Launching game: ${game.title}`);
-      console.log(`  Container Image: ${platform.configuration.containerImage}`);
-      console.log(`  Executable: ${gameExecutable}`);
-      console.log(`  Arguments: ${cleanArgs.join(' ') || '(none)'}`);
-      console.log(`  Working directory: ${containerWorkingDir}`);
+      logger.info(`Launching game: ${game.title}`);
+      logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+      logger.info(`  Executable: ${gameExecutable}`);
+      logger.info(`  Arguments: ${cleanArgs.join(' ') || '(none)'}`);
+      logger.info(`  Working directory: ${containerWorkingDir}`);
     }
 
     // Prepare environment variables
@@ -481,7 +543,7 @@ export class DockerService {
       env.push('INSTALL_DXVK=true');
       // Enable DXVK HUD for verification (shows GPU info, driver, FPS)
       env.push('DXVK_HUD=devinfo,fps');
-      console.log(`  DXVK enabled (DirectX to Vulkan translation)`);
+      logger.info(`  DXVK enabled (DirectX to Vulkan translation)`);
     }
 
     // Add Wine DLL overrides if configured
@@ -490,13 +552,13 @@ export class DockerService {
         .map(([dll, mode]) => `${dll}=${mode}`)
         .join(';');
       env.push(`WINE_DLL_OVERRIDES=${dllOverrides}`);
-      console.log(`  Wine DLL overrides: ${dllOverrides}`);
+      logger.info(`  Wine DLL overrides: ${dllOverrides}`);
     }
 
     // Add Wine compatibility mode if configured
     if (wineConfig?.compatibilityMode && wineConfig.compatibilityMode !== 'none') {
       env.push(`WINE_COMPAT_MODE=${wineConfig.compatibilityMode}`);
-      console.log(`  Wine compatibility mode: ${wineConfig.compatibilityMode}`);
+      logger.info(`  Wine compatibility mode: ${wineConfig.compatibilityMode}`);
     }
 
     // Add Gamescope configuration if enabled
@@ -522,15 +584,15 @@ export class DockerService {
         env.push(`GAMESCOPE_FPS_LIMIT=${gamescopeConfig.limitFps}`);
       }
       
-      console.log(`  Gamescope enabled: ${gamescopeConfig.width}x${gamescopeConfig.height}@${gamescopeConfig.refreshRate}Hz`);
-      console.log(`  Gamescope upscaler: ${gamescopeConfig.upscaler || 'auto'}`);
+      logger.info(`  Gamescope enabled: ${gamescopeConfig.width}x${gamescopeConfig.height}@${gamescopeConfig.refreshRate}Hz`);
+      logger.info(`  Gamescope upscaler: ${gamescopeConfig.upscaler || 'auto'}`);
     }
 
     // Add MangoHUD configuration if enabled
     const mangoHudConfig = game.settings?.mangohud;
     if (mangoHudConfig?.enabled) {
       env.push('ENABLE_MANGOHUD=true');
-      console.log(`  MangoHUD overlay enabled`);
+      logger.info(`  MangoHUD overlay enabled`);
     }
 
     // Add Moonlight streaming configuration if enabled
@@ -562,10 +624,10 @@ export class DockerService {
         env.push(`MOONLIGHT_AUDIO_CODEC=${moonlightConfig.audioCodec}`);
       }
       
-      console.log(`  Moonlight streaming enabled`);
-      console.log(`  Moonlight quality: ${moonlightConfig.quality || 'custom'}`);
+      logger.info(`  Moonlight streaming enabled`);
+      logger.info(`  Moonlight quality: ${moonlightConfig.quality || 'custom'}`);
       if (moonlightConfig.bitrate) {
-        console.log(`  Moonlight bitrate: ${moonlightConfig.bitrate}Mbps`);
+        logger.info(`  Moonlight bitrate: ${moonlightConfig.bitrate}Mbps`);
       }
     }
 
@@ -603,20 +665,20 @@ export class DockerService {
       // Add xrandr resolution setting if requested
       if (useXrandr) {
         env.push(`XRANDR_MODE=${xrandrMode}`);
-        console.log(`  xrandr mode will be set to: ${xrandrMode}`);
+        logger.info(`  xrandr mode will be set to: ${xrandrMode}`);
       }
       
-      console.log(`  WINEDEBUG=${wineDebug}`);
-      console.log(`  GAME_EXECUTABLE=${gameExecutable}`);
-      console.log(`  GAME_ARGS=${cleanArgs || '(none)'}`);
+      logger.info(`  WINEDEBUG=${wineDebug}`);
+      logger.info(`  GAME_EXECUTABLE=${gameExecutable}`);
+      logger.info(`  GAME_ARGS=${cleanArgs || '(none)'}`);
     }
 
     // Get display forwarding configuration
     const displayConfig = await this.getDisplayConfiguration();
     env.push(...displayConfig.env);
     
-    console.log(`  Display mode: ${displayConfig.mode}`);
-    console.log(`  WINEPREFIX will be set to: /wineprefix`);
+    logger.info(`  Display mode: ${displayConfig.mode}`);
+    logger.info(`  WINEPREFIX will be set to: /wineprefix`);
     
     // Determine Wine prefix path if this is a Wine game
     // The game files are in the filePath (e.g., "close-combat-iii-the-russian-front")
@@ -634,15 +696,14 @@ export class DockerService {
         ? filePath.substring(0, filePath.lastIndexOf('/'))
         : '';
       
-      // For now, assume Wine prefix is in /mnt/linuxfast/dillinger_installed
-      // TODO: Make this configurable
-      const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
+      // Get host install path dynamically
+      const hostInstallPath = await this.getInstallVolumeHostPath();
       winePrefixPath = path.posix.join(
         this.getHostPath(hostInstallPath),
         `wineprefix-${gameIdentifier}`
       );
       
-      console.log(`  Wine prefix: ${winePrefixPath}`);
+      logger.info(`  Wine prefix: ${winePrefixPath}`);
     } else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId])) {
       // For emulator games (VICE Commodore or FS-UAE Amiga), create a per-game home directory
       // This allows each game to have its own emulator config, saves, screenshots, etc.
@@ -666,16 +727,22 @@ export class DockerService {
         // This prevents Docker from creating it as root when mounting pulse/cookie
         const pulseDir = path.join(emulatorHomePath, '.config', 'pulse');
         await fs.ensureDir(pulseDir);
+
+        // Pre-create .cache directory for applications that expect it (like VICE)
+        const cacheDir = path.join(emulatorHomePath, '.cache');
+        await fs.ensureDir(cacheDir);
         
         // Set permissions so the container user can write to it
-        await chmod(emulatorHomePath, 0o755);
-        await chmod(path.join(emulatorHomePath, '.config'), 0o755);
-        await chmod(pulseDir, 0o755);
-        console.log(`  Emulator home directory: ${emulatorHomePath}`);
+        // Use 777 to ensure the container user (uid 1000) can write even if created by root
+        await chmod(emulatorHomePath, 0o777);
+        await chmod(path.join(emulatorHomePath, '.config'), 0o777);
+        await chmod(pulseDir, 0o777);
+        await chmod(cacheDir, 0o777);
+        logger.info(`  Emulator home directory: ${emulatorHomePath}`);
       } catch (error: any) {
-        console.error(`  ✗ Failed to create emulator home directory: ${error.message}`);
-        console.error(`    Path: ${emulatorHomePath}`);
-        console.error(`    Error code: ${error.code}`);
+        logger.error(`  ✗ Failed to create emulator home directory: ${error.message}`);
+        logger.error(`    Path: ${emulatorHomePath}`);
+        logger.error(`    Error code: ${error.code}`);
         // Don't mount if we can't create the directory
         emulatorHomePath = null;
       }
@@ -691,19 +758,19 @@ export class DockerService {
     // For Wine games, mount the Wine prefix
     if (platform.type === 'wine' && winePrefixPath) {
       binds.push(`${winePrefixPath}:/wineprefix:rw`);
-      console.log(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
+      logger.info(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
     } 
     // For Commodore and Amiga emulator games, mount the ROM file directory and per-game home
     else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId]) && game.filePath) {
       const romDir = path.dirname(game.filePath);
       binds.push(`${romDir}:/roms:ro`);
-      console.log(`  Mounting ROM directory: ${romDir} -> /roms`);
+      logger.info(`  Mounting ROM directory: ${romDir} -> /roms`);
       
       // Mount per-game home directory for emulator config and saves
       // IMPORTANT: Mount this BEFORE displayConfig.volumes so individual files can overlay
       if (emulatorHomePath) {
         binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
-        console.log(`  Mounting emulator home: ${emulatorHomePath} -> /home/gameuser`);
+        logger.info(`  Mounting emulator home: ${emulatorHomePath} -> /home/gameuser`);
       }
 
       // Mount BIOS directory for Amiga
@@ -716,18 +783,18 @@ export class DockerService {
            const fs = await import('fs-extra');
            await fs.ensureDir(biosPath);
          } catch (err) {
-           console.warn(`Could not ensure BIOS directory exists: ${biosPath}`, err);
+           logger.warn(`Could not ensure BIOS directory exists: ${biosPath}`, err);
          }
 
          const hostBiosPath = this.getHostPath(biosPath);
          binds.push(`${hostBiosPath}:/bios:ro`);
-         console.log(`  Mounting BIOS directory: ${hostBiosPath} -> /bios`);
+         logger.info(`  Mounting BIOS directory: ${hostBiosPath} -> /bios`);
       }
     } 
     // For other games, mount the game directory
     else {
       binds.push(`${this.SESSION_VOLUME}:/game:ro`);
-      console.log(`  Mounting game directory: ${this.SESSION_VOLUME} -> /game`);
+      logger.info(`  Mounting game directory: ${this.SESSION_VOLUME} -> /game`);
     }
     
     // Add display configuration volumes AFTER game-specific mounts
@@ -782,7 +849,7 @@ export class DockerService {
           '48200/udp': [{ HostPort: '48200' }],
         };
         
-        console.log(`  Moonlight ports exposed: 47984, 47989, 47999, 48010, 48100, 48200`);
+        logger.info(`  Moonlight ports exposed: 47984, 47989, 47999, 48010, 48100, 48200`);
       }
       
       // Pass the command array to the container
@@ -795,9 +862,9 @@ export class DockerService {
       
       const info = await container.inspect();
 
-      console.log(`✓ Game container started: ${container.id}`);
-      console.log(`  Container ID: ${info.Id}`);
-      console.log(`  Status: ${info.State.Status}`);
+      logger.info(`✓ Game container started: ${container.id}`);
+      logger.info(`  Container ID: ${info.Id}`);
+      logger.info(`  Status: ${info.State.Status}`);
 
       return {
         containerId: info.Id,
@@ -805,7 +872,7 @@ export class DockerService {
         createdAt: info.Created,
       };
     } catch (error) {
-      console.error('Error launching game container:', error);
+      logger.error('Error launching game container:', error);
       throw new Error(`Failed to launch game: ${error}`);
     }
   }
@@ -852,12 +919,12 @@ export class DockerService {
     };
     
     if (platform.type === 'wine') {
-      const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
+      const hostInstallPath = await this.getInstallVolumeHostPath();
       winePrefixPath = path.posix.join(
         this.getHostPath(hostInstallPath),
         `wineprefix-${gameIdentifier}`
       );
-      console.log(`  Debug Wine prefix: ${winePrefixPath}`);
+      logger.info(`  Debug Wine prefix: ${winePrefixPath}`);
     } else if (game.platformId && viceEmulators[game.platformId]) {
       // For emulator games, prepare the per-game home directory
       const dillingerRoot = this.storage.getDillingerRoot();
@@ -883,10 +950,10 @@ export class DockerService {
         await chmod(emulatorHomePath, 0o755);
         await chmod(path.join(emulatorHomePath, '.config'), 0o755);
         await chmod(pulseDir, 0o755);
-        console.log(`  Debug emulator home: ${emulatorHomePath}`);
+        logger.info(`  Debug emulator home: ${emulatorHomePath}`);
       } catch (error: any) {
-        console.error(`  ✗ Failed to create debug emulator home directory: ${error.message}`);
-        console.error(`    Path: ${emulatorHomePath}`);
+        logger.error(`  ✗ Failed to create debug emulator home directory: ${error.message}`);
+        logger.error(`    Path: ${emulatorHomePath}`);
         emulatorHomePath = null;
       }
     }
@@ -910,7 +977,7 @@ export class DockerService {
       env.push('WINEPREFIX=/wineprefix');
       env.push(`WINEDEBUG=${wineDebug}`);
       
-      console.log(`  WINEDEBUG=${wineDebug}`);
+      logger.info(`  WINEDEBUG=${wineDebug}`);
     }
 
     // Setup volume binds
@@ -955,8 +1022,8 @@ export class DockerService {
       await container.start();
       const info = await container.inspect();
 
-      console.log(`✓ Debug container started: ${container.id}`);
-      console.log(`  Container ID: ${info.Id}`);
+      logger.info(`✓ Debug container started: ${container.id}`);
+      logger.info(`  Container ID: ${info.Id}`);
 
       // Generate the docker exec command for interactive access
       const execCommand = `docker exec -it ${info.Id.substring(0, 12)} /bin/bash`;
@@ -968,7 +1035,7 @@ export class DockerService {
         execCommand,
       };
     } catch (error) {
-      console.error('Error launching debug container:', error);
+      logger.error('Error launching debug container:', error);
       throw new Error(`Failed to launch debug container: ${error}`);
     }
   }
@@ -985,7 +1052,7 @@ export class DockerService {
     }
 
     const gameIdentifier = game.slug || game.id;
-    const hostInstallPath = '/mnt/linuxfast/dillinger_installed';
+    const hostInstallPath = await this.getInstallVolumeHostPath();
     const winePrefixPath = path.posix.join(
       this.getHostPath(hostInstallPath),
       `wineprefix-${gameIdentifier}`
@@ -998,7 +1065,7 @@ export class DockerService {
     const gameDirPath = path.dirname(windowsPath.replace(/\\/g, '/')); // Get directory
     const gameInstallPath = path.posix.join(winePrefixPath, 'drive_c', gameDirPath.substring(1)); // Remove leading /
 
-    console.log(`Looking for registry files in: ${gameInstallPath}`);
+    logger.info(`Looking for registry files in: ${gameInstallPath}`);
 
     // Look for registry setup files
     const { readdir, readFile, writeFile } = await import('fs/promises');
@@ -1014,7 +1081,7 @@ export class DockerService {
         return { success: false, message: 'No registry setup files found (looking for .cmd/.bat files with "reg" or "setup" in name)' };
       }
 
-      console.log(`Found registry setup files: ${regSetupFiles.join(', ')}`);
+      logger.info(`Found registry setup files: ${regSetupFiles.join(', ')}`);
 
       // Process the first registry file found
       const regFile = regSetupFiles[0];
@@ -1032,7 +1099,7 @@ export class DockerService {
       const regFilePath = path.join(gameInstallPath, 'dillinger_setup.reg');
       await writeFile(regFilePath, regContent, 'utf-8');
       
-      console.log(`Converted ${regFile} to dillinger_setup.reg`);
+      logger.info(`Converted ${regFile} to dillinger_setup.reg`);
 
       // Run wine regedit in a temporary container
       const displayConfig = await this.getDisplayConfiguration();
@@ -1062,7 +1129,7 @@ export class DockerService {
         WorkingDir: '/game',
       };
 
-      console.log(`Running: wine regedit /S dillinger_setup.reg (WINEDEBUG=${wineDebug})`);
+      logger.info(`Running: wine regedit /S dillinger_setup.reg (WINEDEBUG=${wineDebug})`);
       
       const container = await docker.createContainer(containerConfig);
       
@@ -1070,15 +1137,15 @@ export class DockerService {
       const result = await container.wait();
 
       if (result.StatusCode === 0) {
-        console.log(`✓ Successfully imported registry settings from ${regFile}`);
+        logger.info(`✓ Successfully imported registry settings from ${regFile}`);
         return { success: true, message: `Registry settings imported from ${regFile}` };
       } else {
-        console.error(`Failed to import registry settings, exit code: ${result.StatusCode}`);
+        logger.error(`Failed to import registry settings, exit code: ${result.StatusCode}`);
         return { success: false, message: `Failed to import registry settings (exit code: ${result.StatusCode})` };
       }
 
     } catch (error: any) {
-      console.error('Error running registry setup:', error);
+      logger.error('Error running registry setup:', error);
       return { success: false, message: `Error: ${error.message}` };
     }
   }
@@ -1101,8 +1168,8 @@ export class DockerService {
       }
     }
     
-    console.log(`Found regpath variable: ${regpathValue}`);
-    console.log(`Total lines in CMD file: ${lines.length}`);
+    logger.info(`Found regpath variable: ${regpathValue}`);
+    logger.info(`Total lines in CMD file: ${lines.length}`);
     
     let processedCount = 0;
     let skippedCount = 0;
@@ -1125,8 +1192,8 @@ export class DockerService {
         trimmed = trimmed.replace(/%regpath%/gi, `"${regpathValue}"`);
       }
       
-      console.log(`[${processedCount}] Original: ${originalLine.substring(0, 80)}`);
-      console.log(`[${processedCount}] After replace: ${trimmed.substring(0, 100)}`);
+      logger.debug(`[${processedCount}] Original: ${originalLine.substring(0, 80)}`);
+      logger.debug(`[${processedCount}] After replace: ${trimmed.substring(0, 100)}`);
       
       // Parse REG ADD commands - more flexible pattern
       // Matches: REG ADD "path" /v "name" /t TYPE /d "data" /f [/reg:32]
@@ -1134,14 +1201,14 @@ export class DockerService {
       
       if (regAddMatch) {
         matchedCount++;
-        console.log(`[${processedCount}] MATCHED!`);
+        logger.debug(`[${processedCount}] MATCHED!`);
         const keyPath = regAddMatch[1];
         const valueName = regAddMatch[2];
         const valueType = regAddMatch[3];
         let valueData = regAddMatch[4]?.trim();
         
         if (!keyPath || !valueName || !valueType || !valueData) {
-          console.log(`Skipping line - missing data: ${trimmed}`);
+          logger.debug(`Skipping line - missing data: ${trimmed}`);
           continue;
         }
         
@@ -1170,14 +1237,14 @@ export class DockerService {
       }
     }
     
-    console.log(`\n=== CMD Parsing Summary ===`);
-    console.log(`Total lines: ${lines.length}`);
-    console.log(`Skipped: ${skippedCount}`);
-    console.log(`Processed: ${processedCount}`);
-    console.log(`Matched: ${matchedCount}`);
-    console.log(`===========================\n`);
+    logger.info(`\n=== CMD Parsing Summary ===`);
+    logger.info(`Total lines: ${lines.length}`);
+    logger.info(`Skipped: ${skippedCount}`);
+    logger.info(`Processed: ${processedCount}`);
+    logger.info(`Matched: ${matchedCount}`);
+    logger.info(`===========================\n`);
     
-    console.log(`Generated .reg file with ${regContent.split('\n').length} lines`);
+    logger.info(`Generated .reg file with ${regContent.split('\n').length} lines`);
     return regContent;
   }
 
@@ -1193,20 +1260,55 @@ export class DockerService {
     try {
       const container = docker.getContainer(containerId);
       
-      console.log(`🔍 Monitoring game container: ${containerId.substring(0, 12)}`);
+      logger.info(`🔍 Monitoring game container: ${containerId.substring(0, 12)}`);
+      
+      // Capture logs in real-time in case container is auto-removed
+      let capturedLogs: string[] = [];
+      try {
+        const stream = await container.logs({
+          follow: true,
+          stdout: true,
+          stderr: true,
+          tail: 100
+        });
+        
+        stream.on('data', (chunk) => {
+          capturedLogs.push(chunk.toString('utf8'));
+          if (capturedLogs.length > 200) capturedLogs.shift(); // Keep last 200 chunks
+        });
+      } catch (err) {
+        logger.warn(`Could not attach to container logs: ${err}`);
+      }
       
       // Wait for container to finish (this blocks until container stops)
       const result = await container.wait();
       
-      console.log(`✓ Game container stopped: ${containerId.substring(0, 12)}`);
-      console.log(`  Exit code: ${result.StatusCode}`);
+      logger.info(`✓ Game container stopped: ${containerId.substring(0, 12)}`);
+      logger.info(`  Exit code: ${result.StatusCode}`);
+      
+      // If exit code is non-zero, print the captured logs
+      if (result.StatusCode !== 0) {
+        logger.error(`=== CONTAINER LOGS (Last captured) ===`);
+        logger.error(capturedLogs.join('').trim());
+        logger.error(`======================================`);
+        
+        // Try to fetch from API as backup if captured logs are empty
+        if (capturedLogs.length === 0) {
+             try {
+                const logs = await this.getContainerLogs(containerId, 50);
+                logger.error(`=== CONTAINER LOGS (From API) ===\n${logs}\n=================================`);
+             } catch (e) {
+                logger.warn(`Could not fetch logs from API (container likely removed): ${e}`);
+             }
+        }
+      }
       
       // Call the callback if provided
       if (onStop) {
         await onStop(result.StatusCode);
       }
     } catch (error) {
-      console.error('Error monitoring game container:', error);
+      logger.error('Error monitoring game container:', error);
     }
   }
 
@@ -1221,11 +1323,11 @@ export class DockerService {
     // Ensure host path is detected
     await this.detectHostPath();
 
-    console.log(`Installing game with installer: ${installerPath}`);
-    console.log(`  Installation target: ${installPath}`);
-    console.log(`  Platform: ${platform.name} (${platform.type})`);
-    console.log(`  Container Image: ${platform.configuration.containerImage}`);
-    console.log(`  Game slug: ${game.slug || game.id}`);
+    logger.info(`Installing game with installer: ${installerPath}`);
+    logger.info(`  Installation target: ${installPath}`);
+    logger.info(`  Platform: ${platform.name} (${platform.type})`);
+    logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+    logger.info(`  Game slug: ${game.slug || game.id}`);
 
     // Convert paths to host paths if running in devcontainer
     const hostInstallerPath = this.getHostPath(installerPath);
@@ -1233,13 +1335,13 @@ export class DockerService {
 
     // Get display forwarding configuration
     const displayConfig = await this.getDisplayConfiguration();
-    console.log(`  Display mode: ${displayConfig.mode}`);
+    logger.info(`  Display mode: ${displayConfig.mode}`);
 
     // Use game slug (or ID if no slug) for Wine prefix directory
     const gameIdentifier = game.slug || game.id;
     const winePrefixPath = path.posix.join(hostInstallPath, `wineprefix-${gameIdentifier}`);
     
-    console.log(`  Wine prefix: ${winePrefixPath}`);
+    logger.info(`  Wine prefix: ${winePrefixPath}`);
 
     // For Wine installations, ensure the Wine prefix directory exists with proper permissions
     // We'll create it with a permissive mode so Wine can use it
@@ -1250,9 +1352,9 @@ export class DockerService {
         await fs.ensureDir(winePrefixPath);
         // Set permissions to 777 so Wine user in container can access it
         await fs.chmod(winePrefixPath, 0o777);
-        console.log(`  ✓ Wine prefix directory prepared with correct permissions`);
+        logger.info(`  ✓ Wine prefix directory prepared with correct permissions`);
       } catch (error) {
-        console.warn(`  ⚠ Could not prepare Wine prefix directory:`, error);
+        logger.warn(`  ⚠ Could not prepare Wine prefix directory:`, error);
         // Continue anyway - Wine will try to create it
       }
     }
@@ -1280,8 +1382,8 @@ export class DockerService {
         'DISPLAY_WINEPREFIX=1' // Signal to show Wine configuration if needed
       );
       
-      console.log(`  Wine architecture: ${wineArch}`);
-      console.log(`  WINEDEBUG=${wineDebug}`);
+      logger.info(`  Wine architecture: ${wineArch}`);
+      logger.info(`  WINEDEBUG=${wineDebug}`);
     }
 
     try {
@@ -1319,10 +1421,10 @@ export class DockerService {
       
       const info = await container.inspect();
 
-      console.log(`✓ Installation container started: ${container.id}`);
-      console.log(`  Container ID: ${info.Id}`);
-      console.log(`  Status: ${info.State.Status}`);
-      console.log(`  The installation GUI should now be visible on your display`);
+      logger.info(`✓ Installation container started: ${container.id}`);
+      logger.info(`  Container ID: ${info.Id}`);
+      logger.info(`  Status: ${info.State.Status}`);
+      logger.info(`  The installation GUI should now be visible on your display`);
 
       return {
         containerId: info.Id,
@@ -1330,7 +1432,7 @@ export class DockerService {
         createdAt: info.Created,
       };
     } catch (error) {
-      console.error('Error starting installation container:', error);
+      logger.error('Error starting installation container:', error);
       throw new Error(`Failed to start installer: ${error}`);
     }
   }
@@ -1347,7 +1449,7 @@ export class DockerService {
         await container.inspect();
       } catch (inspectError: any) {
         if (inspectError.statusCode === 404) {
-          console.log(`⚠️  Installation container ${containerId} no longer exists (auto-removed)`);
+          logger.info(`⚠️  Installation container ${containerId} no longer exists (auto-removed)`);
           // Container was auto-removed, assume it finished (we don't know the exit code)
           // Treat this as a failure since we can't verify success
           return { success: false, exitCode: 1 };
@@ -1356,10 +1458,10 @@ export class DockerService {
       }
       
       // Wait for container to finish
-      console.log(`🔍 Monitoring installation container: ${containerId}`);
+      logger.info(`🔍 Monitoring installation container: ${containerId}`);
       const result = await container.wait();
       
-      console.log(`✓ Installation container finished with exit code: ${result.StatusCode}`);
+      logger.info(`✓ Installation container finished with exit code: ${result.StatusCode}`);
       
       return {
         success: result.StatusCode === 0,
@@ -1367,10 +1469,10 @@ export class DockerService {
       };
     } catch (error: any) {
       if (error.statusCode === 404) {
-        console.log(`⚠️  Installation container ${containerId} no longer exists (auto-removed during wait)`);
+        logger.info(`⚠️  Installation container ${containerId} no longer exists (auto-removed during wait)`);
         return { success: false, exitCode: 1 };
       }
-      console.error('Error monitoring installation:', error);
+      logger.error('Error monitoring installation:', error);
       return { success: false, exitCode: -1 };
     }
   }
@@ -1383,7 +1485,7 @@ export class DockerService {
     const path = await import('path');
     
     try {
-      console.log(`🔍 Scanning for game executables in: ${installPath}`);
+      logger.info(`🔍 Scanning for game executables in: ${installPath}`);
       
       const executables: string[] = [];
       
@@ -1418,7 +1520,7 @@ export class DockerService {
                 
                 if (isMainExecutable) {
                   executables.push(relativePath);
-                  console.log(`  Found executable: ${relativePath}`);
+                  logger.info(`  Found executable: ${relativePath}`);
                 }
               }
             } else if (item.isDirectory()) {
@@ -1430,7 +1532,7 @@ export class DockerService {
             }
           }
         } catch (err) {
-          console.warn(`Could not scan directory ${dirPath}:`, err);
+          logger.warn(`Could not scan directory ${dirPath}:`, err);
         }
       };
       
@@ -1452,11 +1554,11 @@ export class DockerService {
         return scoreB - scoreA;
       });
       
-      console.log(`✓ Found ${executables.length} potential game executables`);
+      logger.info(`✓ Found ${executables.length} potential game executables`);
       return executables;
       
     } catch (error) {
-      console.error('Error scanning for executables:', error);
+      logger.error('Error scanning for executables:', error);
       return [];
     }
   }
@@ -1469,7 +1571,7 @@ export class DockerService {
     const path = await import('path');
     
     try {
-      console.log(`🔍 Scanning for shortcuts in: ${installPath}`);
+      logger.info(`🔍 Scanning for shortcuts in: ${installPath}`);
       
       const shortcuts: string[] = [];
       
@@ -1488,7 +1590,7 @@ export class DockerService {
               const ext = path.extname(item.name).toLowerCase();
               if (ext === '.lnk') {
                 shortcuts.push(relativePath);
-                console.log(`  Found shortcut: ${relativePath}`);
+                logger.info(`  Found shortcut: ${relativePath}`);
               }
             } else if (item.isDirectory()) {
               // Look in common shortcut directories
@@ -1499,17 +1601,17 @@ export class DockerService {
             }
           }
         } catch (err) {
-          console.warn(`Could not scan directory ${dirPath}:`, err);
+          logger.warn(`Could not scan directory ${dirPath}:`, err);
         }
       };
       
       await scanDirectory(installPath);
       
-      console.log(`✓ Found ${shortcuts.length} shortcut files`);
+      logger.info(`✓ Found ${shortcuts.length} shortcut files`);
       return shortcuts;
       
     } catch (error) {
-      console.error('Error scanning for shortcuts:', error);
+      logger.error('Error scanning for shortcuts:', error);
       return [];
     }
   }
@@ -1524,7 +1626,7 @@ export class DockerService {
     workingDirectory: string;
     description: string;
   } | null> {
-    console.log(`🔗 Parsing shortcut: ${shortcutPath}`);
+    logger.info(`🔗 Parsing shortcut: ${shortcutPath}`);
     
     try {
       const fs = await import('fs/promises');
@@ -1534,7 +1636,7 @@ export class DockerService {
       
       // Verify it's a valid .lnk file (starts with magic bytes)
       if (buffer.length < 76 || buffer.readUInt32LE(0) !== 0x0000004C) {
-        console.warn('Invalid .lnk file format');
+        logger.warn('Invalid .lnk file format');
         return null;
       }
       
@@ -1636,14 +1738,14 @@ export class DockerService {
         offset = nextPos;
       }
       
-      console.log(`✓ Parsed shortcut: ${result.target || 'No target found'}`);
-      console.log(`  Working dir: ${result.workingDirectory || 'None'}`);
-      console.log(`  Arguments: ${result.arguments || 'None'}`);
+      logger.info(`✓ Parsed shortcut: ${result.target || 'No target found'}`);
+      logger.info(`  Working dir: ${result.workingDirectory || 'None'}`);
+      logger.info(`  Arguments: ${result.arguments || 'None'}`);
       
       return result.target ? result : null;
       
     } catch (error) {
-      console.error('Error parsing shortcut:', error);
+      logger.error('Error parsing shortcut:', error);
       return null;
     }
   }
@@ -1666,12 +1768,12 @@ export class DockerService {
             sessionId = match[1];
           }
         } catch (err) {
-          console.warn('Could not extract session ID for cleanup:', err);
+          logger.warn('Could not extract session ID for cleanup:', err);
         }
       }
       
       await container.stop();
-      console.log(`✓ Game container stopped: ${containerId}`);
+      logger.info(`✓ Game container stopped: ${containerId}`);
       
       // Note: We don't clean up save volumes here anymore
       // Save volumes are game-based (dillinger_saves_<gameId>) and persist across sessions
@@ -1679,17 +1781,17 @@ export class DockerService {
     } catch (error: any) {
       // 304 means container is already stopped - this is fine
       if (error.statusCode === 304) {
-        console.log(`ℹ Game container already stopped: ${containerId}`);
+        logger.info(`ℹ Game container already stopped: ${containerId}`);
         return;
       }
       
       // 404 means container doesn't exist - also not really an error
       if (error.statusCode === 404) {
-        console.log(`ℹ Game container not found (may have been removed): ${containerId}`);
+        logger.info(`ℹ Game container not found (may have been removed): ${containerId}`);
         return;
       }
       
-      console.error('Error stopping game container:', error);
+      logger.error('Error stopping game container:', error);
       throw new Error(`Failed to stop game: ${error}`);
     }
   }
@@ -1707,29 +1809,29 @@ export class DockerService {
         }
       });
 
-      console.log(`Found ${allContainers.length} containers using ${this.SESSION_VOLUME}`);
+      logger.info(`Found ${allContainers.length} containers using ${this.SESSION_VOLUME}`);
 
       for (const containerInfo of allContainers) {
         const container = docker.getContainer(containerInfo.Id);
-        console.log(`Cleaning up container: ${containerInfo.Names[0]} (${containerInfo.Id.substring(0, 12)})`);
+        logger.info(`Cleaning up container: ${containerInfo.Names[0]} (${containerInfo.Id.substring(0, 12)})`);
         
         try {
           // Stop if running
           if (containerInfo.State === 'running') {
             await container.stop({ t: 2 }); // 2 second timeout
-            console.log(`  Stopped container`);
+            logger.info(`  Stopped container`);
           }
           
           // Remove the container
           await container.remove({ force: true });
-          console.log(`  Removed container`);
+          logger.info(`  Removed container`);
         } catch (err: any) {
-          console.error(`  Failed to cleanup container ${containerInfo.Id}: ${err.message}`);
+          logger.error(`  Failed to cleanup container ${containerInfo.Id}: ${err.message}`);
           // Continue with other containers even if one fails
         }
       }
     } catch (error: any) {
-      console.error('Error cleaning up volume containers:', error.message);
+      logger.error('Error cleaning up volume containers:', error.message);
       // Don't throw - we'll try to proceed anyway
     }
   }
@@ -1767,7 +1869,7 @@ export class DockerService {
         createdAt: new Date(container.Created * 1000).toISOString(),
       }));
     } catch (error) {
-      console.error('Error listing game containers:', error);
+      logger.error('Error listing game containers:', error);
       throw new Error(`Failed to list game containers: ${error}`);
     }
   }
@@ -1792,6 +1894,16 @@ export class DockerService {
     try {
       const container = docker.getContainer(containerId);
       
+      // Check if TTY was enabled
+      let isTty = false;
+      try {
+        const info = await container.inspect();
+        isTty = info.Config.Tty;
+      } catch (e) {
+        // If container is gone, we can't inspect it. Assume false or try to parse anyway.
+        // But if it's gone, logs() might fail too unless we're lucky.
+      }
+
       // Get logs as buffer (follow: false returns Buffer)
       const logsBuffer = await container.logs({
         stdout: true,
@@ -1801,6 +1913,11 @@ export class DockerService {
         follow: false,
       });
 
+      if (isTty) {
+        // If Tty is enabled, logs are raw text
+        return logsBuffer.toString('utf8');
+      }
+
       // Docker's multiplexed stream format: 8-byte header per chunk
       // Header: [stream_type, 0, 0, 0, size1, size2, size3, size4]
       // stream_type: 1=stdout, 2=stderr
@@ -1808,10 +1925,16 @@ export class DockerService {
       let offset = 0;
 
       while (offset < logsBuffer.length) {
+        // Safety check for buffer bounds
+        if (offset + 8 > logsBuffer.length) break;
+
         // Read 8-byte header
         const streamType = logsBuffer[offset];
         const size = logsBuffer.readUInt32BE(offset + 4);
         
+        // Safety check for payload bounds
+        if (offset + 8 + size > logsBuffer.length) break;
+
         // Read payload
         const payload = logsBuffer.slice(offset + 8, offset + 8 + size).toString('utf8');
         logs.push(payload);
@@ -1828,7 +1951,7 @@ export class DockerService {
       if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 404) {
         throw new Error('Container not found');
       }
-      console.error('Error getting container logs:', error);
+      logger.error('Error getting container logs:', error);
       throw new Error(`Failed to get container logs: ${error}`);
     }
   }
@@ -1853,7 +1976,7 @@ export class DockerService {
     // Prefer X11 first (more compatible with legacy games and tools like xterm)
     if (display) {
       const xauthority = process.env.XAUTHORITY || `${process.env.HOME}/.Xauthority`;
-      console.log(`Using X11 display: ${display}`);
+      logger.info(`Using X11 display: ${display}`);
       
       // Check if Xauthority file exists
       const xauthorityExists = existsSync(xauthority);
@@ -1861,40 +1984,40 @@ export class DockerService {
       const volumes = ['/tmp/.X11-unix:/tmp/.X11-unix:rw'];
       if (xauthorityExists) {
         volumes.push(`${xauthority}:/home/gameuser/.Xauthority:ro`);
-        console.log(`  Xauthority: ${xauthority}`);
+        logger.info(`  Xauthority: ${xauthority}`);
       } else {
-        console.log(`  ⚠ No Xauthority file found, X11 may require xhost +local:docker`);
+        logger.warn(`  ⚠ No Xauthority file found, X11 may require xhost +local:docker`);
       }
       
       // Add PulseAudio socket for audio support
       const userHome = process.env.HOME;
       if (xdgRuntimeDir && existsSync(`${xdgRuntimeDir}/pulse`)) {
         volumes.push(`${xdgRuntimeDir}/pulse:/run/user/1000/pulse:rw`);
-        console.log(`  ✓ PulseAudio socket available`);
+        logger.info(`  ✓ PulseAudio socket available`);
         
         // Mount PulseAudio cookie if it exists
         const pulseCookie = `${userHome}/.config/pulse/cookie`;
         if (existsSync(pulseCookie)) {
           volumes.push(`${pulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
-          console.log(`  ✓ PulseAudio cookie available`);
+          logger.info(`  ✓ PulseAudio cookie available`);
         }
       } else {
-        console.log(`  ⚠ No PulseAudio socket found at ${xdgRuntimeDir}/pulse`);
+        logger.warn(`  ⚠ No PulseAudio socket found at ${xdgRuntimeDir}/pulse`);
       }
       
       // Check if GPU device exists
       const devices = [];
       if (existsSync('/dev/dri')) {
         devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
-        console.log(`  ✓ GPU device available`);
+        logger.info(`  ✓ GPU device available`);
       } else {
-        console.log(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+        logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
       }
       
       // Add input devices for keyboard, mouse, and joystick support
       if (existsSync('/dev/input')) {
         devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
-        console.log(`  ✓ Input devices available (keyboard, mouse, joystick)`);
+        logger.info(`  ✓ Input devices available (keyboard, mouse, joystick)`);
       }
       
       // Add explicit joystick devices (js0, js1, js2, etc.)
@@ -1903,14 +2026,14 @@ export class DockerService {
         const jsDevice = `/dev/input/js${i}`;
         if (existsSync(jsDevice)) {
           devices.push({ PathOnHost: jsDevice, PathInContainer: jsDevice, CgroupPermissions: 'rwm' });
-          console.log(`  ✓ Joystick device available: ${jsDevice}`);
+          logger.info(`  ✓ Joystick device available: ${jsDevice}`);
         }
       }
       
       // Add uinput for virtual input device creation (needed by some emulators)
       if (existsSync('/dev/uinput')) {
         devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
-        console.log(`  ✓ uinput device available`);
+        logger.info(`  ✓ uinput device available`);
       }
       
       // Get default PulseAudio sink from settings or environment variable
@@ -1943,21 +2066,21 @@ export class DockerService {
     // Fall back to Wayland if X11 is not available
     if (waylandDisplay && xdgRuntimeDir) {
       const waylandSocket = `${xdgRuntimeDir}/${waylandDisplay}`;
-      console.log(`Using Wayland display: ${waylandDisplay}`);
+      logger.info(`Using Wayland display: ${waylandDisplay}`);
       
       // Check if GPU device exists
       const devices = [];
       if (existsSync('/dev/dri')) {
         devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
-        console.log(`  ✓ GPU device available`);
+        logger.info(`  ✓ GPU device available`);
       } else {
-        console.log(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+        logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
       }
       
       // Add input devices for keyboard, mouse, and joystick support
       if (existsSync('/dev/input')) {
         devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
-        console.log(`  ✓ Input devices available (keyboard, mouse, joystick)`);
+        logger.info(`  ✓ Input devices available (keyboard, mouse, joystick)`);
       }
       
       // Add explicit joystick devices (js0, js1, js2, etc.)
@@ -1966,14 +2089,14 @@ export class DockerService {
         const jsDevice = `/dev/input/js${i}`;
         if (existsSync(jsDevice)) {
           devices.push({ PathOnHost: jsDevice, PathInContainer: jsDevice, CgroupPermissions: 'rwm' });
-          console.log(`  ✓ Joystick device available: ${jsDevice}`);
+          logger.info(`  ✓ Joystick device available: ${jsDevice}`);
         }
       }
       
       // Add uinput for virtual input device creation (needed by some emulators)
       if (existsSync('/dev/uinput')) {
         devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
-        console.log(`  ✓ uinput device available`);
+        logger.info(`  ✓ uinput device available`);
       }
       
       return {
@@ -1994,8 +2117,8 @@ export class DockerService {
     }
     
     // No display available - headless mode
-    console.warn('⚠ No display environment detected (DISPLAY or WAYLAND_DISPLAY not set)');
-    console.warn('  Games with graphical output will not be visible');
+    logger.warn('⚠ No display environment detected (DISPLAY or WAYLAND_DISPLAY not set)');
+    logger.warn('  Games with graphical output will not be visible');
     
     return {
       mode: 'none',
@@ -2072,7 +2195,7 @@ export class DockerService {
       
       return sinks;
     } catch (error) {
-      console.error('Failed to get audio sinks:', error);
+      logger.error('Failed to get audio sinks:', error);
       return [];
     }
   }
@@ -2097,9 +2220,9 @@ export class DockerService {
           const container = docker.getContainer(containerInfo.Id);
           await container.remove({ v: true }); // Remove with volumes
           removed.push(containerInfo.Names[0]?.replace(/^\//, '') || containerInfo.Id);
-          console.log(`✓ Removed stopped container: ${containerInfo.Id.substring(0, 12)}`);
+          logger.info(`✓ Removed stopped container: ${containerInfo.Id.substring(0, 12)}`);
         } catch (err) {
-          console.error(`Failed to remove container ${containerInfo.Id}:`, err);
+          logger.error(`Failed to remove container ${containerInfo.Id}:`, err);
         }
       }
 
@@ -2108,7 +2231,7 @@ export class DockerService {
         containers: removed
       };
     } catch (error) {
-      console.error('Failed to cleanup stopped containers:', error);
+      logger.error('Failed to cleanup stopped containers:', error);
       throw error;
     }
   }
@@ -2167,9 +2290,9 @@ export class DockerService {
           const volume = docker.getVolume(volumeName);
           await volume.remove();
           removed.push(volumeName);
-          console.log(`✓ Removed orphaned volume: ${volumeName}`);
+          logger.info(`✓ Removed orphaned volume: ${volumeName}`);
         } catch (err) {
-          console.error(`Failed to remove volume ${volumeName}:`, err);
+          logger.error(`Failed to remove volume ${volumeName}:`, err);
         }
       }
 
@@ -2178,7 +2301,7 @@ export class DockerService {
         volumes: removed
       };
     } catch (error) {
-      console.error('Failed to cleanup orphaned volumes:', error);
+      logger.error('Failed to cleanup orphaned volumes:', error);
       throw error;
     }
   }

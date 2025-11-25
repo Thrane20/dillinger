@@ -6,8 +6,12 @@ interface LogPanelProps {
   className?: string;
 }
 
+type TabType = 'containers' | 'core';
+
 export default function LogPanel({ className = '' }: LogPanelProps) {
-  const [logs, setLogs] = useState<string>('');
+  const [containerLogs, setContainerLogs] = useState<string>('');
+  const [coreLogs, setCoreLogs] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<TabType>('containers');
   const [isConnected, setIsConnected] = useState(false);
   const [containerCount, setContainerCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -37,17 +41,21 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
           if (message.type === 'logentry') {
             const { containerId, containerType, gameName, message: logMessage } = message.body;
             
-            // Add container header if this is the first log from this container
-            if (!activeContainersRef.current.has(containerId)) {
-              activeContainersRef.current.add(containerId);
-              setContainerCount(activeContainersRef.current.size);
-              
-              const header = `\n${'='.repeat(80)}\n[${containerType.toUpperCase()}] ${gameName}\nContainer: ${containerId.substring(0, 12)}\n${'='.repeat(80)}\n`;
-              setLogs(prev => prev + header);
+            if (containerType === 'system') {
+                setCoreLogs(prev => prev + logMessage + '\n');
+            } else {
+                // Add container header if this is the first log from this container
+                if (!activeContainersRef.current.has(containerId)) {
+                  activeContainersRef.current.add(containerId);
+                  setContainerCount(activeContainersRef.current.size);
+                  
+                  const header = `\n${'='.repeat(80)}\n[${containerType.toUpperCase()}] ${gameName}\nContainer: ${containerId.substring(0, 12)}\n${'='.repeat(80)}\n`;
+                  setContainerLogs(prev => prev + header);
+                }
+                
+                // Append log message
+                setContainerLogs(prev => prev + logMessage + '\n');
             }
-            
-            // Append log message
-            setLogs(prev => prev + logMessage + '\n');
             
             // Auto-scroll to bottom
             if (scrollRef.current) {
@@ -63,13 +71,13 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
             setContainerCount(activeContainersRef.current.size);
             
             const header = `\n${'='.repeat(80)}\n[${containerType.toUpperCase()}] ${gameName} (starting...)\nContainer: ${containerId.substring(0, 12)}\n${'='.repeat(80)}\n`;
-            setLogs(prev => prev + header);
+            setContainerLogs(prev => prev + header);
           } else if (message.type === 'container-stopped') {
             const { containerId } = message.body;
             activeContainersRef.current.delete(containerId);
             setContainerCount(activeContainersRef.current.size);
             
-            setLogs(prev => prev + `\n[Container ${containerId.substring(0, 12)} stopped]\n`);
+            setContainerLogs(prev => prev + `\n[Container ${containerId.substring(0, 12)} stopped]\n`);
           } else if (message.type === 'connected') {
             console.log('WebSocket connection confirmed:', message.body.message);
           }
@@ -104,18 +112,24 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
   }, []);
 
   const handleClear = () => {
-    setLogs('');
-    activeContainersRef.current.clear();
-    setContainerCount(0);
+    if (activeTab === 'containers') {
+        setContainerLogs('');
+        activeContainersRef.current.clear();
+        setContainerCount(0);
+    } else {
+        setCoreLogs('');
+    }
     setError(null);
   };
+
+  const currentLogs = activeTab === 'containers' ? containerLogs : coreLogs;
 
   return (
     <div className={`space-y-2 ${className}`}>
       {/* Header with controls */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-text">Container Logs</h3>
+          <h3 className="text-sm font-semibold text-text">Logs</h3>
           {isConnected ? (
             <span className="px-2 py-0.5 text-xs font-medium bg-success/20 text-success rounded-full flex items-center gap-1">
               <span className="w-2 h-2 bg-success rounded-full animate-pulse"></span>
@@ -126,12 +140,31 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
               Disconnected
             </span>
           )}
-          {containerCount > 0 && (
-            <span className="px-2 py-0.5 text-xs font-medium bg-primary/20 text-primary rounded-full">
-              {containerCount} active
-            </span>
-          )}
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-border pb-2">
+          <button
+            onClick={() => setActiveTab('containers')}
+            className={`px-3 py-1 text-xs font-medium rounded-t-lg transition-colors ${
+              activeTab === 'containers' 
+                ? 'bg-primary/20 text-primary border-b-2 border-primary' 
+                : 'text-muted hover:text-text hover:bg-surface/50'
+            }`}
+          >
+            Containers {containerCount > 0 && `(${containerCount})`}
+          </button>
+          <button
+            onClick={() => setActiveTab('core')}
+            className={`px-3 py-1 text-xs font-medium rounded-t-lg transition-colors ${
+              activeTab === 'core' 
+                ? 'bg-primary/20 text-primary border-b-2 border-primary' 
+                : 'text-muted hover:text-text hover:bg-surface/50'
+            }`}
+          >
+            Core
+          </button>
       </div>
 
       {/* Control buttons */}
@@ -165,12 +198,14 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
           maxHeight: '300px'
         }}
       >
-        {logs || (isConnected ? 'Waiting for container logs...' : 'Connecting to log stream...')}
+        {currentLogs || (isConnected ? `Waiting for ${activeTab} logs...` : 'Connecting to log stream...')}
       </div>
 
       {/* Info text */}
       <p className="text-xs text-muted italic">
-        Real-time logs from active game launches and installations. Wine logs included for Windows games.
+        {activeTab === 'containers' 
+            ? 'Real-time logs from active game launches and installations.' 
+            : 'System logs from Dillinger Core backend.'}
       </p>
     </div>
   );

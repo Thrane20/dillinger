@@ -3,6 +3,7 @@ import type { Server as HTTPServer } from 'http';
 import type { DillingerWebSocketMessage } from '@dillinger/shared';
 import { DockerService } from './docker-service.js';
 import { JSONStorageService } from './storage.js';
+import { logger } from './logger.js';
 
 /**
  * WebSocket service for real-time container log streaming
@@ -34,6 +35,21 @@ export class WebSocketService {
     this.wss = new WebSocketServer({ 
       server,
       path: '/ws/logs'
+    });
+
+    // Subscribe to system logs
+    logger.on('log', (log) => {
+      this.broadcast({
+        type: 'logentry',
+        body: {
+          containerId: 'system',
+          containerType: 'system',
+          gameName: 'Dillinger Core',
+          gameId: 'system',
+          message: `[${log.level.toUpperCase()}] ${log.message}`,
+          timestamp: log.timestamp || new Date().toISOString(),
+        }
+      });
     });
 
     this.wss.on('connection', (ws: WebSocket) => {

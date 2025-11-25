@@ -15,7 +15,7 @@ export interface WebSocketMessage<T = any> {
  */
 export interface LogEntryBody {
   containerId: string;
-  containerType: 'install' | 'launch';
+  containerType: 'install' | 'launch' | 'system';
   gameName: string;
   gameId: string;
   message: string;
