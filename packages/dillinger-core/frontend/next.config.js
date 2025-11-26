@@ -14,8 +14,9 @@ const nextConfig = {
     let backendUrl;
     
     if (process.env.NODE_ENV === 'production') {
-      // Production: Use BACKEND_URL env var or default to localhost:4001
-      backendUrl = process.env.BACKEND_URL || 'http://localhost:4001';
+      // Production: Use BACKEND_URL env var or default to localhost:3001
+      // Note: Docker production uses port 4001 (set via BACKEND_URL), but local pnpm start uses 3001
+      backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
       console.log(`[Next.js] Rewriting API requests to: ${backendUrl}`);
     } else if (process.env.DOCKER_ENV) {
       // Docker development: Use container name

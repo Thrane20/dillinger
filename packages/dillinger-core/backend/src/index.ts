@@ -19,6 +19,7 @@ import filesystemRouter from './api/filesystem.js';
 import volumesRouter from './api/volumes.js';
 import onlineSourcesRouter from './api/online-sources.js';
 import platformsRouter from './api/platforms.js';
+import logsRouter from './api/logs.js';
 
 const app: Express = express();
 const server = createServer(app);
@@ -74,7 +75,19 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 // Common middleware
-app.use(compression());
+app.use(compression({
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    // Don't compress responses with this request header
+    if (req.path.includes('/stream')) {
+      return false;
+    }
+    // fallback to standard filter function
+    return compression.filter(req, res);
+  }
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -147,6 +160,9 @@ app.use('/api/volumes', volumesRouter);
 
 // Online sources routes (GOG, Epic, Steam, etc.)
 app.use('/api/online-sources', onlineSourcesRouter);
+
+// Log routes
+app.use('/api/logs', logsRouter);
 
 // Basic 404 handler for API routes
 app.use('/api/*', (req, res) => {
