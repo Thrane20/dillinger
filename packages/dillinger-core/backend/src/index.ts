@@ -58,9 +58,10 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // Increased limit for development (100 was too low)
   skip: (req) => {
-    // Skip rate limiting in development or for local requests
+    // Skip rate limiting in development, for local requests, or in Docker container
     const ip = req.ip || '';
     return process.env.NODE_ENV === 'development' || 
+           process.env.DOCKER_CONTAINER === 'true' || // Trust internal Docker traffic
            ip === '127.0.0.1' || 
            ip === '::1' ||
            ip.startsWith('172.') || // Docker network

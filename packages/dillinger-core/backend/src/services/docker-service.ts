@@ -537,6 +537,10 @@ export class DockerService {
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
 
+    // Pass PUID/PGID to runner if set in environment
+    if (process.env.PUID) env.push(`PUID=${process.env.PUID}`);
+    if (process.env.PGID) env.push(`PGID=${process.env.PGID}`);
+
     // Add Wine-specific configuration
     const wineConfig = game.settings?.wine;
     if (wineConfig?.useDxvk) {
@@ -967,6 +971,10 @@ export class DockerService {
       'DEBIAN_FRONTEND=noninteractive',
     ];
 
+    // Pass PUID/PGID to runner if set in environment
+    if (process.env.PUID) env.push(`PUID=${process.env.PUID}`);
+    if (process.env.PGID) env.push(`PGID=${process.env.PGID}`);
+
     // Add Wine-specific environment
     if (platform.type === 'wine') {
       // Build WINEDEBUG environment variable from game settings
@@ -1365,6 +1373,10 @@ export class DockerService {
       `INSTALL_TARGET=/install`,
       ...displayConfig.env
     ];
+
+    // Pass PUID/PGID to runner if set in environment
+    if (process.env.PUID) env.push(`PUID=${process.env.PUID}`);
+    if (process.env.PGID) env.push(`PGID=${process.env.PGID}`);
 
     // Add Wine-specific configuration for Windows installers
     if (platform.type === 'wine') {

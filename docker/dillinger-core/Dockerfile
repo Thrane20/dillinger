@@ -43,7 +43,7 @@ RUN pnpm run build
 # Build frontend
 WORKDIR /app/packages/dillinger-core/frontend
 ENV NODE_ENV=production
-ENV NEXT_PUBLIC_API_URL=http://localhost:4000
+ENV NEXT_PUBLIC_API_URL=http://localhost:3000
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
 
@@ -82,11 +82,12 @@ RUN mkdir -p /data && chown -R dillinger:nodejs /data
 COPY --chown=dillinger:nodejs docker/dillinger-core/ecosystem.config.cjs ./
 
 # USER dillinger
-EXPOSE 4000
+EXPOSE 3000
 ENV NODE_ENV=production
-ENV PORT=4000
-ENV BACKEND_PORT=4001
+ENV PORT=3000
+ENV BACKEND_PORT=3001
 ENV DILLINGER_ROOT=/data
-ENV FRONTEND_URL=http://localhost:4000
+ENV FRONTEND_URL=http://localhost:3000
+ENV DOCKER_CONTAINER=true
 
 CMD ["pm2-runtime", "start", "ecosystem.config.cjs"]

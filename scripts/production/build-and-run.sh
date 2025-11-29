@@ -8,6 +8,11 @@ cd "$PROJECT_ROOT"
 
 echo "Working directory: $(pwd)"
 
+# Determine PUID and PGID
+PUID=${PUID:-$(id -u)}
+PGID=${PGID:-$(id -g)}
+echo "Running with PUID=$PUID, PGID=$PGID"
+
 # Build the Docker image
 echo "Building Dillinger Core Docker image..."
 docker build -t dillinger-core:latest -f docker/dillinger-core/Dockerfile .
@@ -94,8 +99,10 @@ fi
 echo "Starting dillinger-core..."
 docker run -d \
   --name dillinger-core \
-  -p 4000:4000 \
-  -p 4001:4001 \
+  -p 3000:3000 \
+  -p 3001:3001 \
+  -e PUID=$PUID \
+  -e PGID=$PGID \
   -v dillinger_root:/data \
   -v dillinger_installed:/mnt/linuxfast/dillinger_installed \
   -v dillinger_installers:/installers \
@@ -104,5 +111,5 @@ docker run -d \
   --restart unless-stopped \
   dillinger-core:latest
 
-echo "Dillinger Core is running at http://localhost:4000"
+echo "Dillinger Core is running at http://localhost:3000"
 

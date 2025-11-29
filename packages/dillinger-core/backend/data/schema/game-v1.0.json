@@ -28,6 +28,7 @@
     "platformId": {
       "type": "string",
       "description": "Reference to Platform entity"
+      
     },
     "collectionIds": {
       "type": "array",
