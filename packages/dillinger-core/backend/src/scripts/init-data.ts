@@ -379,6 +379,35 @@ async function createDefaultPlatforms(storage: JSONStorageService) {
         }
       },
       isActive: true
+    },
+    {
+      name: 'Arcade',
+      type: 'emulator',
+      description: 'Arcade games through RetroArch (MAME)',
+      configuration: {
+        containerImage: 'dillinger/runner-retroarch:latest',
+        supportedExtensions: ['.zip', '.7z'],
+        requiredFiles: [],
+        defaultSettings: {
+          emulator: {
+            core: 'mame',
+          }
+        }
+      },
+      validation: {
+        fileValidation: ['.zip', '.7z'],
+        pathValidation: '^/.*\\.(zip|7z)$',
+        requiresBios: false
+      },
+      displayStreaming: {
+        method: 'games-on-whales',
+        configuration: {
+          resolution: '1920x1080',
+          framerate: 60,
+          codec: 'h264'
+        }
+      },
+      isActive: true
     }
   ];
 

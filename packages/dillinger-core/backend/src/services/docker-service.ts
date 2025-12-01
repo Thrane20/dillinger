@@ -410,6 +410,12 @@ export class DockerService {
       'amiga4000': 'fs-uae',    // Amiga 4000
       'cd32': 'fs-uae'          // Amiga CD32
     };
+
+    // Map platform IDs to MAME emulator commands
+    const mameEmulators: Record<string, string> = {
+      'mame': 'mame',
+      // 'arcade': 'mame' // Removed arcade from here as it's now handled by RetroArch runner
+    };
     
     if (platform.type === 'wine') {
       // Convert Windows path to Linux path in Wine prefix
@@ -438,6 +444,39 @@ export class DockerService {
       logger.info(`  Converted Linux path: ${gameExecutable}`);
       logger.info(`  Wine command: ${cmdArray.join(' ')}`);
       logger.info(`  Container working dir: ${containerWorkingDir}`);
+    } else if (platform.configuration.containerImage?.includes('runner-retroarch')) {
+      // For RetroArch games
+      const core = game.settings?.emulator?.core || platform.configuration.defaultSettings?.emulator?.core || 'mame';
+      
+      // Set RETROARCH_CORE env var
+      environment['RETROARCH_CORE'] = core;
+      
+      const romPath = game.filePath;
+      
+      if (romPath === 'MENU') {
+        // Launch into menu without a ROM
+        gameExecutable = 'retroarch';
+        cmdArray = [];
+        containerWorkingDir = '/home/gameuser';
+        logger.info(`Launching RetroArch Menu (Setup Mode)`);
+      } else {
+        if (!romPath) {
+          throw new Error('No ROM file specified for RetroArch game');
+        }
+        
+        // The ROM file is mounted into /roms inside the container
+        const romFilename = path.basename(romPath);
+        
+        // Command is just the ROM path (entrypoint handles the rest)
+        gameExecutable = 'retroarch'; // Just for logging
+        cmdArray = [`/roms/${romFilename}`];
+        containerWorkingDir = '/home/gameuser';
+        
+        logger.info(`Launching RetroArch game: ${game.title}`);
+        logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+        logger.info(`  Core: ${core}`);
+        logger.info(`  ROM file: ${romPath}`);
+      }
     } else if (game.platformId && viceEmulators[game.platformId]) {
       // For Commodore emulator games (C64, C128, VIC-20, Plus/4, PET)
       const emulatorCmd = viceEmulators[game.platformId];
@@ -508,6 +547,37 @@ export class DockerService {
       logger.info(`  Container Image: ${platform.configuration.containerImage}`);
       logger.info(`  Emulator: ${emulatorCmd}`);
       logger.info(`  Model: ${amigaModel}`);
+      logger.info(`  ROM file: ${romPath}`);
+      logger.info(`  Command: ${cmdArray.join(' ')}`);
+    } else if (game.platformId && mameEmulators[game.platformId]) {
+      // For MAME Arcade games
+      const emulatorCmd = mameEmulators[game.platformId];
+      
+      if (!emulatorCmd) {
+        throw new Error(`Unknown MAME platform: ${game.platformId}`);
+      }
+      
+      const romPath = game.filePath; // Path to ROM zip file
+      
+      if (!romPath) {
+        throw new Error('No ROM file specified for MAME game');
+      }
+      
+      // MAME expects the driver name (filename without extension)
+      // The ROM directory is mounted to /roms
+      const romFilename = path.basename(romPath);
+      const driverName = romFilename.replace(/\.[^/.]+$/, ""); // Remove extension
+      
+      gameExecutable = emulatorCmd;
+      // Pass driver name to MAME
+      // MAME will look for the zip file in the configured rompath (/roms)
+      cmdArray = [emulatorCmd, driverName];
+      containerWorkingDir = '/home/gameuser';
+      
+      logger.info(`Launching MAME game: ${game.title}`);
+      logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+      logger.info(`  Emulator: ${emulatorCmd}`);
+      logger.info(`  Driver: ${driverName}`);
       logger.info(`  ROM file: ${romPath}`);
       logger.info(`  Command: ${cmdArray.join(' ')}`);
     } else {
@@ -708,8 +778,8 @@ export class DockerService {
       );
       
       logger.info(`  Wine prefix: ${winePrefixPath}`);
-    } else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId])) {
-      // For emulator games (VICE Commodore or FS-UAE Amiga), create a per-game home directory
+    } else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) {
+      // For emulator games (VICE Commodore, FS-UAE Amiga, or MAME), create a per-game home directory
       // This allows each game to have its own emulator config, saves, screenshots, etc.
       const dillingerRoot = this.storage.getDillingerRoot();
       const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
@@ -764,11 +834,13 @@ export class DockerService {
       binds.push(`${winePrefixPath}:/wineprefix:rw`);
       logger.info(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
     } 
-    // For Commodore and Amiga emulator games, mount the ROM file directory and per-game home
-    else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId]) && game.filePath) {
-      const romDir = path.dirname(game.filePath);
-      binds.push(`${romDir}:/roms:ro`);
-      logger.info(`  Mounting ROM directory: ${romDir} -> /roms`);
+    // For Commodore, Amiga, MAME, and RetroArch emulator games, mount the ROM file directory and per-game home
+    else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
+      if (game.filePath && game.filePath !== 'MENU') {
+        const romDir = path.dirname(game.filePath);
+        binds.push(`${romDir}:/roms:ro`);
+        logger.info(`  Mounting ROM directory: ${romDir} -> /roms`);
+      }
       
       // Mount per-game home directory for emulator config and saves
       // IMPORTANT: Mount this BEFORE displayConfig.volumes so individual files can overlay
@@ -778,7 +850,7 @@ export class DockerService {
       }
 
       // Mount BIOS directory for Amiga
-      if (amigaEmulators[game.platformId]) {
+      if (game.platformId && amigaEmulators[game.platformId]) {
          const dillingerRoot = this.storage.getDillingerRoot();
          const biosPath = path.join(dillingerRoot, 'bios', 'amiga');
          
@@ -921,6 +993,12 @@ export class DockerService {
       'plus4': 'xplus4',
       'pet': 'xpet'
     };
+
+    // Map platform IDs to MAME emulator commands
+    const mameEmulators: Record<string, string> = {
+      'mame': 'mame',
+      // 'arcade': 'mame' // Removed arcade from here as it's now handled by RetroArch runner
+    };
     
     if (platform.type === 'wine') {
       const hostInstallPath = await this.getInstallVolumeHostPath();
@@ -929,7 +1007,7 @@ export class DockerService {
         `wineprefix-${gameIdentifier}`
       );
       logger.info(`  Debug Wine prefix: ${winePrefixPath}`);
-    } else if (game.platformId && viceEmulators[game.platformId]) {
+    } else if (game.platformId && (viceEmulators[game.platformId] || mameEmulators[game.platformId])) {
       // For emulator games, prepare the per-game home directory
       const dillingerRoot = this.storage.getDillingerRoot();
       const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
@@ -996,7 +1074,7 @@ export class DockerService {
     
     if (platform.type === 'wine' && winePrefixPath) {
       binds.push(`${winePrefixPath}:/wineprefix:rw`);
-    } else if (game.platformId && viceEmulators[game.platformId] && emulatorHomePath) {
+    } else if (game.platformId && (viceEmulators[game.platformId] || mameEmulators[game.platformId]) && emulatorHomePath) {
       // Mount emulator home for debug session
       binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
       // Also mount ROM directory if available
@@ -2025,6 +2103,12 @@ export class DockerService {
       } else {
         logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
       }
+
+      // Check if sound device exists
+      if (existsSync('/dev/snd')) {
+        devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
+        logger.info(`  ✓ Sound device available`);
+      }
       
       // Add input devices for keyboard, mouse, and joystick support
       if (existsSync('/dev/input')) {
@@ -2087,6 +2171,12 @@ export class DockerService {
         logger.info(`  ✓ GPU device available`);
       } else {
         logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+      }
+
+      // Check if sound device exists
+      if (existsSync('/dev/snd')) {
+        devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
+        logger.info(`  ✓ Sound device available`);
       }
       
       // Add input devices for keyboard, mouse, and joystick support

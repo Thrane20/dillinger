@@ -39,6 +39,7 @@ usage() {
     printf "    wine                    Build only the wine runner image\n"
     printf "    vice                    Build only the vice runner image\n"
     printf "    fs-uae                  Build only the fs-uae runner image\n"
+    printf "    mame                    Build only the mame runner image\n"
     printf "\n"
     printf "\033[1;33mEXAMPLES:\033[0m\n"
     printf "    %s                      # Build all images with cache\n" "$0"
@@ -56,6 +57,7 @@ usage() {
     printf "    3. wine (depends on base)\n"
     printf "    4. vice (depends on base)\n"
     printf "    5. fs-uae (depends on base)\n"
+    printf "    6. mame (depends on base)\n"
     printf "\n"
     exit 0
 }
@@ -121,7 +123,7 @@ while [[ $# -gt 0 ]]; do
             # Build all images (default behavior)
             shift
             ;;
-        base|linux-native|wine|vice|fs-uae)
+        base|linux-native|wine|vice|fs-uae|mame)
             IMAGES+=("$1")
             shift
             ;;
@@ -159,7 +161,7 @@ fi
 printf "\n"
 
 # Check for dependency issues
-if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae"; then
+if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae" || should_build "mame"; then
     if ! should_build "base" && ! docker images | grep -q "dillinger/runner-base"; then
         printf "\033[1;33mWarning: Dependent images require base image, but base not found.\033[0m\n"
         printf "\033[1;33mAdding base to build queue...\033[0m\n"
@@ -206,6 +208,11 @@ if [ "$PARALLEL" = true ]; then
         build_image "FS-UAE Runner" "fs-uae" "dillinger/runner-fs-uae:latest" &
         PIDS+=($!)
     fi
+
+    if should_build "mame"; then
+        build_image "MAME Runner" "mame" "dillinger/runner-mame:latest" &
+        PIDS+=($!)
+    fi
     
     # Wait for all background jobs
     for pid in "${PIDS[@]}"; do
@@ -249,6 +256,13 @@ else
             exit 1
         fi
     fi
+
+    if should_build "mame"; then
+        if ! build_image "MAME Runner" "mame" "dillinger/runner-mame:latest"; then
+            BUILD_FAILED=true
+            exit 1
+        fi
+    fi
 fi
 
 # Summary
@@ -264,6 +278,7 @@ if [ "$BUILD_FAILED" = false ]; then
     should_build "wine" && printf "  - dillinger/runner-wine:latest\n"
     should_build "vice" && printf "  - dillinger/runner-vice:latest\n"
     should_build "fs-uae" && printf "  - dillinger/runner-fs-uae:latest\n"
+    should_build "mame" && printf "  - dillinger/runner-mame:latest\n"
     printf "\n"
     printf "\033[1;33mAvailable images:\033[0m\n"
     docker images | grep "dillinger/runner-" | awk '{printf "  - %-40s %10s %15s\n", $1":"$2, $6" "$7, $NF}'
