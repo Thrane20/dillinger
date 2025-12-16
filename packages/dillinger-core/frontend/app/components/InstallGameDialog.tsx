@@ -14,12 +14,24 @@ interface InstallGameDialogProps {
 export default function InstallGameDialog({ gameId, platformId, onClose, onSuccess }: InstallGameDialogProps) {
   const [installerPath, setInstallerPath] = useState('');
   const [installPath, setInstallPath] = useState('');
+  const [installerArgs, setInstallerArgs] = useState('');
   const [showFileExplorer, setShowFileExplorer] = useState<'installer' | 'location' | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Suggest a default installation directory inside the Dillinger installed volume.
+  // This is a container path mounted from the `dillinger_installed` Docker volume.
+  // Users can override via the directory picker.
+  const defaultInstallPath = `/installed/${gameId}`;
+
   const handleInstallerSelect = (path: string) => {
     setInstallerPath(path);
+
+    // Auto-populate a sensible default install location if empty
+    if (!installPath) {
+      setInstallPath(defaultInstallPath);
+    }
+
     setShowFileExplorer('location');
   };
 
@@ -43,6 +55,9 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
         installPath,
         platformId,
       };
+
+      // Backwards-compatible: only include installerArgs if provided
+      (payload as any).installerArgs = installerArgs || undefined;
 
       const response = await fetch(`/api/games/${gameId}/install`, {
         method: 'POST',
@@ -125,6 +140,22 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                 >
                   Browse for Installation Directory
                 </button>
+
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-muted mb-2">
+                    Installer Arguments (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={installerArgs}
+                    onChange={(e) => setInstallerArgs(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                    placeholder="e.g. /S or /VERYSILENT"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Some installers support silent switches. Leave empty for normal GUI install.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -143,6 +174,12 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                     <label className="text-sm font-medium text-muted">Platform:</label>
                     <p className="font-mono text-sm mt-1">{platformId}</p>
                   </div>
+                  {installerArgs && (
+                    <div>
+                      <label className="text-sm font-medium text-muted">Installer Args:</label>
+                      <p className="font-mono text-sm mt-1 break-all">{installerArgs}</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">

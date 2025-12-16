@@ -74,7 +74,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/:id/launch', async (req: Request, res: Response) => {
   try {
     const gameId = req.params.id;
-    const { mode = 'local', platformId } = req.body; // Extract launch mode and optional platformId
+    const { mode = 'local', platformId, keepContainer = false, keepAlive = false } = req.body; // Optional debug flags
     if (!gameId) {
       return res.status(400).json({ error: 'Game ID required' });
     }
@@ -168,7 +168,7 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
         platformId: targetPlatformId,
         filePath: platformConfig.filePath || game.filePath,
         settings: platformConfig.settings,
-        installation: platformConfig.installation,
+        installation: platformConfig.installation || game.installation,
       };
       
       const containerInfo = await docker.launchGame({
@@ -176,6 +176,8 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
         platform,
         sessionId,
         mode, // Pass launch mode (local or streaming)
+        keepContainer: keepContainer === true,
+        keepAlive: keepAlive === true,
       });
 
       // Update session with container info
@@ -294,6 +296,212 @@ router.post('/:id/launch', async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * GET /api/launch/:gameId/sessions/:sessionId
+ * Return a single session (including containerId) for debug UI.
+ */
+router.get('/:id/sessions/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const gameId = req.params.id;
+    const sessionId = req.params.sessionId;
+    if (!gameId || !sessionId) {
+      return res.status(400).json({ error: 'Game ID and session ID required' });
+    }
+
+    const session = await storage.readEntity<GameSession>('sessions', sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.gameId !== gameId) {
+      return res.status(404).json({ error: 'Session not found for this game' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      session,
+    });
+  } catch (error: any) {
+    console.error('Error getting session:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/launch/:gameId/sessions/:sessionId/logs
+ * Fetch Docker logs for the session container.
+ */
+router.get('/:id/sessions/:sessionId/logs', async (req: Request, res: Response) => {
+  try {
+    const gameId = req.params.id;
+    const sessionId = req.params.sessionId;
+    const tail = Math.max(1, Math.min(5000, Number(req.query.tail ?? 500)));
+
+    if (!gameId || !sessionId) {
+      return res.status(400).json({ error: 'Game ID and session ID required' });
+    }
+
+    const session = await storage.readEntity<GameSession>('sessions', sessionId);
+    if (!session || session.gameId !== gameId) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (!session.containerId) {
+      return res.status(400).json({ error: 'Session has no containerId yet' });
+    }
+
+    const logs = await docker.getContainerLogs(session.containerId, tail);
+    return res.status(200).json({
+      success: true,
+      containerId: session.containerId,
+      logs,
+    });
+  } catch (error: any) {
+    console.error('Error getting container logs:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/launch/:gameId/sessions/:sessionId/inspect
+ * Fetch Docker inspect data for the session container.
+ */
+router.get(
+  '/:id/sessions/:sessionId/inspect',
+  async (req: Request, res: Response) => {
+    try {
+      const gameId = req.params.id;
+      const sessionId = req.params.sessionId;
+      if (!gameId || !sessionId) {
+        return res.status(400).json({ error: 'Game ID and session ID required' });
+      }
+
+      const session = await storage.readEntity<GameSession>('sessions', sessionId);
+      if (!session || session.gameId !== gameId) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      if (!session.containerId) {
+        return res.status(400).json({ error: 'Session has no containerId yet' });
+      }
+
+      const inspect = await docker.inspectContainer(session.containerId);
+      return res.status(200).json({
+        success: true,
+        containerId: session.containerId,
+        inspect,
+      });
+    } catch (error: any) {
+      console.error('Error inspecting container:', error);
+      return res.status(500).json({
+        error: 'Internal server error',
+        details: error.message,
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/launch/:gameId/sessions/:sessionId/stop
+ * Stop the session container (debug feature).
+ */
+router.post('/:id/sessions/:sessionId/stop', async (req: Request, res: Response) => {
+  try {
+    const gameId = req.params.id;
+    const sessionId = req.params.sessionId;
+    if (!gameId || !sessionId) {
+      return res.status(400).json({ error: 'Game ID and session ID required' });
+    }
+
+    const session = await storage.readEntity<GameSession>('sessions', sessionId);
+    if (!session || session.gameId !== gameId) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (!session.containerId) {
+      return res.status(400).json({ error: 'Session has no containerId yet' });
+    }
+
+    await docker.stopContainer(session.containerId);
+
+    // Best-effort update
+    session.status = 'stopped';
+    session.updated = new Date().toISOString();
+    if (session.performance) {
+      session.performance.endTime = new Date().toISOString();
+    }
+    await storage.writeEntity('sessions', sessionId, session);
+
+    return res.status(200).json({
+      success: true,
+      containerId: session.containerId,
+    });
+  } catch (error: any) {
+    console.error('Error stopping session container:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/launch/:gameId/sessions/:sessionId/stop-remove
+ * Stop (best-effort) and remove the session container (debug feature).
+ */
+router.post(
+  '/:id/sessions/:sessionId/stop-remove',
+  async (req: Request, res: Response) => {
+    try {
+      const gameId = req.params.id;
+      const sessionId = req.params.sessionId;
+      if (!gameId || !sessionId) {
+        return res.status(400).json({ error: 'Game ID and session ID required' });
+      }
+
+      const session = await storage.readEntity<GameSession>('sessions', sessionId);
+      if (!session || session.gameId !== gameId) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!session.containerId) {
+        return res.status(400).json({ error: 'Session has no containerId yet' });
+      }
+
+      // Stop is best-effort; remove with force handles running too.
+      try {
+        await docker.stopContainer(session.containerId);
+      } catch (e) {
+        // ignore stop errors here; removal is the goal
+      }
+      await docker.removeContainer(session.containerId, true);
+
+      session.status = 'stopped';
+      session.updated = new Date().toISOString();
+      if (session.performance) {
+        session.performance.endTime = new Date().toISOString();
+      }
+      await storage.writeEntity('sessions', sessionId, session);
+
+      return res.status(200).json({
+        success: true,
+        containerId: session.containerId,
+        removed: true,
+      });
+    } catch (error: any) {
+      console.error('Error stop+removing session container:', error);
+      return res.status(500).json({
+        error: 'Internal server error',
+        details: error.message,
+      });
+    }
+  }
+);
 
 /**
  * POST /api/games/:id/stop

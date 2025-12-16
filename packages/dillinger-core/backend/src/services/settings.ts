@@ -17,6 +17,12 @@ export interface DockerSettings {
   autoRemoveContainers?: boolean; // Whether to automatically remove containers after they stop (default: false)
 }
 
+export type GpuVendor = 'auto' | 'amd' | 'nvidia';
+
+export interface GpuSettings {
+  vendor?: GpuVendor;
+}
+
 export interface GOGSettings {
   accessCode?: string; // GOG access code for authentication
 }
@@ -25,12 +31,23 @@ export interface DownloadSettings {
   maxConcurrent?: number; // Maximum number of concurrent download worker threads (default: 2)
 }
 
+export interface JoystickConfig {
+  deviceId: string; // e.g., "event11"
+  deviceName: string; // e.g., "Logitech Gamepad F310"
+}
+
+export interface JoystickSettings {
+  [platform: string]: JoystickConfig;
+}
+
 export interface AppSettings {
   scrapers?: ScraperSettings;
   audio?: AudioSettings;
   docker?: DockerSettings;
+  gpu?: GpuSettings;
   gog?: GOGSettings;
   downloads?: DownloadSettings;
+  joysticks?: JoystickSettings;
   // Future settings can be added here:
   // streaming?: StreamingSettings;
   // library?: LibrarySettings;
@@ -100,6 +117,18 @@ export class SettingsService {
     await this.save();
   }
 
+  async getGpuSettings(): Promise<GpuSettings> {
+    return this.settings.gpu || { vendor: 'auto' };
+  }
+
+  async updateGpuSettings(settings: Partial<GpuSettings>): Promise<void> {
+    this.settings.gpu = {
+      ...this.settings.gpu,
+      ...settings,
+    };
+    await this.save();
+  }
+
   async getGOGSettings(): Promise<GOGSettings> {
     return this.settings.gog || {};
   }
@@ -122,6 +151,22 @@ export class SettingsService {
       ...settings,
     };
     await this.save();
+  }
+
+  async getJoystickSettings(): Promise<JoystickSettings> {
+    return this.settings.joysticks || {};
+  }
+
+  async updateJoystickSettings(settings: JoystickSettings): Promise<void> {
+    this.settings.joysticks = {
+      ...(this.settings.joysticks || {}),
+      ...settings,
+    };
+    await this.save();
+  }
+
+  async getJoystickConfig(platform: string): Promise<JoystickConfig | undefined> {
+    return this.settings.joysticks?.[platform];
   }
 
   async getAllSettings(): Promise<AppSettings> {

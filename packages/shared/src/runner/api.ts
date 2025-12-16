@@ -41,7 +41,7 @@ export interface LaunchResponse {
   error?: string;
 }
 
-export interface SessionStatus {
+export interface RunnerSessionStatusResponse {
   sessionId: string;
   status: SessionState;
   containerId?: string;

@@ -121,6 +121,22 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
    pnpm install
    ```
 
+## 🛠️ Debugging game launches
+
+If a game container starts and exits immediately (or you want to inspect mounts/logs), you can prevent Docker from auto-removing it.
+
+- **Keep the container:** call `POST /api/games/:id/launch` with JSON body including `"keepContainer": true`.
+- **Find recent Dillinger containers:**
+   ```bash
+   docker ps -a --filter "name=dillinger-session-" --format '{{.ID}} {{.Image}} {{.Status}} {{.Names}}'
+   ```
+- **View logs / mounts / shell:**
+   ```bash
+   docker logs <containerId>
+   docker inspect <containerId> | jq '.[0].HostConfig.Binds'
+   docker exec -it <containerId> /bin/bash
+   ```
+
 3. **Build shared packages:**
    ```bash
    pnpm run build:shared

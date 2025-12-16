@@ -15,8 +15,7 @@
     "dev:frontend": "pnpm --filter=@dillinger/frontend run dev"
   },
   "dependencies": {
-    "@dillinger/runner-types": "workspace:*",
-    "@dillinger/validation": "workspace:*"
+    "@dillinger/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

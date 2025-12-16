@@ -94,8 +94,11 @@ RUN chmod +x /opt/dillinger/wine-scripts/*.sh || true
 # Volumes and Working Directory
 #######################################################
 
-# Additional volumes for Wine
-VOLUME ["/wineprefix"]
+# NOTE: Do not declare a VOLUME for /wineprefix.
+# Historically the runner used /wineprefix, but Dillinger now stores prefixes under
+# the installed volume (mounted at /installed) and points WINEPREFIX there.
+# Declaring /wineprefix as a VOLUME causes Docker to create an anonymous volume at
+# /wineprefix, which is confusing during inspection and can mask mistakes.
 
 WORKDIR /home/gameuser
 

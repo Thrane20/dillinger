@@ -84,18 +84,36 @@ chmod 700 "$XDG_RUNTIME_DIR"
 
 echo -e "${BLUE}Checking GPU access...${NC}"
 
-# Check for NVIDIA GPU
-if [ -d "/dev/nvidia0" ] || [ -d "/dev/nvidiactl" ]; then
-    echo -e "${GREEN}✓ NVIDIA GPU detected${NC}"
-    export __NV_PRIME_RENDER_OFFLOAD=1
-    export __GLX_VENDOR_LIBRARY_NAME=nvidia
-    export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+# Allow caller to force a specific vendor stack.
+# Values: auto | amd | nvidia
+GPU_VENDOR="${GPU_VENDOR:-auto}"
+
+# Best-effort hardware detection (may not work in minimal containers).
+HAS_NVIDIA_DEV="false"
+if [ -e "/dev/nvidia0" ] || [ -e "/dev/nvidiactl" ]; then
+    HAS_NVIDIA_DEV="true"
 fi
 
-# Check for AMD GPU
-if lspci 2>/dev/null | grep -i "VGA.*AMD" >/dev/null; then
-    echo -e "${GREEN}✓ AMD GPU detected${NC}"
+HAS_AMD_PCI="false"
+if command -v lspci >/dev/null 2>&1 && lspci 2>/dev/null | grep -Ei "VGA|3D" | grep -i "AMD" >/dev/null; then
+    HAS_AMD_PCI="true"
+fi
+
+if [ "$GPU_VENDOR" = "nvidia" ] || { [ "$GPU_VENDOR" = "auto" ] && [ "$HAS_NVIDIA_DEV" = "true" ]; }; then
+    echo -e "${GREEN}✓ NVIDIA GPU selected${NC}"
+    export __NV_PRIME_RENDER_OFFLOAD=1
+    export __GLX_VENDOR_LIBRARY_NAME=nvidia
+    if [ -f "/usr/share/vulkan/icd.d/nvidia_icd.json" ]; then
+        export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+    fi
+fi
+
+if [ "$GPU_VENDOR" = "amd" ] || { [ "$GPU_VENDOR" = "auto" ] && [ "$HAS_AMD_PCI" = "true" ] && [ "$HAS_NVIDIA_DEV" != "true" ]; }; then
+    echo -e "${GREEN}✓ AMD GPU selected${NC}"
     export RADV_PERFTEST=aco
+    if [ -f "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json" ]; then
+        export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+    fi
 fi
 
 # Check for Intel GPU

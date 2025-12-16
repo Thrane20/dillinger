@@ -53,19 +53,21 @@ app.use(
   })
 );
 
-// Rate limiting
+// Rate limiting - very relaxed for local development
+// For local services, rate limiting is typically not needed and can interfere with development
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Increased limit for development (100 was too low)
+  windowMs: 1 * 60 * 1000, // 1 minute window
+  max: 10000, // Very high limit - essentially disabled for local use
   skip: (req) => {
-    // Skip rate limiting in development, for local requests, or in Docker container
+    // Skip rate limiting for local/development traffic
     const ip = req.ip || '';
     return process.env.NODE_ENV === 'development' || 
-           process.env.DOCKER_CONTAINER === 'true' || // Trust internal Docker traffic
+           process.env.DOCKER_CONTAINER === 'true' || 
            ip === '127.0.0.1' || 
            ip === '::1' ||
            ip.startsWith('172.') || // Docker network
-           ip.startsWith('192.168.'); // Local network
+           ip.startsWith('192.168.') || // Local network
+           req.path.startsWith('/api/logs'); // Log streaming generates many requests
   },
   message: {
     error: 'rate_limit_exceeded',

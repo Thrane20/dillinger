@@ -46,6 +46,7 @@ export interface InstallGameRequest {
   installerPath: string; // Path to installer file (exe, msi, etc.)
   installPath: string; // Target installation directory
   platformId: string; // Platform to use for installation
+  installerArgs?: string; // Optional installer arguments (e.g. /S, /VERYSILENT)
 }
 
 export interface InstallGameResponse {

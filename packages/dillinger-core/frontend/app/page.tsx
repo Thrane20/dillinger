@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
 import type {
   DownloadProgressBody,
@@ -54,6 +55,7 @@ const getPlatformName = (id: string) => {
 };
 
 export default function GamesPage() {
+  const router = useRouter();
   const [games, setGames] = useState<Game[]>([]);
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
   const [filterText, setFilterText] = useState('');
@@ -68,6 +70,42 @@ export default function GamesPage() {
   );
   const [backdropOpacity, setBackdropOpacity] = useState(0);
   const [gridColumns, setGridColumns] = useState(2); // Default to 2 columns
+
+  const [debugDialogOpenForGameId, setDebugDialogOpenForGameId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!debugDialogOpenForGameId) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDebugDialogOpenForGameId(null);
+      }
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      const path = (e.composedPath?.() || []) as EventTarget[];
+      const clickedInside = path.some((t) => {
+        return (
+          typeof t === 'object' &&
+          t !== null &&
+          'getAttribute' in (t as any) &&
+          typeof (t as any).getAttribute === 'function' &&
+          (t as any).getAttribute('data-debug-menu') === 'true'
+        );
+      });
+
+      if (!clickedInside) {
+        setDebugDialogOpenForGameId(null);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onMouseDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [debugDialogOpenForGameId]);
 
   const hoveredGame = hoveredGameId
     ? games.find((g) => g.id === hoveredGameId)
@@ -500,7 +538,8 @@ export default function GamesPage() {
   async function launchGame(
     gameId: string,
     mode: 'local' | 'streaming' = 'local',
-    platformId?: string
+    platformId?: string,
+    options?: { keepContainer?: boolean; keepAlive?: boolean }
   ) {
     setLaunching((prev) => ({ ...prev, [gameId]: true }));
     setError(null);
@@ -514,6 +553,8 @@ export default function GamesPage() {
         body: JSON.stringify({
           mode,
           platformId, // Optional platform ID for multi-platform games
+          keepContainer: options?.keepContainer === true,
+          keepAlive: options?.keepAlive === true,
         }),
       });
 
@@ -524,6 +565,9 @@ export default function GamesPage() {
             ...prev,
             [gameId]: data.session,
           }));
+          if (options?.keepContainer === true || options?.keepAlive === true) {
+            router.push(`/debug/${gameId}/${data.session.id}`);
+          }
           // Game launched successfully - no modal needed
         }
       } else {
@@ -812,12 +856,19 @@ export default function GamesPage() {
               );
               const isOtherGameRunning = anyGameRunning && !isRunning;
 
+              const isAnotherGameHovered =
+                hoveredGameId !== null && hoveredGameId !== game.id;
+
               return (
                 <div
                   key={game.id}
                   id={`game-${game.id}`}
                   className={`card transition-all duration-200 hover:scale-[1.02] relative ${
-                    isOtherGameRunning ? 'opacity-30' : 'opacity-100'
+                    isOtherGameRunning
+                      ? 'opacity-30'
+                      : isAnotherGameHovered
+                        ? 'opacity-90'
+                        : 'opacity-100'
                   }`}
                   onMouseEnter={() => setHoveredGameId(game.id)}
                   onMouseLeave={() => setHoveredGameId(null)}
@@ -836,7 +887,7 @@ export default function GamesPage() {
 
                   {/* Primary Image */}
                   {primaryImage && (
-                    <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 overflow-hidden rounded-t-3xl">
                       <img
                         src={primaryImage}
                         alt={game.title}
@@ -1230,42 +1281,91 @@ export default function GamesPage() {
                         </button>
                       ) : (
                         <>
-                          <button
-                            onClick={() => launchGame(game.id, 'local')}
-                            disabled={isLaunching}
-                            className="bg-green-600 hover:bg-green-700 text-white rounded-md px-3 py-2 transition-colors flex-1 disabled:opacity-60 disabled:cursor-not-allowed"
-                            title="Launch game locally on this machine"
-                          >
-                            {isLaunching ? (
+                          <div className="relative inline-flex" data-debug-menu="true">
+                            <button
+                              onClick={() => launchGame(game.id, 'local')}
+                              disabled={isLaunching}
+                              className="bg-green-700 hover:bg-green-800 text-white rounded-l-md px-3 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                              title="Launch normally"
+                            >
+                              Launch
+                            </button>
+                            <button
+                              onClick={() =>
+                                setDebugDialogOpenForGameId((prev) =>
+                                  prev === game.id ? null : game.id
+                                )
+                              }
+                              disabled={isLaunching}
+                              className="bg-green-700 hover:bg-green-800 text-white rounded-r-md px-2 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed border-l border-green-900/30"
+                              title="Open debug options"
+                              aria-label="Open debug options"
+                            >
+                              <svg
+                                className="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 9l-7 7-7-7"
+                                />
+                              </svg>
+                            </button>
+
+                            {debugDialogOpenForGameId === game.id && (
                               <>
-                                <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                                Launching...
-                              </>
-                            ) : (
-                              <>
-                                <svg
-                                  className="inline-block h-4 w-4 mr-2"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                                  />
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                  />
-                                </svg>
-                                Play Local
+                                <div
+                                  className="fixed inset-0 z-[9998]"
+                                  data-debug-menu="true"
+                                  onClick={() => setDebugDialogOpenForGameId(null)}
+                                />
+                                <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-[9999]" data-debug-menu="true">
+                                <div className="p-3 border-b border-border">
+                                  <div className="text-sm font-semibold text-text">
+                                    Start Debugging
+                                  </div>
+                                  <div className="text-xs text-muted mt-1">
+                                    Keeps the container alive for logs/inspect.
+                                  </div>
+                                </div>
+                                <div className="p-3 flex gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setDebugDialogOpenForGameId(null);
+                                      void launchGame(game.id, 'local', undefined, {
+                                        keepContainer: true,
+                                        keepAlive: true,
+                                      });
+                                    }}
+                                    disabled={isLaunching}
+                                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-2 transition-colors disabled:opacity-60"
+                                    title="Debug launch (keep container + keep alive)"
+                                  >
+                                    {isLaunching ? (
+                                      <span className="inline-flex items-center gap-2">
+                                        <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                                        Launching…
+                                      </span>
+                                    ) : (
+                                      'Start Debugging'
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => setDebugDialogOpenForGameId(null)}
+                                    className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700 text-text hover:opacity-90"
+                                    title="Cancel"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                                </div>
                               </>
                             )}
-                          </button>
+                          </div>
                           <button
                             onClick={() => launchGame(game.id, 'streaming')}
                             disabled={isLaunching}

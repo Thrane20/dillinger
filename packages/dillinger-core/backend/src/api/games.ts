@@ -15,10 +15,13 @@ import {
   removePlatformConfig 
 } from '@dillinger/shared';
 import { DILLINGER_ROOT } from '../services/settings.js';
+import type { ScraperType } from '@dillinger/shared';
+import { getScraperManager } from '../services/scrapers/index.js';
 
 const router = Router();
 const storage = JSONStorageService.getInstance();
 const dockerService = DockerService.getInstance();
+const scraperManager = getScraperManager();
 
 /**
  * Generate a URL-friendly slug from a title
@@ -127,6 +130,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
+
 });
 
 // POST /api/games - Create a new game
@@ -208,6 +212,183 @@ router.post('/', gameValidation, async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to create game',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST /api/games/:id/scrape/apply - Apply scraped metadata/images to an existing game
+router.post('/:id/scrape/apply', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'Game ID is required',
+      });
+      return;
+    }
+
+    const { scraperType, scraperId, downloadImages = true } = req.body as {
+      scraperType?: ScraperType;
+      scraperId?: string;
+      downloadImages?: boolean;
+    };
+
+    if (!scraperType || !scraperId) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required fields: scraperType, scraperId',
+      });
+      return;
+    }
+
+    const { game: existingGame, fileKey } = await findGameAndFileKey(id);
+    if (!existingGame || !fileKey) {
+      res.status(404).json({
+        success: false,
+        error: 'Game not found',
+      });
+      return;
+    }
+
+    const scraped = await scraperManager.getGameDetail(scraperType, scraperId);
+
+    let primaryImage: string | undefined;
+    let backdropImage: string | undefined;
+    const localImages: { cover?: string; screenshots: string[]; artworks: string[] } = {
+      screenshots: [],
+      artworks: [],
+    };
+    const metadataDir = path.join(DILLINGER_ROOT, 'storage', 'metadata', existingGame.id);
+    const imagesPath = path.join(metadataDir, 'images');
+    try {
+      await fs.ensureDir(imagesPath);
+      if (downloadImages && scraped.cover?.url) {
+        // Reuse scrapers "save" behavior: it stores into /data/storage/metadata/<slug>/images
+        // Here we store into the existing game's metadata directory, keyed by game.id.
+        const coverBuffer = await scraperManager.downloadImage(scraperType, scraped.cover.url);
+        const coverExt = path.extname(new URL(scraped.cover.url).pathname) || '.jpg';
+        const coverFilename = `cover${coverExt}`;
+        const coverPath = path.join(imagesPath, coverFilename);
+        await fs.writeFile(coverPath, coverBuffer);
+
+        localImages.cover = coverFilename;
+        scraped.cover.localPath = coverFilename;
+
+        primaryImage = `/api/images/${existingGame.id}/${coverFilename}`;
+        backdropImage = `/api/images/${existingGame.id}/${coverFilename}`;
+      }
+
+      if (downloadImages && scraped.screenshots) {
+        for (let i = 0; i < scraped.screenshots.length; i++) {
+          const screenshot = scraped.screenshots[i];
+          if (!screenshot) continue;
+          try {
+            const buffer = await scraperManager.downloadImage(scraperType, screenshot.url);
+            const ext = path.extname(new URL(screenshot.url).pathname) || '.jpg';
+            const filename = `screenshot_${i}${ext}`;
+            const filepath = path.join(imagesPath, filename);
+            await fs.writeFile(filepath, buffer);
+            localImages.screenshots.push(filename);
+            screenshot.localPath = filename;
+          } catch (err) {
+            console.error(`Failed to download screenshot ${i}:`, err);
+          }
+        }
+      }
+
+      if (downloadImages && scraped.artworks) {
+        for (let i = 0; i < scraped.artworks.length; i++) {
+          const artwork = scraped.artworks[i];
+          if (!artwork) continue;
+          try {
+            const buffer = await scraperManager.downloadImage(scraperType, artwork.url);
+            const ext = path.extname(new URL(artwork.url).pathname) || '.jpg';
+            const filename = `artwork_${i}${ext}`;
+            const filepath = path.join(imagesPath, filename);
+            await fs.writeFile(filepath, buffer);
+            localImages.artworks.push(filename);
+            artwork.localPath = filename;
+          } catch (err) {
+            console.error(`Failed to download artwork ${i}:`, err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to download cover image:', err);
+    }
+
+    // Auto-select a reasonable default backdrop if we didn't get a cover.
+    if (!backdropImage) {
+      if (localImages.screenshots.length > 0) {
+        backdropImage = `/api/images/${existingGame.id}/${localImages.screenshots[0]}`;
+      } else if (localImages.artworks.length > 0) {
+        backdropImage = `/api/images/${existingGame.id}/${localImages.artworks[0]}`;
+      }
+    }
+    if (!primaryImage) {
+      if (localImages.screenshots.length > 0) {
+        primaryImage = `/api/images/${existingGame.id}/${localImages.screenshots[0]}`;
+      } else if (localImages.artworks.length > 0) {
+        primaryImage = `/api/images/${existingGame.id}/${localImages.artworks[0]}`;
+      }
+    }
+
+    // Write a "saved metadata" file compatible with /api/scrapers/saved/:gameId so
+    // the GameForm image picker can populate availableImages for existing games too.
+    try {
+      await fs.ensureDir(metadataDir);
+      const savedMetadataPath = path.join(metadataDir, 'metadata.json');
+      await fs.writeJSON(
+        savedMetadataPath,
+        {
+          id: existingGame.id,
+          slug: existingGame.id,
+          scraperData: scraped,
+          localImages,
+          savedAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+        },
+        { spaces: 2 }
+      );
+    } catch (err) {
+      console.error('Failed to write saved metadata for game:', err);
+    }
+
+    const updatedGame: Game = {
+      ...existingGame,
+      title: existingGame.title || scraped.title,
+      metadata: {
+        ...(existingGame.metadata || {}),
+        description: scraped.summary || (existingGame.metadata as any)?.description,
+        developer:
+          (scraped.developers && scraped.developers[0]) ||
+          (existingGame.metadata as any)?.developer,
+        genre: (scraped.genres as any) || (existingGame.metadata as any)?.genre,
+        primaryImage: primaryImage || (existingGame.metadata as any)?.primaryImage,
+        backdropImage: backdropImage || (existingGame.metadata as any)?.backdropImage,
+        scrapedFrom: {
+          scraperType,
+          scraperId,
+          scrapedAt: new Date().toISOString(),
+        } as any,
+      } as any,
+      updated: new Date().toISOString(),
+    };
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    res.json({
+      success: true,
+      data: migrateGameToMultiPlatform(updatedGame),
+      message: 'Scraped metadata applied',
+    });
+  } catch (error) {
+    console.error('Error applying scraped metadata:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to apply scraped metadata',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
@@ -689,7 +870,7 @@ router.put('/:id/default-platform', async (req: Request, res: Response) => {
 router.post('/:id/install', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { installerPath, installPath, platformId } = req.body as InstallGameRequest;
+    const { installerPath, installPath, platformId, installerArgs } = req.body as InstallGameRequest;
 
     if (!id || !installerPath || !installPath || !platformId) {
       res.status(400).json({
@@ -725,15 +906,28 @@ router.post('/:id/install', async (req: Request, res: Response) => {
     console.log(`🎮 Starting game installation for: ${game.title}`);
     console.log(`  Installer: ${installerPath}`);
     console.log(`  Install target: ${installPath}`);
+
+    // Option A canonical: store install paths under /installed to match the dillinger_installed volume mount.
+    // Accept legacy host paths (e.g. /mnt/linuxfast/dillinger_installed/...) but persist as /installed/... when possible.
+    const legacyPublicRoot = process.env.DILLINGER_INSTALLED_PUBLIC_PATH || '/mnt/linuxfast/dillinger_installed';
+    let canonicalInstallPath = installPath;
+    if (installPath && (installPath === legacyPublicRoot || installPath.startsWith(legacyPublicRoot + '/'))) {
+      canonicalInstallPath = '/installed' + installPath.substring(legacyPublicRoot.length);
+      console.log(`  Normalized installPath to canonical: ${canonicalInstallPath}`);
+    }
     console.log(`  Platform: ${platform.name}`);
+    if (installerArgs) {
+      console.log(`  Installer args: ${installerArgs}`);
+    }
 
     // Start installation container
     const containerInfo = await dockerService.installGame({
       installerPath,
-      installPath,
+      installPath: canonicalInstallPath,
       platform,
       sessionId,
       game, // Pass game object for slug-based Wine prefix
+      installerArgs,
     });
 
     // Update game with installation information
@@ -741,8 +935,9 @@ router.post('/:id/install', async (req: Request, res: Response) => {
       ...game,
       installation: {
         status: 'installing' as const,
-        installPath,
+        installPath: canonicalInstallPath,
         installerPath,
+        installerArgs,
         containerId: containerInfo.containerId,
         installMethod: 'automated' as const,
       },

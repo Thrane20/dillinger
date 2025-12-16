@@ -59,6 +59,31 @@ echo "  Wine Prefix: $WINEPREFIX"
 echo "  Wine Architecture: $WINEARCH"
 echo "  Wine Debug: $WINEDEBUG"
 
+# Ensure prefix directory exists and is owned by the runtime user.
+# When /wineprefix is a bind mount, build-time ownership in the image does not apply.
+if [ ! -d "$WINEPREFIX" ]; then
+    mkdir -p "$WINEPREFIX" || true
+fi
+
+# Best-effort ownership fix: requires entrypoint to run as root.
+if [ "$(id -u)" = "0" ]; then
+    if [ -n "$PUID" ] && [ -n "$PGID" ]; then
+        chown -R "$PUID:$PGID" "$WINEPREFIX" 2>/dev/null || true
+    else
+        chown -R "${UNAME:-gameuser}:${UNAME:-gameuser}" "$WINEPREFIX" 2>/dev/null || true
+    fi
+fi
+
+if [ -e "$WINEPREFIX" ]; then
+    PREFIX_OWNER_UID=$(stat -c "%u" "$WINEPREFIX" 2>/dev/null || echo "?")
+    PREFIX_OWNER_GID=$(stat -c "%g" "$WINEPREFIX" 2>/dev/null || echo "?")
+    CURRENT_UID=$(id -u)
+    if [ "$PREFIX_OWNER_UID" != "?" ] && [ "$PREFIX_OWNER_UID" != "$CURRENT_UID" ]; then
+        echo -e "${YELLOW}⚠ Wine prefix ownership mismatch: owner=${PREFIX_OWNER_UID}:${PREFIX_OWNER_GID} current=${CURRENT_UID} (Wine may refuse to run)${NC}"
+        echo -e "${YELLOW}  Tip: ensure the host prefix dir is owned by uid=${PUID:-1000} gid=${PGID:-1000}, or run the container entrypoint as root so it can chown.${NC}"
+    fi
+fi
+
 # Initialize Wine prefix if it doesn't exist
 if [ ! -d "$WINEPREFIX/drive_c" ]; then
     echo ""
@@ -79,7 +104,25 @@ fi
 # Configure Wine registry for gaming optimizations
 echo -e "${BLUE}Applying Wine gaming optimizations...${NC}"
 
-gosu ${UNAME:-gameuser} wine reg add "HKCU\\Software\\Wine\\Direct3D" /v "renderer" /t REG_SZ /d "vulkan" /f 2>/dev/null || true
+# Allow per-game override of the Direct3D renderer.
+# Supported values: vulkan | opengl
+WINE_D3D_RENDERER="${WINE_D3D_RENDERER:-vulkan}"
+if [ "$WINE_D3D_RENDERER" != "vulkan" ] && [ "$WINE_D3D_RENDERER" != "opengl" ]; then
+    echo -e "${YELLOW}⚠ Invalid WINE_D3D_RENDERER='$WINE_D3D_RENDERER' (expected 'vulkan' or 'opengl'); defaulting to 'vulkan'${NC}"
+    WINE_D3D_RENDERER="vulkan"
+fi
+
+# If Vulkan is requested but not available, fall back to OpenGL.
+# This prevents hard crashes during device enumeration.
+if [ "$WINE_D3D_RENDERER" = "vulkan" ]; then
+    if [ ! -c /dev/dri/renderD128 ] && [ ! -c /dev/dri/renderD129 ] && [ ! -c /dev/dri/renderD130 ]; then
+        echo -e "${YELLOW}⚠ Vulkan requested but no /dev/dri/renderD* device found; falling back to OpenGL${NC}"
+        WINE_D3D_RENDERER="opengl"
+    fi
+fi
+
+echo "  Direct3D renderer: $WINE_D3D_RENDERER"
+gosu ${UNAME:-gameuser} wine reg add "HKCU\\Software\\Wine\\Direct3D" /v "renderer" /t REG_SZ /d "$WINE_D3D_RENDERER" /f 2>/dev/null || true
 gosu ${UNAME:-gameuser} wine reg add "HKCU\\Software\\Wine\\DirectSound" /v "DefaultSampleRate" /t REG_DWORD /d 44100 /f 2>/dev/null || true
 
 # Apply Wine virtual desktop if specified via WINE_VIRTUAL_DESKTOP environment variable
@@ -274,7 +317,7 @@ if [ "$#" -gt 0 ]; then
             echo ""
             gosu ${UNAME:-gameuser} $GAMESCOPE_CMD -- "$@"
         fi
-    else
+        else
         if [ "$ENABLE_MANGOHUD" = "true" ]; then
             echo -e "${BLUE}Executing with MangoHUD: mangohud $@${NC}"
             echo ""
@@ -286,7 +329,8 @@ if [ "$#" -gt 0 ]; then
         fi
     fi
     
-    # Capture exit code
+    # Capture exit code. Wine crashes (SIGSEGV) can bypass normal shell flow,
+    # but we still want KEEP_ALIVE to work whenever the script continues.
     EXIT_CODE=$?
     
     # Wait for Wine to finish writing registry and other files
@@ -294,7 +338,15 @@ if [ "$#" -gt 0 ]; then
     echo -e "${BLUE}Waiting for Wine to finish...${NC}"
     gosu ${UNAME:-gameuser} wineserver -w 2>/dev/null || true
     echo -e "${GREEN}✓ Wine shutdown complete${NC}"
-    
+
+    # Optional: keep container alive for debugging (even on failure)
+    if [ "${KEEP_ALIVE}" = "true" ]; then
+        echo ""
+        echo -e "${YELLOW}KEEP_ALIVE=true - container will remain running for inspection${NC}"
+        echo -e "${YELLOW}Exit code was: ${EXIT_CODE}${NC}"
+        exec tail -f /dev/null
+    fi
+
     # Exit with the game's exit code
     exit $EXIT_CODE
 else

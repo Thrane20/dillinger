@@ -30,15 +30,34 @@ ENV PUID=1000 \
 
 # Update system and install base packages + gosu
 RUN set -e && \
+    echo "**** Configure pacman (enable multilib) ****" && \
+    sed -i 's/^#\[multilib\]/[multilib]/' /etc/pacman.conf && \
+    sed -i '/^\[multilib\]$/,/^Include/s/^#Include/Include/' /etc/pacman.conf && \
+        \
+        echo "**** Configure pacman mirrors (prefer stable mirror) ****" && \
+        # The default geo mirror can be extremely slow/unreliable in some regions.
+        # Pin to kernel.org which is usually reliable, and keep fallbacks.
+        printf '%s\n' \
+            'Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch' \
+            'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' \
+            'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch' \
+            > /etc/pacman.d/mirrorlist && \
+    \
+    echo "**** Configure pacman defaults (non-interactive) ****" && \
+    sed -i 's/^#ParallelDownloads = .*/ParallelDownloads = 10/' /etc/pacman.conf && \
+    if ! grep -q '^ILoveCandy' /etc/pacman.conf; then echo 'ILoveCandy' >> /etc/pacman.conf; fi && \
+        # Increase transfer timeout and add some retries for flaky mirrors
+        if ! grep -q '^DisableDownloadTimeout' /etc/pacman.conf; then echo 'DisableDownloadTimeout' >> /etc/pacman.conf; fi && \
+    \
     echo "**** Initialize Arch Linux keyring ****" && \
     pacman-key --init && \
     pacman-key --populate archlinux && \
     \
     echo "**** Update system ****" && \
-    pacman -Syu --noconfirm && \
+    pacman -Syyu --noconfirm --needed && \
     \
     echo "**** Install base packages ****" && \
-    pacman -S --noconfirm \
+    pacman -S --noconfirm --needed \
         base-devel \
         curl wget \
         git \
@@ -78,7 +97,7 @@ RUN set -e && \
 RUN <<_INSTALL_DISPLAY
 set -e
 echo "**** Install X11 and Wayland support ****"
-pacman -S --noconfirm \
+pacman -S --noconfirm --needed \
     xorg-server \
     xorg-xauth \
     xorg-xinit \
@@ -105,20 +124,62 @@ _INSTALL_DISPLAY
 RUN <<_INSTALL_GPU
 set -e
 echo "**** Install Mesa and Vulkan drivers ****"
-pacman -S --noconfirm \
+GPU_PKGS=(
     mesa \
     mesa-utils \
     vulkan-icd-loader \
     vulkan-tools \
     vulkan-mesa-layers \
+    libva-mesa-driver \
+    vulkan-radeon
+)
+
+# Optional 32-bit userspace (requires multilib). Skip if repo/package isn't available.
+OPTIONAL_32BIT_PKGS=(
     lib32-mesa \
     lib32-vulkan-icd-loader \
-    nvidia-utils \
-    lib32-nvidia-utils \
-    libva-mesa-driver \
     lib32-libva-mesa-driver \
+    lib32-mesa-vdpau \
+    lib32-vulkan-radeon
+)
+
+# Optional VDPAU support (package name has changed over time on Arch)
+OPTIONAL_VDPAU_PKGS=(
     mesa-vdpau \
     lib32-mesa-vdpau
+)
+
+# Optional NVIDIA userspace. Skip on non-x86_64 and if packages aren't available.
+OPTIONAL_NVIDIA_PKGS=(
+    nvidia-utils \
+    lib32-nvidia-utils
+)
+
+pacman -S --noconfirm --needed "${GPU_PKGS[@]}"
+
+for pkg in "${OPTIONAL_32BIT_PKGS[@]}"; do
+    if pacman -Si "$pkg" >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed "$pkg"
+    else
+        echo "**** Skipping missing optional package: $pkg ****"
+    fi
+done
+
+for pkg in "${OPTIONAL_NVIDIA_PKGS[@]}"; do
+    if pacman -Si "$pkg" >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed "$pkg"
+    else
+        echo "**** Skipping missing optional package: $pkg ****"
+    fi
+done
+
+for pkg in "${OPTIONAL_VDPAU_PKGS[@]}"; do
+    if pacman -Si "$pkg" >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed "$pkg"
+    else
+        echo "**** Skipping missing optional package: $pkg ****"
+    fi
+done
 
 echo "**** Cleanup ****"
 pacman -Scc --noconfirm
@@ -131,13 +192,27 @@ _INSTALL_GPU
 RUN <<_INSTALL_AUDIO
 set -e
 echo "**** Install PulseAudio ****"
-pacman -S --noconfirm \
+AUDIO_PKGS=(
     pulseaudio \
     pulseaudio-alsa \
     alsa-utils \
-    alsa-plugins \
+    alsa-plugins
+)
+
+OPTIONAL_AUDIO_32BIT_PKGS=(
     lib32-alsa-plugins \
     lib32-libpulse
+)
+
+pacman -S --noconfirm --needed "${AUDIO_PKGS[@]}"
+
+for pkg in "${OPTIONAL_AUDIO_32BIT_PKGS[@]}"; do
+    if pacman -Si "$pkg" >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed "$pkg"
+    else
+        echo "**** Skipping missing optional package: $pkg ****"
+    fi
+done
 
 echo "**** Cleanup ****"
 pacman -Scc --noconfirm
@@ -149,7 +224,7 @@ _INSTALL_AUDIO
 
 RUN set -e && \
     echo "**** Install Gamescope, MangoHUD and dependencies ****" && \
-    pacman -S --noconfirm \
+    pacman -S --noconfirm --needed \
         gamescope \
         mangohud \
         noto-fonts-cjk \
@@ -168,7 +243,7 @@ ENV PATH="/usr/bin:${PATH}"
 RUN <<_INSTALL_MOONLIGHT
 set -e
 echo "**** Install Wolf/Moonlight dependencies ****"
-pacman -S --noconfirm \
+pacman -S --noconfirm --needed \
     openssl \
     icu \
     libevdev \
@@ -189,7 +264,7 @@ _INSTALL_MOONLIGHT
 RUN <<_INSTALL_GSTREAMER
 set -e
 echo "**** Install GStreamer for video/audio streaming ****"
-pacman -S --noconfirm \
+pacman -S --noconfirm --needed \
     gstreamer \
     gst-plugins-base \
     gst-plugins-good \

@@ -99,7 +99,7 @@
   }
 
   .card {
-    @apply bg-surface overflow-hidden shadow-neumorphic rounded-3xl border border-border transition-colors duration-300;
+    @apply bg-surface shadow-neumorphic rounded-3xl border border-border transition-colors duration-300;
   }
 
   .card-header {

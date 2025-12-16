@@ -13,6 +13,8 @@ export interface GameLaunchOptions {
   platform: Platform;
   sessionId: string;
   mode?: 'local' | 'streaming'; // Launch mode: local (host display) or streaming (Moonlight/Wolf)
+  keepContainer?: boolean; // If true, do not auto-remove container (debugging)
+  keepAlive?: boolean; // If true, keep runner alive after failure (debugging)
 }
 
 export interface GameInstallOptions {
@@ -21,6 +23,7 @@ export interface GameInstallOptions {
   platform: Platform;
   sessionId: string;
   game: Game; // Game object for slug and other metadata
+  installerArgs?: string; // Optional installer arguments
 }
 
 export interface ContainerInfo {
@@ -93,6 +96,35 @@ export class DockerService {
     this.installVolumeHostPath = '/mnt/linuxfast/dillinger_installed';
     logger.info(`Using default install volume path: ${this.installVolumeHostPath}`);
     return this.installVolumeHostPath;
+  }
+
+  /**
+   * Check if a path exists inside the `dillinger_installed` Docker volume.
+   * This avoids relying on host access to `/var/lib/docker/volumes/...`.
+   */
+  private async installedVolumePathExists(containerPathUnderInstalled: string): Promise<boolean> {
+    const clean = containerPathUnderInstalled.replace(/^\/+/, '');
+    const full = path.posix.join('/installed', clean);
+
+    // Use a tiny container to test for existence.
+    // We keep it minimal and non-interactive.
+    try {
+      const container = await docker.createContainer({
+        Image: 'alpine:3.20',
+        Cmd: ['sh', '-lc', `[ -e "${full}" ]`],
+        HostConfig: {
+          AutoRemove: true,
+          Binds: ['dillinger_installed:/installed:ro'],
+        },
+      } as any);
+
+      await container.start();
+      const wait = await container.wait();
+      return wait.StatusCode === 0;
+    } catch (error) {
+      logger.warn(`installedVolumePathExists check failed for ${full}:`, error);
+      return false;
+    }
   }
 
   /**
@@ -222,6 +254,45 @@ export class DockerService {
     }
 
     return containerPath;
+  }
+
+  /**
+   * Normalize a user-configured install path (often under the public install root)
+   * to the actual host path of the `dillinger_installed` Docker volume.
+   *
+   * In some environments the UI stores install paths like:
+   *   /mnt/linuxfast/dillinger_installed/<game>
+   * while Docker bind mounts must use the volume host root:
+   *   /var/lib/docker/volumes/dillinger_installed/_data/<game>
+   */
+  private async normalizeInstalledPath(maybePublicPath: string): Promise<string> {
+    await this.detectHostPath();
+
+    const installVolumeHostRoot = this.getHostPath(await this.getInstallVolumeHostPath());
+    const containerInstalledRoot = '/installed';
+    const defaultPublicRoot = '/mnt/linuxfast/dillinger_installed';
+    const publicRoot = process.env.DILLINGER_INSTALLED_PUBLIC_PATH || defaultPublicRoot;
+
+    // If the path is already inside the volume host root, keep it.
+    if (maybePublicPath === installVolumeHostRoot || maybePublicPath.startsWith(installVolumeHostRoot + '/')) {
+      return maybePublicPath;
+    }
+
+    // Canonical (Option A): user stores container paths under /installed
+    if (maybePublicPath === containerInstalledRoot || maybePublicPath.startsWith(containerInstalledRoot + '/')) {
+      const rel = maybePublicPath.substring(containerInstalledRoot.length);
+      return installVolumeHostRoot + rel;
+    }
+
+    // If the path is under the public root, map it to the volume host root.
+    if (maybePublicPath === publicRoot || maybePublicPath.startsWith(publicRoot + '/')) {
+      const rel = maybePublicPath.substring(publicRoot.length);
+      // rel includes leading '/', which is what we want.
+      return installVolumeHostRoot + rel;
+    }
+
+    // Otherwise, attempt generic container->host translation (devcontainer mounts etc.)
+    return this.getHostPath(maybePublicPath);
   }
 
   /**
@@ -418,48 +489,67 @@ export class DockerService {
     };
     
     if (platform.type === 'wine') {
-      // Convert Windows path to Linux path in Wine prefix
-      // Remove drive letter (C:) and convert backslashes to forward slashes
-      let linuxPath = launchCommand.replace(/^[A-Za-z]:/, ''); // Remove "C:"
-      linuxPath = linuxPath.replace(/\\/g, '/'); // Convert backslashes
-      
-      // Construct full path: /wineprefix/drive_c/path/to/game.exe
-      gameExecutable = path.posix.join('/wineprefix/drive_c', linuxPath);
-      
+      // For Wine games, we pass a container path executable via env (GAME_EXECUTABLE)
+      // and let the runner use WINEPREFIX (also set via env). This avoids hardcoding
+      // legacy /wineprefix paths now that prefixes live under /installed.
+
       // Prepare clean arguments
       const cleanArgs = launchArgs
         .filter(arg => arg && typeof arg === 'string')
         .map(arg => arg.replace(/\0/g, ''))
         .filter(arg => arg !== ''); // Remove empty strings
-      
-      // Build Wine command with Linux path: wine /wineprefix/drive_c/GOG Games/.../game.exe arg1 arg2
-      cmdArray = ['wine', gameExecutable, ...cleanArgs];
-      
-      // Working directory doesn't matter - WINEPREFIX handles it
-      containerWorkingDir = '/wineprefix';
-      
+
+      // Resolve Windows-style command into a path under the mounted prefix.
+      // This will later be rewritten from `/wineprefix/...` to `/installed/...`.
+      let linuxPath = launchCommand.replace(/^[A-Za-z]:/, '');
+      linuxPath = linuxPath.replace(/\\/g, '/');
+      gameExecutable = path.posix.join('/wineprefix/drive_c', linuxPath);
+
+      // Note: Docker's `Cmd` does not perform shell expansion, so passing
+      // `$GAME_EXECUTABLE` would be treated as a literal filename. Use a shell
+      // wrapper so the variable expands at runtime.
+      const escapedArgs = cleanArgs.map((a) => a.replace(/"/g, '\\"'));
+      const argsJoined = escapedArgs.map((a) => `"${a}"`).join(' ');
+
+      // If keepAlive is enabled, ensure the container stays running after Wine exits
+      // so the user can `docker exec` and inspect files/logs.
+      const keepAliveSuffix = options.keepAlive === true
+        ? ' ; EXIT_CODE=$? ; echo "[dillinger] wine exited with code: ${EXIT_CODE}" ; tail -f /dev/null'
+        : '';
+
+      cmdArray = ['bash', '-lc', `wine "${'${GAME_EXECUTABLE}'}"${argsJoined ? ` ${argsJoined}` : ''}${keepAliveSuffix}`];
+      // Set working directory to the executable directory.
+      // Some Windows games rely on relative paths to DLLs/data next to the EXE.
+      // Note: GAME_EXECUTABLE will be rewritten from /wineprefix/... to /installed/... later,
+      // so we use the expected rewritten path when computing the working directory.
+      const expectedPrefixRoot = `/installed/${game.id}/wineprefix-${game.id}`;
+      const expectedExecutable = gameExecutable.startsWith('/wineprefix/')
+        ? `${expectedPrefixRoot}${gameExecutable.substring('/wineprefix'.length)}`
+        : gameExecutable;
+      containerWorkingDir = path.posix.dirname(expectedExecutable);
+
       logger.info(`Launching game: ${game.title}`);
       logger.info(`  Container Image: ${platform.configuration.containerImage}`);
       logger.info(`  Original Windows path: ${launchCommand}`);
-      logger.info(`  Converted Linux path: ${gameExecutable}`);
-      logger.info(`  Wine command: ${cmdArray.join(' ')}`);
-      logger.info(`  Container working dir: ${containerWorkingDir}`);
+      logger.info(`  Wine command (template): ${cmdArray.join(' ')}`);
+      logger.info(`  Working directory: ${containerWorkingDir}`);
     } else if (platform.configuration.containerImage?.includes('runner-retroarch')) {
       // For RetroArch games
       const core = game.settings?.emulator?.core || platform.configuration.defaultSettings?.emulator?.core || 'mame';
-      
-      // Set RETROARCH_CORE env var
-      environment['RETROARCH_CORE'] = core;
       
       const romPath = game.filePath;
       
       if (romPath === 'MENU') {
         // Launch into menu without a ROM
+        // Do NOT set RETROARCH_CORE to avoid pre-loading a core
         gameExecutable = 'retroarch';
         cmdArray = [];
         containerWorkingDir = '/home/gameuser';
         logger.info(`Launching RetroArch Menu (Setup Mode)`);
       } else {
+        // Set RETROARCH_CORE env var for normal games
+        environment['RETROARCH_CORE'] = core;
+
         if (!romPath) {
           throw new Error('No ROM file specified for RetroArch game');
         }
@@ -607,9 +697,50 @@ export class DockerService {
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
 
+    // Inject Joystick Configuration
+    try {
+      const settingsService = SettingsService.getInstance();
+      const joystickSettings = await settingsService.getJoystickSettings();
+      
+      // Determine platform category for joystick mapping
+      let joystickPlatform = 'default';
+      const platformType = platform.type as string;
+      
+      if (platformType === 'arcade' || game.platformId === 'mame' || game.platformId === 'arcade' || platform.configuration.containerImage?.includes('retroarch')) {
+        joystickPlatform = 'arcade';
+      } else if (platformType === 'console' || ['nes', 'snes', 'genesis', 'psx', 'n64'].includes(game.platformId || '')) {
+        joystickPlatform = 'console';
+      } else if (platformType === 'computer' || ['c64', 'amiga', 'dos', 'pc'].includes(game.platformId || '')) {
+        joystickPlatform = 'computer';
+      }
+
+      // Check for specific platform config first, then fallback to category
+      const joystickConfig = joystickSettings[game.platformId || ''] || joystickSettings[joystickPlatform];
+      
+      if (joystickConfig) {
+        env.push(`JOYSTICK_DEVICE_ID=${joystickConfig.deviceId}`);
+        env.push(`JOYSTICK_DEVICE_NAME=${joystickConfig.deviceName}`);
+        logger.info(`  Joystick configured: ${joystickConfig.deviceName} (${joystickConfig.deviceId})`);
+      }
+    } catch (err) {
+      logger.warn('Failed to inject joystick configuration:', err);
+    }
+
     // Pass PUID/PGID to runner if set in environment
     if (process.env.PUID) env.push(`PUID=${process.env.PUID}`);
     if (process.env.PGID) env.push(`PGID=${process.env.PGID}`);
+
+    // Pass global GPU selection to runner (base entrypoint consumes GPU_VENDOR)
+    try {
+      const settingsService = SettingsService.getInstance();
+      const gpuSettings = await settingsService.getGpuSettings();
+      if (gpuSettings?.vendor) {
+        env.push(`GPU_VENDOR=${gpuSettings.vendor}`);
+        logger.info(`  GPU vendor preference: ${gpuSettings.vendor}`);
+      }
+    } catch (err) {
+      logger.warn('Failed to load GPU settings:', err);
+    }
 
     // Add Wine-specific configuration
     const wineConfig = game.settings?.wine;
@@ -726,12 +857,27 @@ export class DockerService {
       // Note: WINEARCH should NOT be set when launching with an existing prefix
       // Wine will auto-detect the architecture from the existing prefix
       // Setting it causes "not supported in wow64 mode" errors
+      //
+      // IMPORTANT: `gameExecutable` is set earlier in launchGame(). Use it as-is.
+      // Do NOT overwrite it with a placeholder string.
       env.push(
         `WINEDEBUG=${wineDebug}`,
         'WINEPREFIX=/wineprefix',
         `GAME_EXECUTABLE=${gameExecutable}`,
         `GAME_ARGS=${cleanArgs}`
       );
+
+      // Allow per-game selection of D3D renderer (Wine runner consumes WINE_D3D_RENDERER)
+      const renderer = game.settings?.wine?.renderer;
+      if (renderer === 'vulkan' || renderer === 'opengl') {
+        env.push(`WINE_D3D_RENDERER=${renderer}`);
+        logger.info(`  Wine renderer: ${renderer}`);
+      }
+
+      if (options.keepAlive === true) {
+        env.push('KEEP_ALIVE=true');
+        logger.info('  KEEP_ALIVE enabled for Wine runner');
+      }
       
       // Note: Wine virtual desktop disabled due to input handling issues
       // Users should enable gamescope for fullscreen support instead
@@ -755,31 +901,62 @@ export class DockerService {
     logger.info(`  WINEPREFIX will be set to: /wineprefix`);
     
     // Determine Wine prefix path if this is a Wine game
-    // The game files are in the filePath (e.g., "close-combat-iii-the-russian-front")
-    // The Wine prefix is in dillinger_installed/wineprefix-<slug>
+    // Wine prefix layout:
+    // - Preferred (current installer flow): <installation.installPath>/wineprefix-<slug>
+    // - Legacy fallback: <dillinger_installed volume root>/wineprefix-<slug>
     const gameIdentifier = game.slug || game.id;
     let winePrefixPath: string | null = null;
     let emulatorHomePath: string | null = null;
     
     if (platform.type === 'wine') {
-      // Extract the base directory from the game's filePath
-      // filePath is like "close-combat-iii-the-russian-front" or "games/my-game"
-      const filePath = game.filePath || '';
-      const gameBasePath = filePath.split('/')[0]; // Get first segment
-      const installBasePath = filePath.includes('/') 
-        ? filePath.substring(0, filePath.lastIndexOf('/'))
-        : '';
-      
-      // Get host install path dynamically
-      const hostInstallPath = await this.getInstallVolumeHostPath();
-      winePrefixPath = path.posix.join(
-        this.getHostPath(hostInstallPath),
-        `wineprefix-${gameIdentifier}`
-      );
-      
-      logger.info(`  Wine prefix: ${winePrefixPath}`);
-    } else if (game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) {
-      // For emulator games (VICE Commodore, FS-UAE Amiga, or MAME), create a per-game home directory
+      const fs = await import('fs-extra');
+
+      // IMPORTANT: the backend process may not have permission to read
+      // `/var/lib/docker/volumes/...` on the host, even though Docker itself can.
+      // So we probe for existence *inside the dillinger_installed volume*.
+
+      const configuredInstallPath = game.installation?.installPath;
+
+      const candidates: string[] = [];
+      // Prefer per-game directory (Option A): /installed/<gameId>/wineprefix-<gameId>
+      candidates.push(path.posix.join(gameIdentifier, `wineprefix-${gameIdentifier}`));
+      // Legacy root prefix: /installed/wineprefix-<gameId>
+      candidates.push(`wineprefix-${gameIdentifier}`);
+
+      // If installPath is /installed/<something>, try that too.
+      if (configuredInstallPath && configuredInstallPath.startsWith('/installed/')) {
+        const rel = configuredInstallPath.replace(/^\/installed\//, '');
+        if (rel) {
+          candidates.unshift(path.posix.join(rel, `wineprefix-${gameIdentifier}`));
+        }
+      }
+
+      // Deduplicate
+      const seen = new Set<string>();
+      const uniqueCandidates = candidates.filter((p) => {
+        if (seen.has(p)) return false;
+        seen.add(p);
+        return true;
+      });
+
+      for (const relCandidate of uniqueCandidates) {
+        if (await this.installedVolumePathExists(relCandidate)) {
+          winePrefixPath = path.posix.join('/installed', relCandidate);
+          logger.info(`  Wine prefix (installed volume): ${winePrefixPath}`);
+          break;
+        }
+      }
+
+      if (!winePrefixPath) {
+        logger.warn(`  ⚠ No Wine prefix found in installed volume for game: ${gameIdentifier}`);
+        logger.warn(`    installPath: ${configuredInstallPath || '(none)'}`);
+        logger.warn(`    Probed container paths:`);
+        for (const p of uniqueCandidates) {
+          logger.warn(`      - /installed/${p}`);
+        }
+      }
+    } else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
+      // For emulator games (VICE Commodore, FS-UAE Amiga, MAME, or RetroArch), create a per-game home directory
       // This allows each game to have its own emulator config, saves, screenshots, etc.
       const dillingerRoot = this.storage.getDillingerRoot();
       const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
@@ -813,6 +990,31 @@ export class DockerService {
         await chmod(pulseDir, 0o777);
         await chmod(cacheDir, 0o777);
         logger.info(`  Emulator home directory: ${emulatorHomePath}`);
+
+        // --- MASTER CONFIG INJECTION ---
+        // Check if this is an Arcade/RetroArch game and if we need to inject the master config
+        const platformType = platform.type as string;
+        if (platformType === 'arcade' || game.platformId === 'mame' || game.platformId === 'arcade' || platform.configuration.containerImage?.includes('retroarch')) {
+          const retroArchConfigPath = path.join(emulatorHomePath, '.config', 'retroarch', 'retroarch.cfg');
+          
+          // If config doesn't exist, try to copy from master
+          if (!await fs.pathExists(retroArchConfigPath)) {
+            const masterConfigPath = path.join(dillingerRoot, 'storage', 'platform-configs', 'arcade', 'retroarch.cfg');
+            
+            if (await fs.pathExists(masterConfigPath)) {
+              logger.info(`  Injecting Master Arcade Config from: ${masterConfigPath}`);
+              await fs.ensureDir(path.dirname(retroArchConfigPath));
+              await fs.copy(masterConfigPath, retroArchConfigPath);
+              await chmod(retroArchConfigPath, 0o666); // Ensure writable
+            } else {
+              logger.warn(`  Master Arcade Config not found at: ${masterConfigPath}`);
+            }
+          } else {
+             logger.info(`  Using existing game-specific config: ${retroArchConfigPath}`);
+          }
+        }
+        // -------------------------------
+
       } catch (error: any) {
         logger.error(`  ✗ Failed to create emulator home directory: ${error.message}`);
         logger.error(`    Path: ${emulatorHomePath}`);
@@ -831,9 +1033,57 @@ export class DockerService {
     
     // For Wine games, mount the Wine prefix
     if (platform.type === 'wine' && winePrefixPath) {
-      binds.push(`${winePrefixPath}:/wineprefix:rw`);
-      logger.info(`  Mounting Wine prefix: ${winePrefixPath} -> /wineprefix`);
+      // Rewrite WINEPREFIX and GAME_EXECUTABLE to point at the prefix path inside /installed.
+      for (let i = 0; i < env.length; i++) {
+        const entry = env[i];
+        if (!entry) continue;
+
+        if (entry.startsWith('WINEPREFIX=')) {
+          env[i] = `WINEPREFIX=${winePrefixPath}`;
+          continue;
+        }
+        if (entry.startsWith('GAME_EXECUTABLE=/wineprefix/')) {
+          const rel = entry.substring('GAME_EXECUTABLE=/wineprefix'.length);
+          env[i] = `GAME_EXECUTABLE=${winePrefixPath}${rel}`;
+        }
+      }
+
+      // Preflight: ensure the target executable exists within the selected prefix.
+      // This avoids launching with the wrong prefix and getting a vague Wine error.
+      try {
+        const maybeGameExecutable = env.find((e) => e.startsWith('GAME_EXECUTABLE='));
+        if (maybeGameExecutable) {
+          const gameExecutable = maybeGameExecutable.substring('GAME_EXECUTABLE='.length);
+          // Existence check inside installed volume using helper.
+          if (gameExecutable.startsWith('/installed/')) {
+            const relUnderInstalled = gameExecutable.substring('/installed/'.length);
+            if (!(await this.installedVolumePathExists(relUnderInstalled))) {
+              logger.error(`  ✗ Executable not found inside installed volume prefix:`);
+              logger.error(`    GAME_EXECUTABLE: ${gameExecutable}`);
+              throw new Error('Executable not found in Wine prefix (prefix is likely wrong or install is incomplete)');
+            }
+          }
+        }
+      } catch (err) {
+        // Re-throw so launch fails fast with a useful message.
+        throw err;
+      }
+
+      // Do NOT bind-mount /wineprefix from host. We already have the installed volume mounted at /installed,
+      // and we pointed WINEPREFIX+GAME_EXECUTABLE into it.
+      logger.info(`  Using Wine prefix inside installed volume: ${winePrefixPath}`);
+
+      // Log the effective (rewritten) Wine env for debugging.
+      const effectiveWinePrefix = env.find((e) => e.startsWith('WINEPREFIX='));
+      const effectiveGameExecutable = env.find((e) => e.startsWith('GAME_EXECUTABLE='));
+      if (effectiveWinePrefix) logger.info(`  Effective ${effectiveWinePrefix}`);
+      if (effectiveGameExecutable) logger.info(`  Effective ${effectiveGameExecutable}`);
     } 
+    else if (platform.type === 'wine' && !winePrefixPath) {
+      // Without a prefix mount, the container will get an empty anonymous volume at /wineprefix
+      // and Wine will fail to find the installed game files.
+      throw new Error('Wine prefix not found; refusing to launch without /wineprefix bind mount');
+    }
     // For Commodore, Amiga, MAME, and RetroArch emulator games, mount the ROM file directory and per-game home
     else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
       if (game.filePath && game.filePath !== 'MENU') {
@@ -867,8 +1117,11 @@ export class DockerService {
          logger.info(`  Mounting BIOS directory: ${hostBiosPath} -> /bios`);
       }
     } 
-    // For other games, mount the game directory
-    else {
+    // For other games, mount the game directory.
+    // Wine games should NOT mount `/game` via dillinger_current_session:
+    // they run from `/wineprefix` and the session volume can accidentally
+    // point at a single ROM file (causing Docker "not a directory").
+    else if (platform.type !== 'wine') {
       binds.push(`${this.SESSION_VOLUME}:/game:ro`);
       logger.info(`  Mounting game directory: ${this.SESSION_VOLUME} -> /game`);
     }
@@ -879,11 +1132,15 @@ export class DockerService {
 
     try {
       // Get Docker settings for auto-remove policy
+      // Allow a per-launch override for debugging.
       const settingsService = SettingsService.getInstance();
       const dockerSettings = await settingsService.getDockerSettings();
-      const autoRemove = dockerSettings.autoRemoveContainers !== undefined 
-        ? dockerSettings.autoRemoveContainers 
-        : false; // Default to false (keep containers)
+      const keepContainer = options.keepContainer === true;
+      const autoRemove = keepContainer
+        ? false
+        : (dockerSettings.autoRemoveContainers !== undefined
+          ? dockerSettings.autoRemoveContainers
+          : false); // Default to false (keep containers)
 
       // Create and start the container
       const containerConfig: any = {
@@ -904,6 +1161,10 @@ export class DockerService {
         AttachStdout: true,
         AttachStderr: true,
       };
+
+      if (keepContainer) {
+        logger.info('  Keep container enabled: container will not be auto-removed');
+      }
       
       // Expose Moonlight ports if streaming is enabled
       if (moonlightConfig?.enabled) {
@@ -1001,12 +1262,24 @@ export class DockerService {
     };
     
     if (platform.type === 'wine') {
-      const hostInstallPath = await this.getInstallVolumeHostPath();
-      winePrefixPath = path.posix.join(
-        this.getHostPath(hostInstallPath),
-        `wineprefix-${gameIdentifier}`
-      );
-      logger.info(`  Debug Wine prefix: ${winePrefixPath}`);
+      const fs = await import('fs-extra');
+
+      const configuredInstallPath = game.installation?.installPath;
+      if (configuredInstallPath) {
+        const normalizedInstallPath = await this.normalizeInstalledPath(configuredInstallPath);
+        const preferredPrefixPath = path.posix.join(normalizedInstallPath, `wineprefix-${gameIdentifier}`);
+        if (await fs.pathExists(preferredPrefixPath)) {
+          winePrefixPath = preferredPrefixPath;
+          logger.info(`  Debug Wine prefix (per-game installPath): ${winePrefixPath}`);
+        }
+      }
+
+      if (!winePrefixPath) {
+        const hostInstallPath = await this.getInstallVolumeHostPath();
+        const legacyPrefixPath = path.posix.join(this.getHostPath(hostInstallPath), `wineprefix-${gameIdentifier}`);
+        winePrefixPath = legacyPrefixPath;
+        logger.info(`  Debug Wine prefix (legacy volume root): ${winePrefixPath}`);
+      }
     } else if (game.platformId && (viceEmulators[game.platformId] || mameEmulators[game.platformId])) {
       // For emulator games, prepare the per-game home directory
       const dillingerRoot = this.storage.getDillingerRoot();
@@ -1404,7 +1677,7 @@ export class DockerService {
    * with X11/Wayland passthrough so the user sees the installation wizard
    */
   async installGame(options: GameInstallOptions): Promise<ContainerInfo> {
-    const { installerPath, installPath, platform, sessionId, game } = options;
+    const { installerPath, installPath, platform, sessionId, game, installerArgs } = options;
 
     // Ensure host path is detected
     await this.detectHostPath();
@@ -1415,9 +1688,10 @@ export class DockerService {
     logger.info(`  Container Image: ${platform.configuration.containerImage}`);
     logger.info(`  Game slug: ${game.slug || game.id}`);
 
-    // Convert paths to host paths if running in devcontainer
+    // Convert paths to host paths for Docker bind mounts
     const hostInstallerPath = this.getHostPath(installerPath);
-    const hostInstallPath = this.getHostPath(installPath);
+    // Option A canonical: installPath should be a container path under /installed
+    const hostInstallPath = await this.normalizeInstalledPath(installPath);
 
     // Get display forwarding configuration
     const displayConfig = await this.getDisplayConfiguration();
@@ -1434,6 +1708,8 @@ export class DockerService {
     if (platform.type === 'wine') {
       try {
         const fs = await import('fs-extra');
+        // Ensure install root exists too
+        await fs.ensureDir(hostInstallPath);
         // Create directory if it doesn't exist
         await fs.ensureDir(winePrefixPath);
         // Set permissions to 777 so Wine user in container can access it
@@ -1451,6 +1727,11 @@ export class DockerService {
       `INSTALL_TARGET=/install`,
       ...displayConfig.env
     ];
+
+    // Optional installer args passed through to runner entrypoint
+    if (installerArgs) {
+      env.push(`INSTALLER_ARGS=${installerArgs}`);
+    }
 
     // Pass PUID/PGID to runner if set in environment
     if (process.env.PUID) env.push(`PUID=${process.env.PUID}`);
@@ -1575,7 +1856,11 @@ export class DockerService {
     const path = await import('path');
     
     try {
+      const hostInstallPath = await this.normalizeInstalledPath(installPath);
       logger.info(`🔍 Scanning for game executables in: ${installPath}`);
+      if (hostInstallPath !== installPath) {
+        logger.info(`  Host path: ${hostInstallPath}`);
+      }
       
       const executables: string[] = [];
       
@@ -1588,7 +1873,7 @@ export class DockerService {
           
           for (const item of items) {
             const itemPath = path.join(dirPath, item.name);
-            const relativePath = path.relative(installPath, itemPath);
+            const relativePath = path.relative(hostInstallPath, itemPath);
             
             if (item.isFile()) {
               const ext = path.extname(item.name).toLowerCase();
@@ -1626,7 +1911,7 @@ export class DockerService {
         }
       };
       
-      await scanDirectory(installPath);
+      await scanDirectory(hostInstallPath);
       
       // Sort executables by likelihood (shorter paths and better names first)
       executables.sort((a, b) => {
@@ -1661,7 +1946,11 @@ export class DockerService {
     const path = await import('path');
     
     try {
+      const hostInstallPath = await this.normalizeInstalledPath(installPath);
       logger.info(`🔍 Scanning for shortcuts in: ${installPath}`);
+      if (hostInstallPath !== installPath) {
+        logger.info(`  Host path: ${hostInstallPath}`);
+      }
       
       const shortcuts: string[] = [];
       
@@ -1674,7 +1963,7 @@ export class DockerService {
           
           for (const item of items) {
             const itemPath = path.join(dirPath, item.name);
-            const relativePath = path.relative(installPath, itemPath);
+            const relativePath = path.relative(hostInstallPath, itemPath);
             
             if (item.isFile()) {
               const ext = path.extname(item.name).toLowerCase();
@@ -1695,7 +1984,7 @@ export class DockerService {
         }
       };
       
-      await scanDirectory(installPath);
+      await scanDirectory(hostInstallPath);
       
       logger.info(`✓ Found ${shortcuts.length} shortcut files`);
       return shortcuts;
@@ -2046,6 +2335,48 @@ export class DockerService {
     }
   }
 
+  async inspectContainer(containerId: string): Promise<any> {
+    try {
+      const container = docker.getContainer(containerId);
+      return await container.inspect();
+    } catch (error) {
+      if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 404) {
+        throw new Error('Container not found');
+      }
+      logger.error('Error inspecting container:', error);
+      throw new Error(`Failed to inspect container: ${error}`);
+    }
+  }
+
+  async stopContainer(containerId: string): Promise<void> {
+    try {
+      const container = docker.getContainer(containerId);
+      await container.stop();
+    } catch (error: any) {
+      if (error?.statusCode === 304) {
+        return; // already stopped
+      }
+      if (error?.statusCode === 404) {
+        throw new Error('Container not found');
+      }
+      logger.error('Error stopping container:', error);
+      throw new Error(`Failed to stop container: ${error}`);
+    }
+  }
+
+  async removeContainer(containerId: string, force: boolean = true): Promise<void> {
+    try {
+      const container = docker.getContainer(containerId);
+      await container.remove({ force });
+    } catch (error: any) {
+      if (error?.statusCode === 404) {
+        throw new Error('Container not found');
+      }
+      logger.error('Error removing container:', error);
+      throw new Error(`Failed to remove container: ${error}`);
+    }
+  }
+
   /**
    * Get display forwarding configuration based on host environment
    * Supports X11 and Wayland display protocols
@@ -2114,6 +2445,18 @@ export class DockerService {
       if (existsSync('/dev/input')) {
         devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
         logger.info(`  ✓ Input devices available (keyboard, mouse, joystick)`);
+
+        // Also mount /proc/bus/input/devices so we can identify devices by name
+        // Mount to /tmp/host-input-devices to avoid "inside /proc" mount errors
+        if (existsSync('/proc/bus/input/devices')) {
+          volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
+        }
+
+        // Mount /run/udev to allow libudev to query device details (names, capabilities)
+        if (existsSync('/run/udev')) {
+          volumes.push('/run/udev:/run/udev:ro');
+          logger.info(`  ✓ udev database mounted`);
+        }
       }
       
       // Add explicit joystick devices (js0, js1, js2, etc.)
@@ -2179,10 +2522,24 @@ export class DockerService {
         logger.info(`  ✓ Sound device available`);
       }
       
+      const volumes = [`${waylandSocket}:/run/user/1000/${waylandDisplay}:rw`];
+
       // Add input devices for keyboard, mouse, and joystick support
       if (existsSync('/dev/input')) {
         devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
         logger.info(`  ✓ Input devices available (keyboard, mouse, joystick)`);
+
+        // Also mount /proc/bus/input/devices so we can identify devices by name
+        // Mount to /tmp/host-input-devices to avoid "inside /proc" mount errors
+        if (existsSync('/proc/bus/input/devices')) {
+          volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
+        }
+
+        // Mount /run/udev to allow libudev to query device details (names, capabilities)
+        if (existsSync('/run/udev')) {
+          volumes.push('/run/udev:/run/udev:ro');
+          logger.info(`  ✓ udev database mounted`);
+        }
       }
       
       // Add explicit joystick devices (js0, js1, js2, etc.)
@@ -2210,9 +2567,7 @@ export class DockerService {
           'GDK_BACKEND=wayland',
           'SDL_VIDEODRIVER=wayland'
         ],
-        volumes: [
-          `${waylandSocket}:/run/user/1000/${waylandDisplay}:rw`
-        ],
+        volumes,
         devices,
         securityOpt: []
       };

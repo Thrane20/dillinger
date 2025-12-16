@@ -14,7 +14,7 @@ LABEL version="2.0.0"
 RUN <<_INSTALL_NATIVE
 set -e
 echo "**** Installing native Linux gaming libraries ****"
-pacman -S --noconfirm \
+pacman -S --noconfirm --needed \
     sdl2 \
     sdl2_image \
     sdl2_mixer \
@@ -34,11 +34,20 @@ pacman -S --noconfirm \
     ncurses
 
 echo "**** Install 32-bit libraries for 32-bit games ****"
-pacman -S --noconfirm \
+OPTIONAL_32BIT_PKGS=(
     lib32-sdl2 \
     lib32-openal \
     lib32-mesa \
     lib32-glu
+)
+
+for pkg in "${OPTIONAL_32BIT_PKGS[@]}"; do
+    if pacman -Si "$pkg" >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed "$pkg"
+    else
+        echo "**** Skipping missing optional package: $pkg ****"
+    fi
+done
 
 echo "**** Cleanup ****"
 pacman -Scc --noconfirm

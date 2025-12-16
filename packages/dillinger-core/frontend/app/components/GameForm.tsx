@@ -8,6 +8,7 @@ import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
 import ContainerLogsDialog from './ContainerLogsDialog';
+import Link from 'next/link';
 
 interface GameFormData {
   id?: string;
@@ -32,6 +33,7 @@ interface GameFormData {
     wine?: {
       arch?: 'win32' | 'win64';
       useDxvk?: boolean;
+      renderer?: 'vulkan' | 'opengl';
       compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10';
       dlls?: Record<string, string>;
       debug?: {
@@ -143,6 +145,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     settings: {
       wine: {
         arch: 'win64',
+        renderer: 'vulkan',
         debug: {},
       },
       launch: {
@@ -153,6 +156,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       },
     },
   });
+
+  const scrapeHref = mode === 'edit' && gameId
+    ? `/games/${gameId}/scrape?title=${encodeURIComponent(formData.title || '')}`
+    : null;
+
+  // Convenience accessors for the currently selected platform config
+  const activePlatformConfig = formData.platforms.find(p => p.platformId === formData.platformId);
+  const activeInstallation = activePlatformConfig?.installation || formData._originalGame?.installation;
 
   // Load game data if in edit mode
   useEffect(() => {
@@ -209,6 +220,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   wine: {
                     arch: activeSettings?.wine?.arch || 'win64',
                     useDxvk: activeSettings?.wine?.useDxvk || false,
+                    renderer: activeSettings?.wine?.renderer || 'vulkan',
                     compatibilityMode: activeSettings?.wine?.compatibilityMode || 'none',
                     dlls: activeSettings?.wine?.dlls || {},
                     debug: activeSettings?.wine?.debug || {},
@@ -254,7 +266,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
 
   // Poll for installation status when installation is in progress
   useEffect(() => {
-    if (mode === 'edit' && gameId && formData._originalGame?.installation?.status === 'installing') {
+    if (mode === 'edit' && gameId && activeInstallation?.status === 'installing') {
       const pollInstallationStatus = async () => {
         try {
           const response = await fetch(`/api/games/${gameId}/install/status`);
@@ -290,7 +302,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     
     // Return undefined if condition not met
     return undefined;
-  }, [mode, gameId, formData._originalGame?.installation?.status]);
+  }, [mode, gameId, activeInstallation?.status]);
 
   // Load available images from scraped metadata
   useEffect(() => {
@@ -1078,6 +1090,76 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
               <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
 
+              {/* Wine Installation Helper */}
+              {formData.platformId === 'windows-wine' && mode === 'edit' && gameId && (
+                <div className="space-y-3 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-text">Wine Installation</div>
+                      <div className="text-xs text-gray-500">
+                        Pick an installer, run it in the Wine runner, then select what to launch.
+                      </div>
+                    </div>
+
+                    {activeInstallation?.status !== 'installed' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowInstallDialog(true)}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                      >
+                        {activeInstallation?.status === 'installing' ? 'Installing…' : 'Install / Reinstall'}
+                      </button>
+                    )}
+                  </div>
+
+                  {activeInstallation?.status === 'installing' && (
+                    <div className="text-sm text-yellow-700 dark:text-yellow-300">
+                      Installation is running. When you finish the installer, come back here — we’ll auto-detect executables and shortcuts.
+                    </div>
+                  )}
+
+                  {activeInstallation?.status === 'failed' && (
+                    <div className="text-sm text-red-700 dark:text-red-300">
+                      Installation failed{activeInstallation?.error ? `: ${activeInstallation.error}` : '.'}
+                    </div>
+                  )}
+
+                  {activeInstallation?.status === 'installed' && activeInstallation?.installPath && (
+                    <div className="space-y-2">
+                      <div className="text-sm text-green-700 dark:text-green-300">Installed</div>
+                      {typeof (activeInstallation as any)?.installerArgs === 'string' && (activeInstallation as any).installerArgs.trim() !== '' && (
+                        <div className="text-xs text-gray-500">
+                          Installer args: <span className="font-mono break-all">{(activeInstallation as any).installerArgs}</span>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowShortcutDialog(true)}
+                          className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                          title="Search for Windows shortcuts (.lnk)"
+                        >
+                          <MagnifyingGlassIcon className="w-4 h-4" />
+                          Find Shortcuts
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowFileExplorer(true)}
+                          className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                          title="Browse installation directory to pick an executable"
+                        >
+                          <FolderIcon className="w-4 h-4" />
+                          Browse Install Folder
+                        </button>
+                      </div>
+                      <div className="text-xs text-gray-500 font-mono break-all">
+                        {activeInstallation.installPath}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label htmlFor="settings.launch.command" className="block text-sm font-medium text-muted mb-2">
                   Launch Command
@@ -1092,7 +1174,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
                     placeholder="./start.sh or game.exe"
                   />
-                  {formData._originalGame?.installation?.status === 'installed' && formData._originalGame?.installation?.installPath && (
+                  {activeInstallation?.status === 'installed' && activeInstallation?.installPath && (
                     <>
                       <button
                         type="button"
@@ -1135,6 +1217,25 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               {/* Display Options - only show for Wine platform */}
               {formData.platformId === 'windows-wine' && (
                 <>
+                  <div>
+                    <label htmlFor="settings.wine.renderer" className="block text-sm font-medium text-muted mb-2">
+                      Renderer
+                    </label>
+                    <select
+                      id="settings.wine.renderer"
+                      name="settings.wine.renderer"
+                      value={formData.settings?.wine?.renderer || 'vulkan'}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                    >
+                      <option value="vulkan">Vulkan (DXVK)</option>
+                      <option value="opengl">OpenGL (WineD3D)</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Vulkan is faster when supported; OpenGL can help if Vulkan init fails.
+                    </p>
+                  </div>
+
                   <div className="col-span-2">
                     <label className="flex items-center space-x-2 cursor-pointer">
                       <input
@@ -1781,6 +1882,28 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             </div>
           )}
 
+          {/* Scrape Data */}
+          {scrapeHref && (
+            <div className="space-y-3 mb-6">
+              <h3 className="text-lg font-semibold text-text border-b pb-2">Scrape Data</h3>
+              <p className="text-sm text-muted">
+                Fetch metadata and images from external sources, then pick tile/backdrop images.
+              </p>
+              <div>
+                <Link
+                  href={scrapeHref}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+                  title="Scrape metadata and images"
+                >
+                  Scrape Data
+                  <span aria-hidden>
+                    →
+                  </span>
+                </Link>
+              </div>
+            </div>
+          )}
+
           {/* Game Screenshots - Show for emulator games (VICE) */}
           {mode === 'edit' && 
            ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(formData.platformId) && 
@@ -1904,10 +2027,10 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         )}
 
         {/* Shortcut Selector Dialog */}
-        {showShortcutDialog && gameId && formData._originalGame?.installation?.installPath && (
+        {showShortcutDialog && gameId && activeInstallation?.installPath && (
           <ShortcutSelectorDialog
             gameId={gameId}
-            installPath={formData._originalGame.installation.installPath}
+            installPath={activeInstallation.installPath}
             isOpen={showShortcutDialog}
             onClose={() => setShowShortcutDialog(false)}
             onSelectShortcut={handleSelectShortcut}
@@ -1916,7 +2039,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         )}
 
         {/* File Explorer for browsing installation directory */}
-        {showFileExplorer && formData._originalGame?.installation?.installPath && (
+        {showFileExplorer && activeInstallation?.installPath && (
           <FileExplorer
             isOpen={showFileExplorer}
             onClose={() => setShowFileExplorer(false)}

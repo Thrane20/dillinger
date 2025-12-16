@@ -115,6 +115,18 @@ if [ ! -d "$RETROARCH_CONFIG_DIR" ]; then
     chown -R "${UNAME}:${UNAME}" "$RETROARCH_CONFIG_DIR"
 fi
 
+# Helper function to set config value
+set_config() {
+    local key="$1"
+    local value="$2"
+    local file="$3"
+    if grep -q "^$key =" "$file"; then
+        sed -i "s|^$key = .*|$key = \"$value\"|" "$file"
+    else
+        echo "$key = \"$value\"" >> "$file"
+    fi
+}
+
 # Generate default config if missing
 if [ ! -f "$RETROARCH_CONFIG_FILE" ]; then
     echo -e "${BLUE}Generating default RetroArch config...${NC}"
@@ -126,10 +138,63 @@ savefile_directory = "/saves"
 savestate_directory = "/states"
 video_driver = "gl"
 audio_driver = "pulse"
-input_driver = "udev"
+input_driver = "sdl2"
+input_joypad_driver = "udev"
 menu_driver = "ozone"
 EOF
     chown "${UNAME}:${UNAME}" "$RETROARCH_CONFIG_FILE"
+fi
+
+# Enforce critical drivers to match known working host config
+# This ensures that even if the config exists (from a previous run), we update it to what works
+echo -e "${BLUE}Enforcing drivers...${NC}"
+set_config "input_driver" "sdl2" "$RETROARCH_CONFIG_FILE"
+set_config "input_joypad_driver" "udev" "$RETROARCH_CONFIG_FILE"
+set_config "video_driver" "gl" "$RETROARCH_CONFIG_FILE"
+set_config "audio_driver" "pulse" "$RETROARCH_CONFIG_FILE"
+
+# Configure Joystick if specified
+if [ -n "$JOYSTICK_DEVICE_NAME" ]; then
+    echo -e "${BLUE}Configuring Joystick: $JOYSTICK_DEVICE_NAME${NC}"
+    
+    # Find index of the joystick with the matching name
+    # We assume RetroArch enumerates devices with 'js' handlers in order
+    
+    TARGET_NAME="$JOYSTICK_DEVICE_NAME"
+    CURRENT_INDEX=0
+    MATCHED_INDEX=""
+    CURRENT_NAME=""
+    
+    # Determine where to read input devices from
+    # We prefer the mounted host file if available to avoid /proc restrictions
+    INPUT_DEVICES_FILE="/proc/bus/input/devices"
+    if [ -f "/tmp/host-input-devices" ]; then
+        INPUT_DEVICES_FILE="/tmp/host-input-devices"
+    fi
+    
+    # Read input devices block by block
+    # We use a loop that parses the file
+    while read -r line; do
+        if [[ "$line" =~ ^N:\ Name=\"(.*)\"$ ]]; then
+            CURRENT_NAME="${BASH_REMATCH[1]}"
+        fi
+        
+        if [[ "$line" =~ ^H:\ Handlers=.*(js[0-9]+).*$ ]]; then
+            # This is a joystick
+            if [[ "$CURRENT_NAME" == "$TARGET_NAME" ]]; then
+                MATCHED_INDEX=$CURRENT_INDEX
+                break
+            fi
+            CURRENT_INDEX=$((CURRENT_INDEX + 1))
+        fi
+    done < "$INPUT_DEVICES_FILE"
+    
+    if [ -n "$MATCHED_INDEX" ]; then
+        echo "  Found joystick at index $MATCHED_INDEX"
+        set_config "input_player1_joypad_index" "$MATCHED_INDEX" "$RETROARCH_CONFIG_FILE"
+    else
+        echo "  Could not find joystick index for '$TARGET_NAME'"
+    fi
 fi
 
 # Determine Core
@@ -146,7 +211,8 @@ if [ -n "$RETROARCH_CORE" ]; then
 fi
 
 # Default to mame if not specified (since this was requested for arcade)
-if [ -z "$CORE_PATH" ]; then
+# Only default if we are NOT in menu mode (checked by presence of arguments)
+if [ -z "$CORE_PATH" ] && [ "$#" -gt 0 ]; then
     if [ -f "/usr/lib/libretro/mame_libretro.so" ]; then
         CORE_PATH="/usr/lib/libretro/mame_libretro.so"
         echo -e "${YELLOW}No core specified, defaulting to MAME${NC}"

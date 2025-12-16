@@ -26,10 +26,23 @@ export default function SettingsPage() {
   
   // Docker settings
   const [autoRemoveContainers, setAutoRemoveContainers] = useState(false);
+
+  // GPU settings
+  const [gpuVendor, setGpuVendor] = useState<'auto' | 'amd' | 'nvidia'>('auto');
   
   // Download settings
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
   
+  // Joystick settings
+  const [joysticks, setJoysticks] = useState<Array<{ id: string; name: string; path: string }>>([]);
+  const [joystickSettings, setJoystickSettings] = useState<Record<string, { deviceId: string; deviceName: string }>>({});
+  const [selectedJoystickPlatform, setSelectedJoystickPlatform] = useState('arcade');
+
+  // Platform Config settings
+  const [platformConfigContent, setPlatformConfigContent] = useState('');
+  const [selectedConfigPlatform, setSelectedConfigPlatform] = useState('arcade');
+  const [configLoading, setConfigLoading] = useState(false);
+
   // Maintenance
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
@@ -46,7 +59,10 @@ export default function SettingsPage() {
     loadSettings();
     loadAudioSettings();
     loadDockerSettings();
+    loadGpuSettings();
     loadDownloadSettings();
+    loadJoystickSettings();
+    loadPlatformConfig('arcade');
   }, []);
 
   const loadSettings = async () => {
@@ -145,6 +161,24 @@ export default function SettingsPage() {
     }
   };
 
+  const loadGpuSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/gpu`);
+      if (!response.ok) {
+        throw new Error('Failed to load GPU settings');
+      }
+      const data = await response.json();
+      const vendor = data.settings?.vendor;
+      if (vendor === 'amd' || vendor === 'nvidia' || vendor === 'auto') {
+        setGpuVendor(vendor);
+      } else {
+        setGpuVendor('auto');
+      }
+    } catch (error) {
+      console.error('Failed to load GPU settings:', error);
+    }
+  };
+
   const loadDownloadSettings = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/settings/downloads`);
@@ -179,6 +213,32 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Failed to save Docker settings:', error);
       setMessage({ type: 'error', text: 'Failed to save Docker settings' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveGpuSettings = async () => {
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/gpu`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ vendor: gpuVendor }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save GPU settings');
+      }
+
+      setMessage({ type: 'success', text: 'GPU settings saved successfully!' });
+    } catch (error) {
+      console.error('Failed to save GPU settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save GPU settings' });
     } finally {
       setSaving(false);
     }
@@ -293,6 +353,121 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: 'Failed to save audio settings' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const loadJoystickSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/joysticks`);
+      if (!response.ok) {
+        throw new Error('Failed to load joystick settings');
+      }
+      const data = await response.json();
+      setJoysticks(data.available || []);
+      setJoystickSettings(data.settings || {});
+    } catch (error) {
+      console.error('Failed to load joystick settings:', error);
+    }
+  };
+
+  const saveJoystickSettings = async (platform: string, deviceId: string) => {
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const device = joysticks.find(j => j.id === deviceId);
+      const deviceName = device?.name || 'Unknown Device';
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/joysticks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          platform,
+          deviceId,
+          deviceName
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save joystick settings');
+      }
+
+      setMessage({ type: 'success', text: `Joystick settings for ${platform} saved successfully!` });
+      await loadJoystickSettings();
+    } catch (error) {
+      console.error('Failed to save joystick settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save joystick settings' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const loadPlatformConfig = async (platformId: string) => {
+    try {
+      setConfigLoading(true);
+      const response = await fetch(`${API_BASE_URL}/api/settings/platforms/${platformId}/config`);
+      if (response.status === 404) {
+        setPlatformConfigContent(''); // No config yet
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Failed to load platform config');
+      }
+      const data = await response.json();
+      setPlatformConfigContent(data.content || '');
+    } catch (error) {
+      console.error('Failed to load platform config:', error);
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const savePlatformConfig = async () => {
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/platforms/${selectedConfigPlatform}/config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: platformConfigContent
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save platform config');
+      }
+
+      setMessage({ type: 'success', text: 'Platform configuration saved successfully!' });
+    } catch (error) {
+      console.error('Failed to save platform config:', error);
+      setMessage({ type: 'error', text: 'Failed to save platform config' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const launchRetroArchGui = async () => {
+    try {
+      setMessage(null);
+      const response = await fetch(`${API_BASE_URL}/api/settings/platforms/retroarch/launch-gui`, {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to launch RetroArch GUI');
+      }
+      
+      const data = await response.json();
+      setMessage({ type: 'success', text: `RetroArch GUI launched! Container ID: ${data.containerId.substring(0, 12)}` });
+    } catch (error) {
+      console.error('Failed to launch RetroArch GUI:', error);
+      setMessage({ type: 'error', text: 'Failed to launch RetroArch GUI' });
     }
   };
 
@@ -451,6 +626,127 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Configure Platforms */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">Configure Platforms</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Manage platform-specific settings, including joystick mapping and configuration files.
+          </p>
+
+          <div className="space-y-6">
+            {/* Platform Selector */}
+            <div className="flex space-x-2 border-b border-gray-200 dark:border-gray-700 pb-4">
+              {['arcade', 'console', 'computer'].map((platform) => (
+                <button
+                  key={platform}
+                  onClick={() => {
+                    setSelectedJoystickPlatform(platform);
+                    if (platform === 'arcade') {
+                        setSelectedConfigPlatform('arcade');
+                        loadPlatformConfig('arcade');
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-lg capitalize ${
+                    selectedJoystickPlatform === platform
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {platform}
+                </button>
+              ))}
+            </div>
+
+            {/* Joystick Section */}
+            <div>
+              <h3 className="text-lg font-medium mb-3">Joystick Mapping</h3>
+              <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">
+                    Select Joystick
+                  </label>
+                  {joysticks.length > 0 ? (
+                    <select
+                      value={joystickSettings[selectedJoystickPlatform]?.deviceId || ''}
+                      onChange={(e) => saveJoystickSettings(selectedJoystickPlatform, e.target.value)}
+                      disabled={saving}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">Select a joystick...</option>
+                      {joysticks.map((joystick) => (
+                        <option key={joystick.id} value={joystick.id}>
+                          {joystick.name} ({joystick.id})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No joysticks detected. Connect a controller and refresh the page.
+                    </p>
+                  )}
+                </div>
+                
+                {joystickSettings[selectedJoystickPlatform] && (
+                  <div className="text-sm text-green-600 dark:text-green-400">
+                    ✓ Configured: {joystickSettings[selectedJoystickPlatform].deviceName}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Config Section (only for supported platforms) */}
+            {selectedJoystickPlatform === 'arcade' && (
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                    <h3 className="text-lg font-medium mb-3">Platform Configuration (RetroArch)</h3>
+                    
+                    {/* Launch GUI Button */}
+                    <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-900">
+                        <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2">Interactive Configuration</h4>
+                        <p className="text-sm text-purple-800 dark:text-purple-200 mb-4">
+                            Launch the full RetroArch interface to configure input, video, and other settings interactively. 
+                            Changes saved in the GUI will be persisted to the master configuration.
+                        </p>
+                        <button 
+                            onClick={launchRetroArchGui}
+                            className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                            </svg>
+                            Launch RetroArch GUI
+                        </button>
+                    </div>
+
+                    {/* Config Editor */}
+                    <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                      <h4 className="font-medium mb-3">Master Configuration File (retroarch.cfg)</h4>
+                      
+                      {configLoading ? (
+                        <div className="text-center py-4">Loading configuration...</div>
+                      ) : (
+                        <div className="space-y-4">
+                          <textarea
+                            value={platformConfigContent}
+                            onChange={(e) => setPlatformConfigContent(e.target.value)}
+                            className="w-full h-96 px-4 py-2 font-mono text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Configuration content..."
+                          />
+                          
+                          <button
+                            onClick={savePlatformConfig}
+                            disabled={saving}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                          >
+                            {saving ? 'Saving...' : 'Save Master Configuration'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                </div>
+            )}
+          </div>
+        </div>
+
         {/* Docker Settings */}
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
           <h2 className="text-2xl font-semibold mb-4">Docker Settings</h2>
@@ -485,6 +781,43 @@ export default function SettingsPage() {
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save Docker Settings'}
+            </button>
+          </div>
+        </div>
+
+        {/* GPU Settings */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">GPU Settings</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Select which GPU vendor stack to prefer inside game containers. Use <span className="font-medium">Auto</span> unless you have a specific multi-GPU setup.
+          </p>
+
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="gpuVendor" className="block text-sm font-medium mb-2">
+                Preferred GPU Vendor
+              </label>
+              <select
+                id="gpuVendor"
+                value={gpuVendor}
+                onChange={(e) => setGpuVendor(e.target.value as any)}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="auto">Auto</option>
+                <option value="amd">AMD</option>
+                <option value="nvidia">NVIDIA</option>
+              </select>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                AMD sets Vulkan ICD selection to RADV. NVIDIA support will require the NVIDIA container runtime and device nodes.
+              </p>
+            </div>
+
+            <button
+              onClick={saveGpuSettings}
+              disabled={saving}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Saving...' : 'Save GPU Settings'}
             </button>
           </div>
         </div>

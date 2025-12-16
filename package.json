@@ -15,21 +15,15 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
     "setup": "pnpm install && pnpm run build:shared && pnpm run type-check",
-    "build:shared": "pnpm --filter=@dillinger/runner-types --filter=@dillinger/validation run build",
+    "build:shared": "pnpm --filter=@dillinger/shared run build",
     "docker:build": "cd packages/runner-images && ./build.sh",
     "docker:build:all": "cd packages/runner-images && ./build.sh --all",
-    "docker:build:no-cache": "cd packages/runner-images && ./build.sh --no-cache",
     "docker:build:parallel": "cd packages/runner-images && ./build.sh --parallel",
     "docker:build:base": "cd packages/runner-images && ./build.sh base",
     "docker:build:linux-native": "cd packages/runner-images && ./build.sh linux-native",
     "docker:build:wine": "cd packages/runner-images && ./build.sh wine",
     "docker:build:vice": "cd packages/runner-images && ./build.sh vice",
-    "docker:build:fs-uae": "cd packages/runner-images && ./build.sh fs-uae",
-    "docker:build:base:no-cache": "cd packages/runner-images && ./build.sh --no-cache base",
-    "docker:build:linux-native:no-cache": "cd packages/runner-images && ./build.sh --no-cache linux-native",
-    "docker:build:wine:no-cache": "cd packages/runner-images && ./build.sh --no-cache wine",
-    "docker:build:vice:no-cache": "cd packages/runner-images && ./build.sh --no-cache vice",
-    "docker:build:fs-uae:no-cache": "cd packages/runner-images && ./build.sh --no-cache fs-uae"
+    "docker:build:fs-uae": "cd packages/runner-images && ./build.sh fs-uae"
   },
   "keywords": [
     "game-library",

@@ -11,6 +11,7 @@ export interface GamePlatformConfig {
       dlls?: Record<string, string>; // DLL overrides (e.g., {"ddraw": "native", "d3d9": "native,builtin"})
       arch?: 'win32' | 'win64'; // Wine architecture (WINEARCH)
       useDxvk?: boolean; // Install DXVK (DirectX to Vulkan translation layer) for better performance and MangoHUD compatibility
+      renderer?: 'vulkan' | 'opengl'; // Direct3D renderer selection
       compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10'; // Windows compatibility mode preset
       debug?: {
         // Wine debug channels - controls WINEDEBUG environment variable
