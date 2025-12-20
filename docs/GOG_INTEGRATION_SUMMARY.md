@@ -90,13 +90,13 @@ To use this feature, you need to:
 1. **Register a GOG OAuth Application**
    - Visit https://devportal.gog.com/
    - Create new application
-   - Set redirect URI to: `http://localhost:3000/online_sources/gog-callback`
+  - Set redirect URI to: `http://localhost:3010/online_sources/gog-callback`
 
 2. **Add Environment Variables**
    ```bash
    GOG_CLIENT_ID=your_client_id
    GOG_CLIENT_SECRET=your_client_secret
-   GOG_REDIRECT_URI=http://localhost:3000/online_sources/gog-callback
+  GOG_REDIRECT_URI=http://localhost:3010/online_sources/gog-callback
    ```
 
 3. **Restart Backend**

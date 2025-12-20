@@ -279,7 +279,7 @@ pnpm run docker:build:runners:no-cache
 4. **Test API**:
    ```bash
    # Update game settings
-   curl -X PATCH http://localhost:3001/api/games/{id}/settings \
+   curl -X PATCH http://localhost:3011/api/games/{id}/settings \
      -H "Content-Type: application/json" \
      -d '{"gamescope": {"enabled": true}}'
    ```

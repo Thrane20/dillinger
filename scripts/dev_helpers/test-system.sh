@@ -33,13 +33,13 @@ cleanup() {
     fi
     
     if [ "$STARTED_BACKEND" = true ]; then
-        echo "Stopping backend (port 3001)..."
-        lsof -ti :3001 | xargs -r kill 2>/dev/null || true
+        echo "Stopping backend (port 3011)..."
+        lsof -ti :3011 | xargs -r kill 2>/dev/null || true
     fi
     
     if [ "$STARTED_FRONTEND" = true ]; then
-        echo "Stopping frontend (port 3000)..."
-        lsof -ti :3000 | xargs -r kill 2>/dev/null || true
+        echo "Stopping frontend (port 3010)..."
+        lsof -ti :3010 | xargs -r kill 2>/dev/null || true
     fi
     
     echo -e "${GREEN}✓ Cleanup complete${NC}"
@@ -92,31 +92,31 @@ cd - > /dev/null
 # Step 3: Start Backend API
 # ============================================================================
 echo ""
-echo -e "${BLUE}[3/6] Starting backend API (port 3001)...${NC}"
+echo -e "${BLUE}[3/6] Starting backend API (port 3011)...${NC}"
 
 # Check if already running
-if lsof -ti :3001 > /dev/null 2>&1; then
-    echo -e "${YELLOW}⚠ Backend already running on port 3001${NC}"
+if lsof -ti :3011 > /dev/null 2>&1; then
+    echo -e "${YELLOW}⚠ Backend already running on port 3011${NC}"
     read -p "Use existing backend? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Stopping existing backend..."
-        lsof -ti :3001 | xargs -r kill
+        lsof -ti :3011 | xargs -r kill
         sleep 2
     fi
 fi
 
-if ! lsof -ti :3001 > /dev/null 2>&1; then
+if ! lsof -ti :3011 > /dev/null 2>&1; then
     echo "Starting backend in background..."
     cd packages/dillinger-core/backend
-    PORT=3001 pnpm run dev > /tmp/dillinger-backend.log 2>&1 &
+    PORT=3011 pnpm run dev > /tmp/dillinger-backend.log 2>&1 &
     BACKEND_PID=$!
     STARTED_BACKEND=true
     cd - > /dev/null
     
     echo "Waiting for backend to start..."
     for i in {1..30}; do
-        if curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+        if curl -s http://localhost:3011/api/health > /dev/null 2>&1; then
             echo -e "${GREEN}✓ Backend started successfully${NC}"
             break
         fi
@@ -138,7 +138,7 @@ fi
 echo ""
 echo -e "${BLUE}[4/6] Testing backend API...${NC}"
 
-HEALTH=$(curl -s http://localhost:3001/api/health)
+HEALTH=$(curl -s http://localhost:3011/api/health)
 if echo "$HEALTH" | grep -q "healthy\|ok"; then
     echo -e "${GREEN}✓ Backend health check passed${NC}"
     echo "  Response: $HEALTH"
@@ -196,8 +196,8 @@ echo -e "${GREEN}║  All Systems Operational ✓            ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
 echo ""
 echo "Services:"
-echo "  • Backend API:  http://localhost:3001/api/health"
-echo "  • Frontend:     http://localhost:3000 (manual start needed)"
+echo "  • Backend API:  http://localhost:3011/api/health"
+echo "  • Frontend:     http://localhost:3010 (manual start needed)"
 echo ""
 echo "Runner:"
 echo "  • Container:    $RUNNER_CONTAINER"
@@ -250,7 +250,7 @@ case $REPLY in
         echo -e "${YELLOW}Keeping services running...${NC}"
         echo "To stop later:"
         echo "  docker stop $RUNNER_CONTAINER"
-        echo "  lsof -ti :3001 | xargs kill"
+        echo "  lsof -ti :3011 | xargs kill"
         trap - EXIT
         exit 0
         ;;

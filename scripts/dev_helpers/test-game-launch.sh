@@ -9,10 +9,10 @@ echo ""
 
 # Check if backend is running
 echo "1️⃣  Checking backend health..."
-if curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+if curl -s http://localhost:3011/api/health > /dev/null 2>&1; then
     echo "✅ Backend is running"
 else
-    echo "❌ Backend is not running on port 3001"
+    echo "❌ Backend is not running on port 3011"
     echo "   Start it with: cd packages/dillinger-core/backend && pnpm run dev"
     exit 1
 fi
@@ -31,7 +31,7 @@ fi
 # Launch the test game
 echo ""
 echo "3️⃣  Launching test game..."
-RESPONSE=$(curl -s -X POST http://localhost:3001/api/games/test-adventure-game/launch)
+RESPONSE=$(curl -s -X POST http://localhost:3011/api/games/test-adventure-game/launch)
 
 if echo "$RESPONSE" | grep -q '"success":true'; then
     echo "✅ Game launched successfully!"
@@ -67,7 +67,7 @@ if echo "$RESPONSE" | grep -q '"success":true'; then
     echo "✅ Test completed!"
     echo ""
     echo "To stop the game:"
-    echo "  curl -X POST http://localhost:3001/api/games/test-adventure-game/stop \\"
+    echo "  curl -X POST http://localhost:3011/api/games/test-adventure-game/stop \\"
     echo "    -H 'Content-Type: application/json' \\"
     echo "    -d '{\"sessionId\":\"$SESSION_ID\"}'"
     

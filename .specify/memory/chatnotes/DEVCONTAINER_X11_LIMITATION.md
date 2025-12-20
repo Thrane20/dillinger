@@ -18,7 +18,7 @@ cd /mnt/linuxfast/dev/dillinger
 1. `F1` → "Dev Containers: Rebuild Container" (first time only)
 2. Wait for rebuild to complete
 3. Run `pnpm dev`
-4. Open http://localhost:3000/games
+4. Open http://localhost:3010/games
 5. Launch GUI Test Game → window appears on your desktop! ✓
 
 ### What Changed
@@ -100,11 +100,11 @@ xhost +local:docker
 # Run development servers
 pnpm dev
 # This starts:
-# - Backend on port 3001
-# - Frontend on port 3000
+# - Backend on port 3011
+# - Frontend on port 3010
 # - TypeScript watch compilation
 
-# Open browser to http://localhost:3000/games
+# Open browser to http://localhost:3010/games
 # Launch games - X11 windows will appear on your desktop!
 ```
 
@@ -166,8 +166,8 @@ export DILLINGER_ROOT=/mnt/linuxfast/dev/dillinger/packages/dillinger-core/backe
 pnpm dev
 
 # Servers will start:
-# - Frontend: http://localhost:3000
-# - Backend:  http://localhost:3001
+# - Frontend: http://localhost:3010
+# - Backend:  http://localhost:3011
 # - TypeScript watch: rebuilds on changes
 ```
 
@@ -197,7 +197,7 @@ cd /mnt/linuxfast/dev/dillinger
 xhost +local:docker
 pnpm dev
 
-# Test in browser: http://localhost:3000/games
+# Test in browser: http://localhost:3010/games
 # Launch GUI Test Game → window appears on desktop
 
 # 4. When done testing, Ctrl+C to stop servers
@@ -266,8 +266,8 @@ cd /mnt/linuxfast/dev/dillinger
 docker-compose up
 
 # Services will be available:
-# - Frontend: http://localhost:3000
-# - Backend: http://localhost:3001
+# - Frontend: http://localhost:3010
+# - Backend: http://localhost:3011
 
 # Display forwarding will work because containers
 # are launched by host Docker daemon with proper X11 access

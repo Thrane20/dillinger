@@ -23,6 +23,39 @@ const GOG_TOKEN_URL = 'https://auth.gog.com/token';
 const GOG_EMBED_URL = 'https://embed.gog.com';
 const GOG_API_URL = 'https://api.gog.com';
 
+/**
+ * Create a human-readable slug from a game title
+ * Example: "Dragon's Lair Trilogy" -> "dragons-lair-trilogy"
+ */
+function createSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[''"]/g, '') // Remove apostrophes and quotes
+    .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric with dashes
+    .replace(/^-+|-+$/g, '') // Remove leading/trailing dashes
+    .substring(0, 40); // Limit length
+}
+
+/**
+ * Create a human-readable game ID for GOG games
+ * Format: gog-{slug}-{gogId}
+ * Example: "gog-dragons-lair-trilogy-2083200433"
+ */
+function createGogGameId(title: string, gogId: string): string {
+  const slug = createSlug(title);
+  return `gog-${slug}-${gogId}`;
+}
+
+/**
+ * Create a human-readable cache directory name
+ * Format: {gogId}-{slug}
+ * Example: "2083200433-dragons-lair-trilogy"
+ */
+function createCacheDirectoryName(title: string, gogId: string): string {
+  const slug = createSlug(title);
+  return `${gogId}-${slug}`;
+}
+
 interface GOGTokenData {
   access_token: string;
   refresh_token: string;
@@ -627,7 +660,7 @@ router.get('/gog/games/:id', async (req: Request, res: Response) => {
 router.post('/gog/games/:id/download', async (req: Request, res: Response) => {
   try {
     const { id: gogId } = req.params;
-    const { gameId, title, runner } = req.body as { gameId?: string; title?: string; runner?: string };
+    const { title, runner } = req.body as { title?: string; runner?: string };
     
     if (!gogId) {
       res.status(400).json({
@@ -637,10 +670,10 @@ router.post('/gog/games/:id/download', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!gameId || !title) {
+    if (!title) {
       res.status(400).json({
         success: false,
-        error: 'gameId and title are required',
+        error: 'title is required',
       });
       return;
     }
@@ -762,14 +795,18 @@ router.post('/gog/games/:id/download', async (req: Request, res: Response) => {
       return;
     }
 
+    // Create human-readable IDs and paths
+    const humanReadableGameId = createGogGameId(title, gogId);
+    const cacheDirectoryName = createCacheDirectoryName(title, gogId);
+    
     // Create game entry in library
     const dillingerRoot = storage.getDillingerRoot();
-    const installerPath = path.join(dillingerRoot, 'storage', 'installer_cache', gogId);
+    const installerPath = path.join(dillingerRoot, 'storage', 'installer_cache', cacheDirectoryName);
     
     const now = new Date().toISOString();
     const game = {
-      id: gameId,
-      slug: gameId,
+      id: humanReadableGameId,
+      slug: humanReadableGameId,
       title,
       filePath: '', // Will be set after installation
       platformId: runner === 'wine' ? 'wine-windows' : 'linux-native',
@@ -792,18 +829,18 @@ router.post('/gog/games/:id/download', async (req: Request, res: Response) => {
       updated: now,
     };
 
-    await storage.writeEntity('games', gameId, game);
+    await storage.writeEntity('games', humanReadableGameId, game);
 
-    // Start background download
-    await downloadManager.startDownload(gameId, gogId, title, downloadFiles);
+    // Start background download with human-readable cache directory
+    await downloadManager.startDownload(humanReadableGameId, cacheDirectoryName, title, downloadFiles);
 
-    console.log(`Started background download for ${title} (${downloadFiles.length} files)`);
+    console.log(`Started background download for ${title} (${downloadFiles.length} files) -> ${cacheDirectoryName}`);
 
     res.json({
       success: true,
       message: 'Download started',
       fileCount: downloadFiles.length,
-      gameId,
+      gameId: humanReadableGameId,
     });
   } catch (error) {
     console.error('Error starting GOG download:', error);

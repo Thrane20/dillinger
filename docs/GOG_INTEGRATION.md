@@ -27,7 +27,7 @@ To use GOG integration, you need to register an OAuth application with GOG to ob
    - Fill in the application details:
      - **Application Name**: Dillinger Game Library Manager
      - **Description**: Personal game library manager with multi-platform support
-     - **Redirect URI**: `http://localhost:3000/online_sources/gog-callback`
+   - **Redirect URI**: `http://localhost:3010/online_sources/gog-callback`
      - For production, use your actual domain: `https://yourdomain.com/online_sources/gog-callback`
 
 3. **Note Your Credentials**
@@ -45,7 +45,7 @@ Add the following environment variables to your backend configuration:
 # GOG OAuth Configuration
 GOG_CLIENT_ID=your_client_id_here
 GOG_CLIENT_SECRET=your_client_secret_here
-GOG_REDIRECT_URI=http://localhost:3000/online_sources/gog-callback
+GOG_REDIRECT_URI=http://localhost:3010/online_sources/gog-callback
 ```
 
 **For Docker deployments**, add these to your `docker-compose.yml`:
@@ -56,7 +56,7 @@ services:
     environment:
       - GOG_CLIENT_ID=${GOG_CLIENT_ID}
       - GOG_CLIENT_SECRET=${GOG_CLIENT_SECRET}
-      - GOG_REDIRECT_URI=http://localhost:3000/online_sources/gog-callback
+      - GOG_REDIRECT_URI=http://localhost:3010/online_sources/gog-callback
 ```
 
 Then create a `.env` file in your project root:
@@ -72,7 +72,7 @@ GOG_CLIENT_SECRET=your_client_secret_here
    ```bash
    GOG_CLIENT_ID=your_client_id_here
    GOG_CLIENT_SECRET=your_client_secret_here
-   GOG_REDIRECT_URI=http://localhost:3000/online_sources/gog-callback
+   GOG_REDIRECT_URI=http://localhost:3010/online_sources/gog-callback
    ```
 
 2. **Add to `.gitignore`** (should already be there):

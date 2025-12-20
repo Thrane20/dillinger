@@ -7,7 +7,7 @@ import type {
   ScraperType,
 } from '@dillinger/shared';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<GetScraperSettingsResponse | null>(null);
@@ -142,7 +142,7 @@ export default function SettingsPage() {
       await loadSettings();
     } catch (error) {
       console.error('Failed to save settings:', error);
-      setMessage({ type: 'error', text: 'Failed to save audio settings' });
+      setMessage({ type: 'error', text: 'Failed to save IGDB settings' });
     } finally {
       setSaving(false);
     }
@@ -504,12 +504,12 @@ export default function SettingsPage() {
             <h2 className="text-2xl font-semibold">IGDB (Internet Game Database)</h2>
             <span
               className={`px-3 py-1 rounded-full text-sm ${
-                settings?.availableScrapers.find((s) => s.type === 'igdb')?.enabled
+                (settings?.settings as any)?.igdb?.configured
                   ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
               }`}
             >
-              {settings?.availableScrapers.find((s) => s.type === 'igdb')?.enabled
+              {(settings?.settings as any)?.igdb?.configured
                 ? 'Configured'
                 : 'Not Configured'}
             </span>
@@ -517,7 +517,7 @@ export default function SettingsPage() {
 
           <p className="text-gray-600 dark:text-gray-400 mb-4">
             IGDB provides comprehensive game metadata including screenshots, descriptions, release
-            dates, and more. You'll need to register for a free API key at{' '}
+            dates, and more. You will need to register for a free API key at{' '}
             <a
               href="https://api-docs.igdb.com/#account-creation"
               target="_blank"
@@ -608,13 +608,38 @@ export default function SettingsPage() {
                   ))}
                 </select>
               ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  No audio outputs detected. Make sure PulseAudio or PipeWire is running.
-                </p>
+                <div className="space-y-3">
+                  <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                      <strong>No audio outputs detected.</strong> This can happen when:
+                    </p>
+                    <ul className="text-sm text-yellow-700 dark:text-yellow-300 list-disc ml-5 mt-1">
+                      <li>PulseAudio/PipeWire is not running on the host</li>
+                      <li>The PulseAudio socket is not mounted into the container</li>
+                      <li>Running in a dev container without host audio access</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <label htmlFor="manualAudioSink" className="block text-sm font-medium mb-1">
+                      Manual Sink Name (optional)
+                    </label>
+                    <input
+                      type="text"
+                      id="manualAudioSink"
+                      value={selectedAudioSink}
+                      onChange={(e) => setSelectedAudioSink(e.target.value)}
+                      placeholder="e.g., alsa_output.pci-0000_00_1f.3.analog-stereo"
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Run <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">pactl list sinks short</code> on your host to find sink names.
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
 
-            {availableAudioSinks.length > 0 && (
+            {(availableAudioSinks.length > 0 || selectedAudioSink) && (
               <button
                 onClick={saveAudioSettings}
                 disabled={saving || !selectedAudioSink}

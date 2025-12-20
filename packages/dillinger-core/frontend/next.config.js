@@ -3,45 +3,24 @@ const nextConfig = {
   // Disable font optimization to avoid network calls during build
   optimizeFonts: false,
   
-  // Enable experimental features if needed
-  experimental: {
-    // Add any experimental features here
+  // Skip ESLint during production builds (code is linted in dev)
+  eslint: {
+    ignoreDuringBuilds: true,
   },
   
-  // API routes rewrite for development and production
-  async rewrites() {
-    // Use environment variable to determine backend URL
-    let backendUrl;
-
-    if (process.env.NODE_ENV === 'production') {
-      // Production: Use BACKEND_URL env var or default to localhost:3001
-      // Note: Docker production uses port 4001. Local production run should set BACKEND_PORT if different.
-      if (process.env.BACKEND_URL) {
-        backendUrl = process.env.BACKEND_URL;
-      } else if (process.env.BACKEND_PORT) {
-        backendUrl = `http://localhost:${process.env.BACKEND_PORT}`;
-      } else if (process.env.DOCKER_CONTAINER === 'true') {
-        // Docker container fallback
-        backendUrl = 'http://localhost:3001';
-      } else {
-        // Default for local production run
-        backendUrl = 'http://localhost:3001';
-      }
-    } else if (process.env.DOCKER_ENV) {
-      // Docker development: Use container name
-      backendUrl = 'http://backend-dev:3001';
-    } else {
-      // Local development
-      backendUrl = 'http://localhost:3001';
-    }
-      
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${backendUrl}/api/:path*`,
-      },
-    ];
+  // Enable standalone output for Docker deployments
+  output: 'standalone',
+  
+  // Enable experimental features if needed
+  experimental: {
+    // Mark packages with native bindings as external for server components
+    serverComponentsExternalPackages: ['dockerode', 'ssh2', 'cpu-features', 'winston', 'winston-daily-rotate-file'],
+    // Enable instrumentation hook for server startup initialization
+    instrumentationHook: true,
   },
+  
+  // Note: API routes are now handled directly by Next.js App Router
+  // No rewrites needed - /api/* routes are served from app/api/*
   
   // CORS and headers configuration
   async headers() {

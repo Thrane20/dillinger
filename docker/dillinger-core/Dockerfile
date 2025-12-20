@@ -6,8 +6,6 @@ FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/runner-types/package.json ./packages/runner-types/
-COPY packages/validation/package.json ./packages/validation/
 COPY packages/dillinger-core/backend/package.json ./packages/dillinger-core/backend/
 COPY packages/dillinger-core/frontend/package.json ./packages/dillinger-core/frontend/
 COPY packages/dillinger-core/package.json ./packages/dillinger-core/
@@ -22,18 +20,10 @@ COPY --from=deps /app/packages ./packages
 
 # Copy source code
 COPY packages/shared ./packages/shared
-COPY packages/runner-types ./packages/runner-types
-COPY packages/validation ./packages/validation
 COPY packages/dillinger-core ./packages/dillinger-core
 
 # Build shared packages
 WORKDIR /app/packages/shared
-RUN pnpm run build
-
-WORKDIR /app/packages/runner-types
-RUN pnpm run build
-
-WORKDIR /app/packages/validation
 RUN pnpm run build
 
 # Build backend
@@ -43,7 +33,7 @@ RUN pnpm run build
 # Build frontend
 WORKDIR /app/packages/dillinger-core/frontend
 ENV NODE_ENV=production
-ENV NEXT_PUBLIC_API_URL=http://localhost:3000
+ENV NEXT_PUBLIC_API_URL=http://localhost:3010
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
 
@@ -57,10 +47,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Copy built artifacts
 COPY --from=builder --chown=dillinger:nodejs /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder --chown=dillinger:nodejs /app/packages/shared/package.json ./packages/shared/
-COPY --from=builder --chown=dillinger:nodejs /app/packages/runner-types/dist ./packages/runner-types/dist
-COPY --from=builder --chown=dillinger:nodejs /app/packages/runner-types/package.json ./packages/runner-types/
-COPY --from=builder --chown=dillinger:nodejs /app/packages/validation/dist ./packages/validation/dist
-COPY --from=builder --chown=dillinger:nodejs /app/packages/validation/package.json ./packages/validation/
 
 COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/backend/dist ./packages/dillinger-core/backend/dist
 COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/backend/package.json ./packages/dillinger-core/backend/
@@ -72,8 +58,6 @@ COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/fronte
 # Copy node_modules
 COPY --from=deps --chown=dillinger:nodejs /app/node_modules ./node_modules
 COPY --from=deps --chown=dillinger:nodejs /app/packages/shared/node_modules ./packages/shared/node_modules
-COPY --from=deps --chown=dillinger:nodejs /app/packages/runner-types/node_modules ./packages/runner-types/node_modules
-COPY --from=deps --chown=dillinger:nodejs /app/packages/validation/node_modules ./packages/validation/node_modules
 COPY --from=deps --chown=dillinger:nodejs /app/packages/dillinger-core/backend/node_modules ./packages/dillinger-core/backend/node_modules
 COPY --from=deps --chown=dillinger:nodejs /app/packages/dillinger-core/frontend/node_modules ./packages/dillinger-core/frontend/node_modules
 
@@ -82,12 +66,12 @@ RUN mkdir -p /data && chown -R dillinger:nodejs /data
 COPY --chown=dillinger:nodejs docker/dillinger-core/ecosystem.config.cjs ./
 
 # USER dillinger
-EXPOSE 3000
+EXPOSE 3010
 ENV NODE_ENV=production
-ENV PORT=3000
-ENV BACKEND_PORT=3001
+ENV PORT=3010
+ENV BACKEND_PORT=3011
 ENV DILLINGER_ROOT=/data
-ENV FRONTEND_URL=http://localhost:3000
+ENV FRONTEND_URL=http://localhost:3010
 ENV DOCKER_CONTAINER=true
 
 CMD ["pm2-runtime", "start", "ecosystem.config.cjs"]

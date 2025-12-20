@@ -7,7 +7,7 @@
 3. Click "Create Application"
 4. Fill in:
    - **Name**: Dillinger
-   - **Redirect URI**: `http://localhost:3000/online_sources/gog-callback`
+   - **Redirect URI**: `http://localhost:3010/online_sources/gog-callback`
 5. Save your **Client ID** and **Client Secret**
 
 ## Step 2: Configure Dillinger
@@ -17,7 +17,7 @@ Create a `.env` file in the project root (or add to existing):
 ```bash
 GOG_CLIENT_ID=your_client_id_here
 GOG_CLIENT_SECRET=your_client_secret_here
-GOG_REDIRECT_URI=http://localhost:3000/online_sources/gog-callback
+GOG_REDIRECT_URI=http://localhost:3010/online_sources/gog-callback
 ```
 
 ## Step 3: Restart Backend
@@ -33,7 +33,7 @@ docker-compose restart
 
 ## Step 4: Use the Feature
 
-1. Open Dillinger in your browser: http://localhost:3000
+1. Open Dillinger in your browser: http://localhost:3010
 2. Click **"Online Sources"** in the top navigation
 3. Click **"Connect GOG Account"**
 4. Login to GOG in the popup window

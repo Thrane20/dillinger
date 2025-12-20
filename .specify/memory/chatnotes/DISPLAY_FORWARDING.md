@@ -59,7 +59,7 @@ If neither X11 nor Wayland is detected:
 
 Launch the **GUI Test Game** from the Dillinger web interface:
 
-1. Navigate to http://localhost:3000/games
+1. Navigate to http://localhost:3010/games
 2. Find "GUI Test Game"
 3. Click "Launch"
 4. A window should appear on your desktop!

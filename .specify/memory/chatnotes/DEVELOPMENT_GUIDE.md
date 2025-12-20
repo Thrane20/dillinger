@@ -17,7 +17,7 @@ cd /mnt/linuxfast/dev/dillinger
 # 3. Terminal in devcontainer:
 pnpm dev
 
-# Open http://localhost:3000/games
+# Open http://localhost:3010/games
 # Launch GUI Test Game → window appears! ✓
 ```
 
@@ -61,7 +61,7 @@ cd /mnt/linuxfast/dev/dillinger
 2. VSCode will prompt to "Reopen in Container" → Click it
 3. Wait for container to build (first time only)
 4. Run `pnpm dev` in devcontainer terminal
-5. Open http://localhost:3000/games
+5. Open http://localhost:3010/games
 6. Launch games - windows appear on your desktop! ✓
 
 **Note:** Run `./setup-x11.sh` on host after each reboot to re-enable X11 access.
@@ -130,8 +130,8 @@ export DILLINGER_ROOT=$(pwd)/packages/dillinger-core/backend/data
 pnpm dev
 
 # You'll see:
-# packages/dillinger-core dev: backend dev: 🚀 Dillinger API server running on port 3001
-# packages/dillinger-core dev: frontend dev: ▲ Next.js 14.0.0 - Local: http://localhost:3000
+# packages/dillinger-core dev: backend dev: 🚀 Dillinger API server running on port 3011
+# packages/dillinger-core dev: frontend dev: ▲ Next.js 14.0.0 - Local: http://localhost:3010
 ```
 
 **Edit code:**
@@ -140,7 +140,7 @@ pnpm dev
 - Option C: Still use devcontainer for editing, files are shared!
 
 **Test display forwarding:**
-- Open browser: http://localhost:3000/games
+- Open browser: http://localhost:3010/games
 - Click "Launch" on GUI Test Game
 - X11 window appears on your desktop! 🎮
 
@@ -283,8 +283,8 @@ pnpm test
 
 | Port | Service | Description |
 |------|---------|-------------|
-| 3000 | Frontend | Next.js development server |
-| 3001 | Backend | Express API server |
+| 3010 | Frontend | Next.js development server |
+| 3011 | Backend | Express API server |
 | 3002 | Legacy Runner | Old runner API (deprecated) |
 | 3003 | Runner | New runner API |
 | 8080 | Streaming | WebRTC/GStreamer (future) |
@@ -378,7 +378,7 @@ pnpm run build:all
 
 ```bash
 # Find what's using the port
-sudo lsof -i :3000  # or :3001
+sudo lsof -i :3010  # or :3011
 
 # Kill the process
 kill -9 <PID>
@@ -413,13 +413,13 @@ git push origin feature/my-feature
 
 ```bash
 # Backend
-PORT=3001                              # API server port
+PORT=3011                              # API server port
 NODE_ENV=development                   # Environment
 DILLINGER_ROOT=./data                  # Game data directory
 HOST_WORKSPACE_PATH=/path/to/workspace # For devcontainer
 
 # Frontend
-NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_API_URL=http://localhost:3011
 
 # Docker
 DISPLAY=:0                             # X11 display

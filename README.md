@@ -160,9 +160,9 @@ If a game container starts and exits immediately (or you want to inspect mounts/
    ```
 
 6. **Open your browser:**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:3001
-   - Health Check: http://localhost:3001/api/health
+   - Frontend: http://localhost:3010
+   - Backend API: http://localhost:3011
+   - Health Check: http://localhost:3011/api/health
 
 ### Docker Development
 

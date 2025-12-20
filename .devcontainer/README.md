@@ -68,7 +68,7 @@ Then reopen/restart your devcontainer in VSCode.
 pnpm dev
 
 # Open browser
-# http://localhost:3000/games
+# http://localhost:3010/games
 
 # Launch "GUI Test Game"
 # An xterm window should appear on your desktop!
@@ -101,8 +101,7 @@ Check if services are running outside the container:
 
 ```bash
 # On host
-sudo lsof -i :3000  # Frontend
-sudo lsof -i :3001  # Backend
+sudo lsof -i :3010  # Dillinger Core (Next.js API + Frontend)
 ```
 
 ## VS Code Extensions

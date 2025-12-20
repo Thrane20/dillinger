@@ -123,8 +123,8 @@ Features:
    ```
 
 ### Via Frontend:
-1. Open http://localhost:3000
-2. Click "Your Games" or navigate to http://localhost:3000/games
+1. Open http://localhost:3010
+2. Click "Your Games" or navigate to http://localhost:3010/games
 3. Click "Launch Game" on the test adventure game
 4. Wait for container to start
 5. Check the status in the card
@@ -133,15 +133,15 @@ Features:
 ### Via API:
 ```bash
 # Launch game
-curl -X POST http://localhost:3001/api/games/test-adventure-game/launch
+curl -X POST http://localhost:3011/api/games/test-adventure-game/launch
 
 # Stop game
-curl -X POST http://localhost:3001/api/games/test-adventure-game/stop \
+curl -X POST http://localhost:3011/api/games/test-adventure-game/stop \
   -H "Content-Type: application/json" \
   -d '{"sessionId":"<session-id>"}'
 
 # Get sessions
-curl http://localhost:3001/api/games/test-adventure-game/sessions
+curl http://localhost:3011/api/games/test-adventure-game/sessions
 ```
 
 ## 🎯 Key Features

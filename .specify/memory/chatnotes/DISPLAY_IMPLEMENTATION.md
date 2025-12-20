@@ -93,7 +93,7 @@ sequenceDiagram
 
 2. **Open web interface:**
    ```
-   http://localhost:3000/games
+  http://localhost:3010/games
    ```
 
 3. **Launch "GUI Test Game":**

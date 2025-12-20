@@ -196,7 +196,7 @@ cd packages/dillinger-core/frontend
 pnpm run dev
 ```
 
-Visit http://localhost:3000 and navigate to the Games page.
+Visit http://localhost:3010 and navigate to the Games page.
 
 ### 4. Build the Runner Image
 
@@ -207,14 +207,14 @@ cd packages/runner-images/linux-native
 
 ### 5. Launch via Frontend
 
-1. Open http://localhost:3000/games
+1. Open http://localhost:3010/games
 2. Click "Launch Game" on the test game card
 3. Check the container status in the card
 
 ### 6. Launch via API
 
 ```bash
-curl -X POST http://localhost:3001/api/games/test-adventure-game/launch
+curl -X POST http://localhost:3011/api/games/test-adventure-game/launch
 ```
 
 ### 7. Check Running Containers
@@ -235,7 +235,7 @@ Via frontend: Click "Stop Game" button
 
 Via API:
 ```bash
-curl -X POST http://localhost:3001/api/games/test-adventure-game/stop \
+curl -X POST http://localhost:3011/api/games/test-adventure-game/stop \
   -H "Content-Type: application/json" \
   -d '{"sessionId":"<session-id>"}'
 ```
@@ -286,7 +286,7 @@ Create `$DILLINGER_ROOT/storage/games/my-new-game.json`:
 ### 3. Launch
 
 ```bash
-curl -X POST http://localhost:3001/api/games/my-new-game/launch
+curl -X POST http://localhost:3011/api/games/my-new-game/launch
 ```
 
 ## Production Deployment

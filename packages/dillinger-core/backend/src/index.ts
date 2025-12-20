@@ -23,7 +23,7 @@ import logsRouter from './api/logs.js';
 
 const app: Express = express();
 const server = createServer(app);
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3011;
 
 // Trust proxy - required for rate limiting behind reverse proxies
 // Enable in both dev and production to avoid X-Forwarded-For header warnings
@@ -41,14 +41,14 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-        'img-src': ["'self'", 'data:', 'https:', 'http://localhost:3001'],
+        'img-src': ["'self'", 'data:', 'https:', 'http://localhost:3011'],
       },
     },
   })
 );
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3010',
     credentials: true,
   })
 );
@@ -181,8 +181,7 @@ app.use(
   (
     err: Error,
     _req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
+    res: express.Response
   ) => {
     console.error('Unhandled error:', err);
     res.status(500).json({

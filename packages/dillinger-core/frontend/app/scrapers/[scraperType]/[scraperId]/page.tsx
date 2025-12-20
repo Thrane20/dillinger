@@ -11,7 +11,7 @@ import type {
 } from '@dillinger/shared';
 import ImageCarousel from '../../../components/ImageCarousel';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface PageProps {
   params: {

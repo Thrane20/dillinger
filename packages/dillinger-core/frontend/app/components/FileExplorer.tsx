@@ -15,6 +15,7 @@ interface VolumeItem {
   mountpoint: string | null;
   driver: string;
   createdAt?: string;
+  hostPath?: string;  // For configured volumes
 }
 
 interface FileExplorerProps {
@@ -58,7 +59,7 @@ export default function FileExplorer({
 
   async function loadHome() {
     try {
-      const response = await fetch('http://localhost:3001/api/filesystem/home');
+      const response = await fetch('/api/filesystem/home');
       const data = await response.json();
       if (data.success) {
         browsePath(data.data.path);
@@ -71,17 +72,25 @@ export default function FileExplorer({
   async function loadVolumes() {
     try {
       // Load host roots
-      const rootsResponse = await fetch('http://localhost:3001/api/filesystem/roots');
+      const rootsResponse = await fetch('/api/filesystem/roots');
       const rootsData = await rootsResponse.json();
       if (rootsData.success) {
         setHostRoots(rootsData.data.roots);
       }
 
-      // Load Docker volumes
-      const volumesResponse = await fetch('http://localhost:3001/api/volumes/docker/list');
-      const volumesData = await volumesResponse.json();
-      if (volumesData.success) {
-        setDockerVolumes(volumesData.data);
+      // Load configured volumes from storage (these are the volumes configured in the sidebar)
+      const configuredVolumesResponse = await fetch('/api/volumes');
+      const configuredVolumesData = await configuredVolumesResponse.json();
+      if (configuredVolumesData.success && configuredVolumesData.data) {
+        // Map configured volumes to VolumeItem format
+        const configuredVolumes: VolumeItem[] = configuredVolumesData.data.map((v: { name: string; hostPath: string; type: string; createdAt?: string }) => ({
+          name: v.name,
+          mountpoint: v.hostPath,
+          hostPath: v.hostPath,
+          driver: v.type || 'bind',
+          createdAt: v.createdAt,
+        }));
+        setDockerVolumes(configuredVolumes);
       }
     } catch (err) {
       console.error('Failed to load volumes:', err);
@@ -93,7 +102,7 @@ export default function FileExplorer({
     setError(null);
     
     try {
-      const response = await fetch(`http://localhost:3001/api/filesystem/browse?path=${encodeURIComponent(path)}`);
+      const response = await fetch(`/api/filesystem/browse?path=${encodeURIComponent(path)}`);
       const data = await response.json();
       
       if (data.success) {
@@ -192,7 +201,7 @@ export default function FileExplorer({
               {/* Docker Volumes */}
               {dockerVolumes.length > 0 && (
                 <div>
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Docker Volumes</h3>
+                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Volumes</h3>
                   <div className="space-y-1">
                     {dockerVolumes.map((volume) => (
                       <button

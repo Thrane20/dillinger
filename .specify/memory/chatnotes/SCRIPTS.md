@@ -7,8 +7,8 @@ Quick reference for shell scripts in the project root.
 ### `start-dev.sh`
 **Purpose:** Start the development environment  
 **What it does:**
-- Starts backend API on port 3001
-- Starts frontend on port 3000
+- Starts backend API on port 3011
+- Starts frontend on port 3010
 - Checks for port conflicts
 - Installs dependencies if needed
 
@@ -18,8 +18,8 @@ Quick reference for shell scripts in the project root.
 ```
 
 **Services:**
-- Backend: http://localhost:3001/api/health
-- Frontend: http://localhost:3000
+- Backend: http://localhost:3011/api/health
+- Frontend: http://localhost:3010
 
 ---
 
@@ -135,8 +135,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 
 ```bash
 # Check what's using the port
-lsof -i :3000
-lsof -i :3001
+lsof -i :3010
+lsof -i :3011
 
 # Kill the process
 kill -9 <PID>

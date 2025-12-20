@@ -11,17 +11,27 @@
   "runArgs": [
     "--init",
     "--network=host",
-    "--ipc=host"
+    "--ipc=host",
+    "--memory=32g",
+    "--memory-swap=40g",
+    "--oom-score-adj=500",
+    "--device=/dev/dri",
+    "--device=/dev/snd",
+    "--device=/dev/input",
+    "--device=/dev/uinput",
+    "--device=/dev/bus/usb"
   ],
   "mounts": [
     "source=dillinger-pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
-    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
+    "source=/run/user/1000,type=bind,target=/run/user/1000",
+    "source=${localEnv:HOME}/.Xauthority,target=/home/node/.Xauthority,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.config/pulse,target=/home/node/.config/pulse,type=bind"
   ],
-  "forwardPorts": [3000, 3001, 3002, 3003, 8080],
+  "forwardPorts": [3010, 3002, 3003, 8080],
   "portsAttributes": {
-    "3000": { "label": "Next.js Frontend" },
-    "3001": { "label": "API Backend" },
+    "3010": { "label": "Dillinger (Next.js)" },
     "3002": { "label": "Runner API (legacy)" },
     "3003": { "label": "Runner API" },
     "8080": { "label": "Streaming/WebRTC" }
@@ -45,6 +55,8 @@
   "postStartCommand": "sudo chown -R node:node /home/node/.local/share/pnpm/store && sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
   "containerEnv": {
     "PNPM_HOME": "/home/node/.local/share/pnpm",
-    "DISPLAY": "${localEnv:DISPLAY}"
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}"
   }
 }

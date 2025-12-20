@@ -490,12 +490,12 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3011;
 
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || 'http://localhost:3010',
   credentials: true
 }));
 
@@ -815,7 +815,7 @@ services:
       dockerfile: Dockerfile.dev
     container_name: dillinger-backend-dev
     ports:
-      - "3001:3001"
+      - "3011:3011"
     volumes:
       - ./packages/backend:/app
       - ./packages/shared:/shared
@@ -826,7 +826,7 @@ services:
       - NODE_ENV=development
       - DATA_PATH=/data
       - GAME_LIBRARY_PATH=/opt/games
-      - FRONTEND_URL=http://localhost:3000
+      - FRONTEND_URL=http://localhost:3010
     restart: unless-stopped
 
   frontend-dev:
@@ -835,13 +835,13 @@ services:
       dockerfile: Dockerfile.dev
     container_name: dillinger-frontend-dev
     ports:
-      - "3000:3000"
+      - "3010:3010"
     volumes:
       - ./packages/frontend:/app
       - ./packages/shared:/shared
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=http://localhost:3001
+      - NEXT_PUBLIC_API_URL=http://localhost:3011
     restart: unless-stopped
 
 volumes:
@@ -877,7 +877,7 @@ COPY . .
 RUN mkdir -p /data
 
 # Expose port
-EXPOSE 3001
+EXPOSE 3011
 
 # Start development server
 CMD ["pnpm", "run", "dev"]
@@ -906,7 +906,7 @@ RUN cd /root && pnpm install
 COPY . .
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3010
 
 # Start development server
 CMD ["pnpm", "run", "dev"]
@@ -957,7 +957,7 @@ cd packages/backend
 pnpm run dev
 
 # In another terminal, test health endpoint
-curl http://localhost:3001/api/health
+curl http://localhost:3011/api/health
 # Expected response:
 # {
 #   "status": "healthy",
@@ -968,7 +968,7 @@ curl http://localhost:3001/api/health
 # }
 
 # Test 404 handling
-curl http://localhost:3001/api/nonexistent
+curl http://localhost:3011/api/nonexistent
 # Expected: 404 with JSON error response
 ```
 
@@ -979,7 +979,7 @@ curl http://localhost:3001/api/nonexistent
 cd packages/frontend
 pnpm run dev
 
-# Open browser to http://localhost:3000
+# Open browser to http://localhost:3010
 # Should display Dillinger homepage with:
 # - Header with navigation
 # - Welcome message
@@ -1014,11 +1014,11 @@ docker-compose -f docker-compose.dev.yml ps
 # Should show all services as "Up"
 
 # Test containerized backend health
-curl http://localhost:3001/api/health
+curl http://localhost:3011/api/health
 # Should return healthy status
 
 # Test containerized frontend
-open http://localhost:3000
+open http://localhost:3010
 # Should display the same homepage as local development
 ```
 
@@ -1070,13 +1070,13 @@ open http://localhost:3000
 
 ### Port Conflicts
 ```bash
-# Check what's using ports 3000/3001
-sudo netstat -tulpn | grep :3000
-sudo netstat -tulpn | grep :3001
+# Check what's using ports 3010/3011
+sudo netstat -tulpn | grep :3010
+sudo netstat -tulpn | grep :3011
 
 # Kill conflicting processes
-sudo fuser -k 3000/tcp
-sudo fuser -k 3001/tcp
+sudo fuser -k 3010/tcp
+sudo fuser -k 3011/tcp
 ```
 
 ### pnpm Workspace Issues

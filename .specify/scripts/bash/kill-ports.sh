@@ -5,7 +5,7 @@
 echo "Checking for processes using Dillinger ports..."
 echo ""
 
-PORTS=(3000 3001 3002 3003 8080)
+PORTS=(3010 3011 3002 3003 8080)
 FOUND=0
 
 for PORT in "${PORTS[@]}"; do

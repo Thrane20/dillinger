@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface GOGGame {
   id: string;
@@ -34,16 +35,18 @@ interface GOGGameDetails {
 }
 
 interface GOGLibraryResponse {
-  success: boolean;
   games: GOGGame[];
-  count: number;
-  totalPages?: number;
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
   cached?: boolean;
   lastFetched?: string;
   error?: string;
 }
 
 export default function GOGLibraryPage() {
+  const router = useRouter();
   const [games, setGames] = useState<GOGGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,17 +79,21 @@ export default function GOGLibraryPage() {
     setError(null);
 
     try {
-      const url = refresh ? '/api/online-sources/gog/games?refresh=true' : '/api/online-sources/gog/games';
+      // Request a large limit to get all games at once
+      const baseUrl = '/api/online-sources/gog/games?limit=1000';
+      const url = refresh ? `${baseUrl}&refresh=true` : baseUrl;
       const response = await fetch(url);
       if (response.ok) {
         const data: GOGLibraryResponse = await response.json();
-        if (data.success) {
+        if (data.games) {
           setGames(data.games || []);
           setTotalPages(data.totalPages || 0);
           setIsCached(data.cached || false);
           setLastFetched(data.lastFetched || null);
+        } else if (data.error) {
+          setError(data.error);
         } else {
-          setError(data.error || 'Failed to load GOG games');
+          setError('Failed to load GOG games: unexpected response format');
         }
       } else {
         const errorData = await response.json();
@@ -107,10 +114,20 @@ export default function GOGLibraryPage() {
       const response = await fetch(`/api/online-sources/gog/games/${gameId}`);
       if (response.ok) {
         const data = await response.json();
-        if (data.success) {
-          setGameDetails(data.game);
+        // API returns game data directly, not wrapped in { success, game }
+        if (data.id) {
+          // Transform description from { full, lead } to string if needed
+          const details = {
+            ...data,
+            description: typeof data.description === 'object' 
+              ? (data.description?.full || data.description?.lead || '') 
+              : (data.description || ''),
+          };
+          setGameDetails(details);
+        } else if (data.error) {
+          setDetailsError(data.error);
         } else {
-          setDetailsError(data.error || 'Failed to load game details');
+          setDetailsError('Failed to load game details: unexpected response format');
         }
       } else {
         const errorData = await response.json();
@@ -129,16 +146,18 @@ export default function GOGLibraryPage() {
     setAddingToLibrary(true);
     
     try {
-      // Start the download
+      // Start the download - server generates human-readable gameId from title and gogId
       const downloadResponse = await fetch(`/api/online-sources/gog/games/${selectedGame.id}/download`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          gameId: `gog-${selectedGame.id}`,
           title: selectedGame.title,
           runner: selectedRunner,
+          os: selectedRunner === 'linux' ? 'linux' : 'windows',
+          language: 'en',
+          image: selectedGame.image,
         }),
       });
       
@@ -147,12 +166,13 @@ export default function GOGLibraryPage() {
         throw new Error(errorData.error || 'Failed to start download');
       }
       
-      const downloadData = await downloadResponse.json();
-      
-      // Close modal and show success
+      await downloadResponse.json().catch(() => null);
+
+      // Close modal and return to main library page
       setSelectedGame(null);
       setGameDetails(null);
-      alert(`Download started for ${selectedGame.title}! ${downloadData.fileCount} file(s) will be downloaded.`);
+      router.push('/');
+      router.refresh();
       
     } catch (err) {
       alert('Failed to add game: ' + (err instanceof Error ? err.message : 'Unknown error'));
@@ -354,35 +374,48 @@ export default function GOGLibraryPage() {
               </div>
             ) : gameDetails ? (
               <>
-                {/* Background Image */}
-                {gameDetails.images.background && (
-                  <div 
-                    className="h-64 bg-cover bg-center relative"
-                    style={{ backgroundImage: `url(${gameDetails.images.background})` }}
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent"></div>
-                    <button
-                      onClick={closeModal}
-                      className="absolute top-4 right-4 p-2 bg-black bg-opacity-50 rounded-full hover:bg-opacity-75 transition-colors"
+                {/* Background Image - use details background or fall back to selected game thumbnail */}
+                {(() => {
+                  // Prefer the tile thumbnail (always a valid JPG), otherwise use details background.
+                  let bgImage = selectedGame?.image || gameDetails.images?.background;
+
+                  // Fix protocol-relative URLs.
+                  if (bgImage && bgImage.startsWith('//')) bgImage = `https:${bgImage}`;
+
+                  // If it's a GOG static image hash without extension, append a size suffix.
+                  if (bgImage && !bgImage.match(/\.(png|jpe?g|webp)(\?|$)/i)) {
+                    bgImage = `${bgImage}_1000.jpg`;
+                  }
+
+                  return bgImage ? (
+                    <div 
+                      className="h-64 bg-cover bg-center relative"
+                      style={{ backgroundImage: `url(${bgImage})` }}
                     >
-                      <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent"></div>
+                      <button
+                        onClick={closeModal}
+                        className="absolute top-4 right-4 p-2 bg-black bg-opacity-50 rounded-full hover:bg-opacity-75 transition-colors"
+                      >
+                        <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : null;
+                })()}
                 
                 <div className="p-8">
                   {/* Title and Logo */}
                   <div className="flex items-start gap-4 mb-6">
-                    {gameDetails.images.logo2x && (
+                    {gameDetails.images?.logo2x && (
                       <img 
-                        src={gameDetails.images.logo2x} 
+                        src={gameDetails.images.logo2x.startsWith('//') ? 'https:' + gameDetails.images.logo2x : gameDetails.images.logo2x} 
                         alt={gameDetails.title}
                         className="h-16 object-contain"
                       />
                     )}
-                    {!gameDetails.images.logo2x && (
+                    {!gameDetails.images?.logo2x && (
                       <h2 className="text-3xl font-bold text-text">{gameDetails.title}</h2>
                     )}
                   </div>
@@ -407,7 +440,7 @@ export default function GOGLibraryPage() {
                         <span className="ml-2 text-text">{gameDetails.releaseDate}</span>
                       </div>
                     )}
-                    {gameDetails.genres.length > 0 && (
+                    {gameDetails.genres && gameDetails.genres.length > 0 && (
                       <div>
                         <span className="text-muted">Genres:</span>
                         <span className="ml-2 text-text">{gameDetails.genres.join(', ')}</span>
@@ -427,7 +460,7 @@ export default function GOGLibraryPage() {
                   )}
                   
                   {/* Screenshots */}
-                  {gameDetails.screenshots.length > 0 && (
+                  {gameDetails.screenshots && gameDetails.screenshots.length > 0 && (
                     <div className="mb-6">
                       <h3 className="text-lg font-semibold text-text mb-3">Screenshots</h3>
                       <div className="grid grid-cols-3 gap-2">

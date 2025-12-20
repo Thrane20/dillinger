@@ -11,7 +11,7 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: http://localhost:3001/api
+  - url: http://localhost:3011/api
     description: Development server
   - url: https://api.dillinger.local/api
     description: Local production server

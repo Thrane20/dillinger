@@ -28,7 +28,6 @@ export default function OnlineSourcesPage() {
   // Check GOG authentication status on mount
   useEffect(() => {
     checkGOGAuthStatus();
-    loadGOGAccessCode();
   }, []);
 
   // Listen for OAuth callback messages
@@ -164,16 +163,18 @@ export default function OnlineSourcesPage() {
 
   async function loadGOGGames() {
     setLoading(true);
-    setError(null);
+    // Don't clear error here - preserve errors from other operations like exchange-code
+    // setError(null);
 
     try {
       const response = await fetch('/api/online-sources/gog/games');
       if (response.ok) {
         const data = await response.json();
-        if (data.success) {
+        // Games API returns { games, total, page, limit, totalPages } - no success field
+        if (data.games) {
           setGogGames(data.games || []);
-        } else {
-          setError(data.error || 'Failed to load GOG games');
+        } else if (data.error) {
+          setError(data.error);
         }
       } else {
         const errorData = await response.json();
@@ -186,19 +187,8 @@ export default function OnlineSourcesPage() {
     }
   }
 
-  async function loadGOGAccessCode() {
-    try {
-      const response = await fetch('/api/settings/gog');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.settings?.accessCode) {
-          setGogAccessCode(data.settings.accessCode);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load GOG access code:', err);
-    }
-  }
+  // Auth codes are single-use, so we don't load/store them
+  // The textbox should always be empty for entering new codes
 
   async function saveGOGAccessCode() {
     setAccessCodeSaving(true);
@@ -206,7 +196,7 @@ export default function OnlineSourcesPage() {
     setError(null);
 
     try {
-      // First, try to exchange the code for an access token
+      // Exchange the authorization code for access tokens
       const exchangeResponse = await fetch('/api/online-sources/gog/exchange-code', {
         method: 'POST',
         headers: {
@@ -215,40 +205,22 @@ export default function OnlineSourcesPage() {
         body: JSON.stringify({ code: gogAccessCode }),
       });
 
-      if (exchangeResponse.ok) {
-        const exchangeData = await exchangeResponse.json();
-        if (exchangeData.success) {
-          setAccessCodeSuccess(true);
-          setTimeout(() => setAccessCodeSuccess(false), 3000);
-          // Refresh auth status to update connected state
-          await checkGOGAuthStatus();
-          return;
-        }
-      }
+      const exchangeData = await exchangeResponse.json();
       
-      // If exchange fails, fall back to saving as-is (in case it's already a token)
-      const response = await fetch('/api/settings/gog', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ accessCode: gogAccessCode }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setAccessCodeSuccess(true);
-          setTimeout(() => setAccessCodeSuccess(false), 3000);
-          // Refresh auth status to update connected state
-          await checkGOGAuthStatus();
-        }
+      if (exchangeResponse.ok && exchangeData.success) {
+        setAccessCodeSuccess(true);
+        // Clear the code input on success (the code is single-use)
+        setGogAccessCode('');
+        setTimeout(() => setAccessCodeSuccess(false), 3000);
+        // Refresh auth status to update connected state
+        await checkGOGAuthStatus();
       } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to save access code');
+        // Show the actual error from GOG
+        const errorMessage = exchangeData.message || exchangeData.error || 'Failed to exchange code';
+        setError(`GOG Authentication Failed: ${errorMessage}. The authorization code may have expired or already been used. Please get a new code.`);
       }
     } catch (err) {
-      setError('Failed to save access code: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      setError('Failed to exchange code: ' + (err instanceof Error ? err.message : 'Unknown error'));
     } finally {
       setAccessCodeSaving(false);
     }
@@ -455,7 +427,7 @@ export default function OnlineSourcesPage() {
                   </svg>
                   <h3 className="mt-4 text-lg font-medium text-text">No games found</h3>
                   <p className="mt-2 text-sm text-muted">
-                    Your GOG library appears to be empty or couldn't be loaded.
+                    Your GOG library appears to be empty or could not be loaded.
                   </p>
                 </div>
               ) : (

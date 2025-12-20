@@ -2,8 +2,8 @@
 
 # Dillinger Development Startup Script
 # Starts the development environment:
-# - Backend API (port 3001)
-# - Frontend (port 3000)
+# - Backend API (port 3011)
+# - Frontend (port 3010)
 
 set -e
 
@@ -20,16 +20,16 @@ echo
 
 # Check if any services are already running
 echo -e "${BLUE}Checking for existing services...${NC}"
-PORTS_IN_USE=$(lsof -ti :3000,3001 2>/dev/null || true)
+PORTS_IN_USE=$(lsof -ti :3010,3011 2>/dev/null || true)
 
 if [ ! -z "$PORTS_IN_USE" ]; then
-    echo -e "${YELLOW}⚠️  Services already running on ports 3000 or 3001${NC}"
+    echo -e "${YELLOW}⚠️  Services already running on ports 3010 or 3011${NC}"
     echo "   PIDs: $PORTS_IN_USE"
     read -p "Kill existing processes and continue? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW}Stopping existing services...${NC}"
-        lsof -ti :3000,3001 | xargs -r kill -9 2>/dev/null || true
+        lsof -ti :3010,3011 | xargs -r kill -9 2>/dev/null || true
         sleep 2
         echo -e "${GREEN}✓ Existing services stopped${NC}"
     else
@@ -49,8 +49,8 @@ fi
 echo -e "${GREEN}Starting services in parallel...${NC}"
 echo
 echo -e "${BLUE}Services will be available at:${NC}"
-echo "  • Frontend:  http://localhost:3000"
-echo "  • Backend:   http://localhost:3001/api/health"
+echo "  • Frontend:  http://localhost:3010"
+echo "  • Backend:   http://localhost:3011/api/health"
 echo
 echo -e "${BLUE}Note:${NC} Runners are now Docker containers, not a service."
 echo "      Use './test-system.sh' to launch runner containers."
@@ -62,5 +62,5 @@ pnpm run dev
 # If the command above exits (e.g., user presses Ctrl+C), clean up
 echo
 echo -e "${YELLOW}Shutting down services...${NC}"
-lsof -ti :3000,3001 | xargs -r kill -9 2>/dev/null || true
+lsof -ti :3010,3011 | xargs -r kill -9 2>/dev/null || true
 echo -e "${GREEN}✓ All services stopped${NC}"

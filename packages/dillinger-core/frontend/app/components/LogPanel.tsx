@@ -1,12 +1,19 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface LogPanelProps {
   className?: string;
 }
 
 type TabType = 'containers' | 'core';
+
+interface ActiveContainerLog {
+  containerId: string;
+  type: string;
+  gameName: string;
+  logs: string;
+}
 
 export default function LogPanel({ className = '' }: LogPanelProps) {
   const [containerLogs, setContainerLogs] = useState<string>('');
@@ -16,108 +23,129 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
   const [containerCount, setContainerCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const activeContainersRef = useRef<Set<string>>(new Set());
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const appendCoreLog = useCallback((entry: string) => {
+    setCoreLogs((prev) => (prev ? `${prev}\n${entry}` : entry));
+  }, []);
+
+  const fetchContainerLogs = useCallback(async () => {
+    try {
+      const response = await fetch('/api/games/active-containers/logs?tail=200');
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to fetch container logs');
+      }
+
+      const containers: ActiveContainerLog[] = data.containers || [];
+      setContainerCount(data.count ?? containers.length ?? 0);
+
+      if (containers.length === 0) {
+        setContainerLogs('');
+        return;
+      }
+
+      const formatted = containers
+        .map((container) => {
+          const header = `\n${'='.repeat(80)}\n[${(container.type || 'container').toUpperCase()}] ${container.gameName || 'Unknown Game'}\nContainer: ${(container.containerId || '').substring(0, 12)}\n${'='.repeat(80)}\n`;
+          return `${header}${container.logs || ''}`;
+        })
+        .join('\n');
+
+      setContainerLogs(formatted.trimStart());
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch container logs:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch container logs');
+    }
+  }, []);
 
   useEffect(() => {
-    // Connect to WebSocket
-    const connectWebSocket = () => {
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws/logs';
-      console.log('Connecting to WebSocket:', wsUrl);
-      
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+    let isMounted = true;
 
-      ws.onopen = () => {
-        console.log('WebSocket connected');
+    const connect = () => {
+      if (!isMounted) {
+        return;
+      }
+
+      const source = new EventSource('/api/logs/core/stream');
+      eventSourceRef.current = source;
+
+      source.onopen = () => {
         setIsConnected(true);
         setError(null);
       };
 
-      ws.onmessage = (event) => {
+      source.onmessage = (event) => {
+        if (!event.data) {
+          return;
+        }
+
         try {
-          const message = JSON.parse(event.data);
-          
-          if (message.type === 'logentry') {
-            const { containerId, containerType, gameName, message: logMessage } = message.body;
-            
-            if (containerType === 'system') {
-                setCoreLogs(prev => prev + logMessage + '\n');
-            } else {
-                // Add container header if this is the first log from this container
-                if (!activeContainersRef.current.has(containerId)) {
-                  activeContainersRef.current.add(containerId);
-                  setContainerCount(activeContainersRef.current.size);
-                  
-                  const header = `\n${'='.repeat(80)}\n[${containerType.toUpperCase()}] ${gameName}\nContainer: ${containerId.substring(0, 12)}\n${'='.repeat(80)}\n`;
-                  setContainerLogs(prev => prev + header);
-                }
-                
-                // Append log message
-                setContainerLogs(prev => prev + logMessage + '\n');
-            }
-            
-            // Auto-scroll to bottom
-            if (scrollRef.current) {
-              setTimeout(() => {
-                if (scrollRef.current) {
-                  scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-                }
-              }, 50);
-            }
-          } else if (message.type === 'container-started') {
-            const { containerId, containerType, gameName } = message.body;
-            activeContainersRef.current.add(containerId);
-            setContainerCount(activeContainersRef.current.size);
-            
-            const header = `\n${'='.repeat(80)}\n[${containerType.toUpperCase()}] ${gameName} (starting...)\nContainer: ${containerId.substring(0, 12)}\n${'='.repeat(80)}\n`;
-            setContainerLogs(prev => prev + header);
-          } else if (message.type === 'container-stopped') {
-            const { containerId } = message.body;
-            activeContainersRef.current.delete(containerId);
-            setContainerCount(activeContainersRef.current.size);
-            
-            setContainerLogs(prev => prev + `\n[Container ${containerId.substring(0, 12)} stopped]\n`);
-          } else if (message.type === 'connected') {
-            console.log('WebSocket connection confirmed:', message.body.message);
+          const payload = JSON.parse(event.data);
+
+          if (payload.type === 'connected') {
+            appendCoreLog('[connected] Log stream established');
+            return;
+          }
+
+          if (payload.type === 'log' || payload.type === 'info') {
+            const timestamp = payload.timestamp || new Date().toISOString();
+            const level = (payload.level || payload.type || 'info').toUpperCase();
+            const message = payload.message || payload.msg || JSON.stringify(payload);
+            appendCoreLog(`[${timestamp}] [${level}] ${message}`);
           }
         } catch (err) {
-          console.error('Error parsing WebSocket message:', err);
+          console.error('Failed to parse log stream message:', err);
         }
       };
 
-      ws.onerror = (event) => {
-        console.error('WebSocket error:', event);
-        setError('WebSocket connection error');
-        setIsConnected(false);
-      };
+      source.onerror = () => {
+        if (!isMounted) {
+          return;
+        }
 
-      ws.onclose = () => {
-        console.log('WebSocket disconnected');
         setIsConnected(false);
-        
-        // Attempt to reconnect after 3 seconds
-        setTimeout(connectWebSocket, 3000);
+        setError('Core log stream disconnected');
+        source.close();
+
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+        }
+        reconnectTimerRef.current = setTimeout(connect, 5000);
       };
     };
 
-    connectWebSocket();
+    connect();
+    fetchContainerLogs();
+    const interval = setInterval(fetchContainerLogs, 4000);
 
-    // Cleanup on unmount
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
+      isMounted = false;
+      clearInterval(interval);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
       }
     };
-  }, []);
+  }, [appendCoreLog, fetchContainerLogs]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [containerLogs, coreLogs, activeTab]);
 
   const handleClear = () => {
     if (activeTab === 'containers') {
-        setContainerLogs('');
-        activeContainersRef.current.clear();
-        setContainerCount(0);
+      setContainerLogs('');
+      setContainerCount(0);
     } else {
-        setCoreLogs('');
+      setCoreLogs('');
     }
     setError(null);
   };

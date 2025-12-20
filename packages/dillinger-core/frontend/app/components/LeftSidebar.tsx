@@ -41,7 +41,7 @@ export default function LeftSidebar() {
 
   async function loadVolumes() {
     try {
-      const response = await fetch('http://localhost:3001/api/volumes');
+      const response = await fetch('/api/volumes');
       const data = await response.json();
       if (data.success) {
         setVolumes(data.data);
@@ -70,7 +70,7 @@ export default function LeftSidebar() {
     if (!volumeName.trim() || !selectedPath) return;
 
     try {
-      const response = await fetch('http://localhost:3001/api/volumes', {
+      const response = await fetch('/api/volumes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -99,7 +99,7 @@ export default function LeftSidebar() {
     if (!confirm('Remove this volume? Docker volume will be deleted.')) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/volumes/${volumeId}`, {
+      const response = await fetch(`/api/volumes/${volumeId}`, {
         method: 'DELETE',
       });
 
@@ -122,7 +122,7 @@ export default function LeftSidebar() {
     // Load session info first
     console.log('Loading session volumes...');
     try {
-      const response = await fetch('http://localhost:3001/api/volumes/session-volumes');
+      const response = await fetch('/api/volumes/session-volumes');
       const data = await response.json();
       console.log('Session volumes response:', data);
       if (data.success) {
@@ -145,7 +145,7 @@ export default function LeftSidebar() {
     console.log('Confirming cleanup...');
     setCleanupInProgress(true);
     try {
-      const response = await fetch('http://localhost:3001/api/volumes/cleanup-saves', {
+      const response = await fetch('/api/volumes/cleanup-saves', {
         method: 'DELETE',
       });
 

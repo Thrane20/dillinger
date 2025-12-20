@@ -3,10 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
-import type {
-  DownloadProgressBody,
-  Game as SharedGame,
-} from '@dillinger/shared';
+import type { Game as SharedGame } from '@dillinger/shared';
+import ConfirmationModal from './components/ConfirmationModal';
 
 // Frontend Game interface (extends shared but allows UI-specific statuses and properties)
 interface Game extends Omit<SharedGame, 'installation'> {
@@ -54,6 +52,27 @@ const getPlatformName = (id: string) => {
   return names[id] || id;
 };
 
+// Helper to extract GOG ID from game
+// Handles both old format "gog-{gogId}" and new format "gog-{slug}-{gogId}"
+const getGogIdFromGame = (game: { id: string; slug?: string }): string | null => {
+  const extractGogId = (str: string): string | null => {
+    if (!str.startsWith('gog-')) return null;
+    const withoutPrefix = str.replace('gog-', '');
+    // New format: "gog-{slug}-{gogId}" - GOG IDs are 10-digit numbers at the end
+    const gogIdMatch = withoutPrefix.match(/(\d{10})$/);
+    if (gogIdMatch) {
+      return gogIdMatch[1];
+    }
+    // Old format: "gog-{gogId}" - the whole thing after prefix is the ID
+    if (/^\d+$/.test(withoutPrefix)) {
+      return withoutPrefix;
+    }
+    return null;
+  };
+  
+  return extractGogId(game.id) || (game.slug ? extractGogId(game.slug) : null);
+};
+
 export default function GamesPage() {
   const router = useRouter();
   const [games, setGames] = useState<Game[]>([]);
@@ -72,6 +91,21 @@ export default function GamesPage() {
   const [gridColumns, setGridColumns] = useState(2); // Default to 2 columns
 
   const [debugDialogOpenForGameId, setDebugDialogOpenForGameId] = useState<string | null>(null);
+
+  // Delete game with download confirmation
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    gameId: string;
+    gameTitle: string;
+    hasDownload: boolean;
+    downloadProgress: number;
+  } | null>(null);
+
+  // Resume download with cache confirmation
+  const [cacheConfirmModal, setCacheConfirmModal] = useState<{
+    game: Game;
+    cacheSize: number;
+    fileCount: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!debugDialogOpenForGameId) return;
@@ -165,77 +199,16 @@ export default function GamesPage() {
 
     window.addEventListener('backdropSettingsChanged', handleSettingsChange);
 
-    // WebSocket connection for download progress
-    // WebSockets cannot be proxied by Next.js, connect directly to backend
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const backendHost = process.env.NEXT_PUBLIC_BACKEND_URL || 'localhost:3001';
-    const wsUrl = `${protocol}//${backendHost}/ws/logs`;
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      console.log(
-        '[HomePage] WebSocket connected for download progress to',
-        wsUrl
-      );
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-
-        if (message.type === 'download-progress') {
-          const body: DownloadProgressBody = message.body;
-
-          // Update the specific game with download progress
-          setGames((prevGames) =>
-            prevGames.map((game) => {
-              if (game.id === body.gameId) {
-                let status: string;
-                if (body.status === 'completed') {
-                  status = 'ready_to_install';
-                } else if (body.status === 'failed') {
-                  status = 'download_cancelled';
-                } else {
-                  status = 'downloading';
-                }
-
-                return {
-                  ...game,
-                  installation: {
-                    ...game.installation,
-                    status,
-                    downloadProgress: body.totalProgress,
-                  },
-                };
-              }
-              return game;
-            })
-          );
-        }
-      } catch (error) {
-        console.error('[HomePage] Error parsing WebSocket message:', error);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('[HomePage] WebSocket error:', error);
-    };
-
-    ws.onclose = () => {
-      console.log('[HomePage] WebSocket disconnected');
-    };
-
-    // Keep a slow polling as fallback (every 10 seconds instead of 2)
+    // Poll for updates while downloads / installs are in progress
     const pollInterval = setInterval(() => {
       loadGames(true);
-    }, 10000);
+    }, 5000);
 
     return () => {
       window.removeEventListener(
         'backdropSettingsChanged',
         handleSettingsChange
       );
-      ws.close();
       clearInterval(pollInterval);
     };
   }, []);
@@ -341,18 +314,38 @@ export default function GamesPage() {
                 if (downloadResponse.ok) {
                   const downloadData = await downloadResponse.json();
                   if (downloadData.success && downloadData.status) {
-                    // Only mark as cancelled if status is 'failed' (not completed)
-                    if (downloadData.status.status === 'failed') {
+                    const dlStatus = downloadData.status;
+                    
+                    // Handle different download states
+                    if (dlStatus.status === 'failed') {
                       return {
                         ...game,
                         installation: {
                           ...game.installation,
                           status: 'download_cancelled',
-                          downloadProgress: downloadData.status.totalProgress,
+                          downloadProgress: dlStatus.totalProgress,
+                        },
+                      };
+                    } else if (dlStatus.status === 'downloading' || dlStatus.status === 'queued') {
+                      return {
+                        ...game,
+                        installation: {
+                          ...game.installation,
+                          status: 'downloading',
+                          downloadProgress: dlStatus.totalProgress,
+                        },
+                      };
+                    } else if (dlStatus.status === 'paused') {
+                      return {
+                        ...game,
+                        installation: {
+                          ...game.installation,
+                          status: 'download_cancelled',
+                          downloadProgress: dlStatus.totalProgress,
                         },
                       };
                     }
-                    // If completed or paused, show the game as-is (let WebSocket handle completion)
+                    // If completed, let the game keep its current state
                   }
                 }
               } catch (err) {
@@ -388,13 +381,47 @@ export default function GamesPage() {
   }
 
   async function deleteGame(gameId: string) {
-    if (
-      !confirm('Are you sure you want to delete this game from your library?')
-    ) {
+    // Find the game to get its title
+    const game = games.find(g => g.id === gameId);
+    if (!game) return;
+
+    try {
+      // Check if there's an active download for this game
+      const cacheResponse = await fetch(`/api/online-sources/gog/downloads/${gameId}/cache`);
+      const cacheData = await cacheResponse.json();
+
+      if (cacheData.success && (cacheData.hasActiveDownload || cacheData.cacheExists)) {
+        // Show modal to ask about download/cache
+        setDeleteConfirmModal({
+          gameId,
+          gameTitle: game.title,
+          hasDownload: cacheData.hasActiveDownload,
+          downloadProgress: cacheData.downloadProgress || 0,
+        });
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to check download status:', err);
+      // Continue with regular delete flow if check fails
+    }
+
+    // No download - use simple confirm
+    if (!confirm('Are you sure you want to delete this game from your library?')) {
       return;
     }
 
+    await performDeleteGame(gameId, false);
+  }
+
+  async function performDeleteGame(gameId: string, deleteCache: boolean) {
     try {
+      // If requested, delete the cache first
+      if (deleteCache) {
+        await fetch(`/api/online-sources/gog/downloads/${gameId}/cache`, {
+          method: 'DELETE',
+        });
+      }
+
       const response = await fetch(`/api/games/${gameId}`, {
         method: 'DELETE',
       });
@@ -423,16 +450,63 @@ export default function GamesPage() {
     }
   }
 
-  async function resumeDownload(game: any) {
-    if (!game.metadata?.gogId) {
+  async function resumeDownload(game: Game) {
+    const gogId = getGogIdFromGame(game);
+    if (!gogId) {
       setError('Cannot resume: GOG ID not found');
       return;
     }
 
     try {
-      // Resume download by calling the same endpoint
+      // Check if there are existing cache files
+      const cacheResponse = await fetch(`/api/online-sources/gog/downloads/${game.id}/cache`);
+      const cacheData = await cacheResponse.json();
+
+      // If there's already an active download, just continue it
+      if (cacheData.success && cacheData.hasActiveDownload) {
+        await performResumeDownload(game);
+        return;
+      }
+
+      // If there are cache files but no active download, ask user what to do
+      if (cacheData.success && cacheData.cacheExists && cacheData.fileCount > 0) {
+        setCacheConfirmModal({
+          game,
+          cacheSize: cacheData.cacheSize,
+          fileCount: cacheData.fileCount,
+        });
+        return;
+      }
+
+      // No cache, start fresh
+      await performResumeDownload(game);
+    } catch (err) {
+      console.error('Failed to check cache:', err);
+      // Continue with download anyway
+      await performResumeDownload(game);
+    }
+  }
+
+  async function performResumeDownload(game: Game, clearCache: boolean = false) {
+    const gogId = getGogIdFromGame(game);
+    if (!gogId) {
+      setError('Cannot resume: GOG ID not found');
+      return;
+    }
+
+    try {
+      // Clear cache if requested
+      if (clearCache) {
+        await fetch(`/api/online-sources/gog/downloads/${game.id}/cache`, {
+          method: 'DELETE',
+        });
+        // Small delay for cleanup
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+
+      // Resume/start download by calling the download endpoint
       const response = await fetch(
-        `/api/online-sources/gog/games/${game.metadata.gogId}/download`,
+        `/api/online-sources/gog/games/${gogId}/download`,
         {
           method: 'POST',
           headers: {
@@ -469,8 +543,9 @@ export default function GamesPage() {
     }
   }
 
-  async function restartDownload(game: any) {
-    if (!game.metadata?.gogId) {
+  async function restartDownload(game: Game) {
+    const gogId = getGogIdFromGame(game);
+    if (!gogId) {
       setError('Cannot restart: GOG ID not found');
       return;
     }
@@ -494,7 +569,7 @@ export default function GamesPage() {
 
       // Then start a fresh download
       const response = await fetch(
-        `/api/online-sources/gog/games/${game.metadata.gogId}/download`,
+        `/api/online-sources/gog/games/${gogId}/download`,
         {
           method: 'POST',
           headers: {
@@ -545,7 +620,7 @@ export default function GamesPage() {
     setError(null);
 
     try {
-      const response = await fetch(`/api/launch/${gameId}/launch`, {
+      const response = await fetch(`/api/launch/${gameId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1444,6 +1519,70 @@ export default function GamesPage() {
           </div>
         )}
       </div>
+
+      {/* Delete Game with Download Confirmation Modal */}
+      {deleteConfirmModal && (
+        <ConfirmationModal
+          title={deleteConfirmModal.hasDownload ? 'Download In Progress' : 'Delete Game'}
+          message={
+            deleteConfirmModal.hasDownload
+              ? `"${deleteConfirmModal.gameTitle}" has a download in progress (${deleteConfirmModal.downloadProgress}% complete).\n\nWhat would you like to do with the downloaded files?`
+              : `Are you sure you want to delete "${deleteConfirmModal.gameTitle}" from your library?\n\nNote: There are partially downloaded files for this game.`
+          }
+          confirmText="Keep Files"
+          cancelText="Cancel"
+          destructive={false}
+          extraButtons={[
+            {
+              text: 'Delete Files',
+              variant: 'destructive',
+              onClick: () => {
+                performDeleteGame(deleteConfirmModal.gameId, true);
+                setDeleteConfirmModal(null);
+              },
+            },
+          ]}
+          onConfirm={() => {
+            performDeleteGame(deleteConfirmModal.gameId, false);
+            setDeleteConfirmModal(null);
+          }}
+          onCancel={() => setDeleteConfirmModal(null)}
+        />
+      )}
+
+      {/* Resume Download with Cache Confirmation Modal */}
+      {cacheConfirmModal && (
+        <ConfirmationModal
+          title="Existing Download Files Found"
+          message={`Found ${cacheConfirmModal.fileCount} file(s) (${formatBytes(cacheConfirmModal.cacheSize)}) from a previous download.\n\nWould you like to use them, or start fresh?`}
+          confirmText="Use Existing"
+          cancelText="Cancel"
+          extraButtons={[
+            {
+              text: 'Start Fresh',
+              variant: 'secondary',
+              onClick: () => {
+                performResumeDownload(cacheConfirmModal.game, true);
+                setCacheConfirmModal(null);
+              },
+            },
+          ]}
+          onConfirm={() => {
+            performResumeDownload(cacheConfirmModal.game, false);
+            setCacheConfirmModal(null);
+          }}
+          onCancel={() => setCacheConfirmModal(null)}
+        />
+      )}
     </div>
   );
+}
+
+// Helper function to format bytes
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
