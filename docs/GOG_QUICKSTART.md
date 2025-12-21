@@ -24,7 +24,7 @@ GOG_REDIRECT_URI=http://localhost:3010/online_sources/gog-callback
 
 ```bash
 # If running in development
-cd packages/dillinger-core/backend
+cd packages/dillinger-core
 pnpm dev
 
 # Or restart your Docker containers

@@ -6,8 +6,6 @@ FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/dillinger-core/backend/package.json ./packages/dillinger-core/backend/
-COPY packages/dillinger-core/frontend/package.json ./packages/dillinger-core/frontend/
 COPY packages/dillinger-core/package.json ./packages/dillinger-core/
 
 RUN npm config set strict-ssl false && pnpm config set strict-ssl false && pnpm install --frozen-lockfile && pnpm config set strict-ssl true && npm config set strict-ssl true
@@ -26,12 +24,8 @@ COPY packages/dillinger-core ./packages/dillinger-core
 WORKDIR /app/packages/shared
 RUN pnpm run build
 
-# Build backend
-WORKDIR /app/packages/dillinger-core/backend
-RUN pnpm run build
-
-# Build frontend
-WORKDIR /app/packages/dillinger-core/frontend
+# Build Dillinger Core (Next.js)
+WORKDIR /app/packages/dillinger-core
 ENV NODE_ENV=production
 ENV NEXT_PUBLIC_API_URL=http://localhost:3010
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -48,18 +42,15 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=builder --chown=dillinger:nodejs /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder --chown=dillinger:nodejs /app/packages/shared/package.json ./packages/shared/
 
-COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/backend/dist ./packages/dillinger-core/backend/dist
-COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/backend/package.json ./packages/dillinger-core/backend/
-
-COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/frontend/.next ./packages/dillinger-core/frontend/.next
-COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/frontend/package.json ./packages/dillinger-core/frontend/
-COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/frontend/next.config.js ./packages/dillinger-core/frontend/
+COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/.next ./packages/dillinger-core/.next
+COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/package.json ./packages/dillinger-core/
+COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/next.config.js ./packages/dillinger-core/
+COPY --from=builder --chown=dillinger:nodejs /app/packages/dillinger-core/assets ./packages/dillinger-core/assets
 
 # Copy node_modules
 COPY --from=deps --chown=dillinger:nodejs /app/node_modules ./node_modules
 COPY --from=deps --chown=dillinger:nodejs /app/packages/shared/node_modules ./packages/shared/node_modules
-COPY --from=deps --chown=dillinger:nodejs /app/packages/dillinger-core/backend/node_modules ./packages/dillinger-core/backend/node_modules
-COPY --from=deps --chown=dillinger:nodejs /app/packages/dillinger-core/frontend/node_modules ./packages/dillinger-core/frontend/node_modules
+COPY --from=deps --chown=dillinger:nodejs /app/packages/dillinger-core/node_modules ./packages/dillinger-core/node_modules
 
 RUN mkdir -p /data && chown -R dillinger:nodejs /data
 
@@ -69,7 +60,6 @@ COPY --chown=dillinger:nodejs docker/dillinger-core/ecosystem.config.cjs ./
 EXPOSE 3010
 ENV NODE_ENV=production
 ENV PORT=3010
-ENV BACKEND_PORT=3011
 ENV DILLINGER_ROOT=/data
 ENV FRONTEND_URL=http://localhost:3010
 ENV DOCKER_CONTAINER=true

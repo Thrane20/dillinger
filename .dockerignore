@@ -34,7 +34,7 @@ coverage/
 # Temporary files
 tmp/
 temp/
-packages/dillinger-core/backend/data/
+packages/dillinger-core/data/
 
 # Editor files
 .vscode/

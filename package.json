@@ -5,10 +5,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter=@dillinger/frontend run dev",
+    "dev": "pnpm --filter=@dillinger/core run dev",
     "dev:all": "pnpm --parallel run dev",
     "build": "pnpm --recursive run build",
-    "start": "pnpm --filter=@dillinger/frontend start",
+    "start": "pnpm --filter=@dillinger/core start",
     "test": "pnpm --recursive run test", 
     "type-check": "pnpm --recursive run type-check",
     "lint": "pnpm --recursive run lint",

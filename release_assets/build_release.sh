@@ -60,7 +60,7 @@ step "Installing workspace dependencies" pnpm install --frozen-lockfile
 
 step "Building shared packages" pnpm run build:shared
 
-step "Building Dillinger Core Next.js frontend" bash -c "cd packages/dillinger-core/frontend && pnpm run build"
+step "Building Dillinger Core Next.js app" bash -c "cd packages/dillinger-core && pnpm run build"
 
 step "Building Dillinger Core Docker image" pnpm run docker:build:core
 

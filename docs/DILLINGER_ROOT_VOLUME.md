@@ -60,7 +60,7 @@ cd /path/to/dillinger
 docker volume create \
   --driver local \
   --opt type=none \
-  --opt device=$(pwd)/packages/dillinger-core/backend/data \
+  --opt device=$(pwd)/packages/dillinger-core/data \
   --opt o=bind \
   dillinger_root
 ```
@@ -70,7 +70,7 @@ docker volume create \
 ### DILLINGER_ROOT
 This environment variable **MUST** point to the mount point of the `dillinger_root` volume:
 
-- **Development**: `/mnt/linuxfast/dev/dillinger/packages/dillinger-core/backend/data`
+- **Development**: `/mnt/linuxfast/dev/dillinger/packages/dillinger-core/data`
 - **Production**: `/data` (typical Docker container mount point)
 - **Custom**: Wherever your `dillinger_root` volume is mounted
 

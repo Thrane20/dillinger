@@ -71,6 +71,8 @@ fi
 PUID=${PUID:-$(id -u)}
 PGID=${PGID:-$(id -g)}
 
+HOST_XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$PUID}
+
 info "Using PUID=$PUID, PGID=$PGID"
 info "Container: $CONTAINER_NAME"
 info "Image: $IMAGE_NAME"
@@ -83,6 +85,17 @@ docker volume create dillinger_installed >/dev/null
 ok "dillinger_installed"
 docker volume create dillinger_installers >/dev/null
 ok "dillinger_installers"
+
+# Ensure core volumes are writable by the user we're going to run as.
+# This avoids permission issues when running with --user and also helps with PulseAudio.
+info "Ensuring core volumes are owned by PUID:PGID ($PUID:$PGID)"
+docker run --rm \
+  -v dillinger_root:/data \
+  -v dillinger_installed:/mnt/linuxfast/dillinger_installed \
+  -v dillinger_installers:/installers \
+  alpine:3.20 \
+  sh -lc "chown -R $PUID:$PGID /data /mnt/linuxfast/dillinger_installed /installers" >/dev/null
+ok "volume ownership updated"
 
 if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
   warn "Container $CONTAINER_NAME already exists - removing"
@@ -108,15 +121,18 @@ if [[ -n "${DISPLAY:-}" ]]; then
 fi
 
 # Wayland forwarding
-if [[ -n "${WAYLAND_DISPLAY:-}" && -n "${XDG_RUNTIME_DIR:-}" ]]; then
+if [[ -n "${WAYLAND_DISPLAY:-}" && -d "${HOST_XDG_RUNTIME_DIR}" ]]; then
   info "Configuring Wayland display $WAYLAND_DISPLAY"
-  DOCKER_ARGS+=( -e WAYLAND_DISPLAY="$WAYLAND_DISPLAY" -e XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" -v "$XDG_RUNTIME_DIR":"$XDG_RUNTIME_DIR":rw )
+  DOCKER_ARGS+=( -e WAYLAND_DISPLAY="$WAYLAND_DISPLAY" -e XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" -v "$HOST_XDG_RUNTIME_DIR":"$HOST_XDG_RUNTIME_DIR":rw )
 fi
 
 # PulseAudio
-if [[ -n "${XDG_RUNTIME_DIR:-}" && -S "$XDG_RUNTIME_DIR/pulse/native" ]]; then
+if [[ -S "$HOST_XDG_RUNTIME_DIR/pulse/native" ]]; then
   info "Mounting PulseAudio socket"
-  DOCKER_ARGS+=( -v "$XDG_RUNTIME_DIR/pulse":"$XDG_RUNTIME_DIR/pulse":rw )
+  DOCKER_ARGS+=( \
+    -e XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" \
+    -e PULSE_SERVER="unix:$HOST_XDG_RUNTIME_DIR/pulse/native" \
+    -v "$HOST_XDG_RUNTIME_DIR/pulse":"$HOST_XDG_RUNTIME_DIR/pulse":rw )
 fi
 
 mkdir -p "$HOME/.config/pulse"
@@ -160,6 +176,7 @@ info "Starting Dillinger Core container"
 docker run -d \
   --name "$CONTAINER_NAME" \
   "${RESTART_FLAG[@]}" \
+  --user "$PUID:$PGID" \
   "${DOCKER_ARGS[@]}" \
   "$IMAGE_NAME"
 

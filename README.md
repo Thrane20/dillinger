@@ -149,7 +149,7 @@ If a game container starts and exits immediately (or you want to inspect mounts/
    docker volume create \
      --driver local \
      --opt type=none \
-     --opt device=$(pwd)/packages/dillinger-core/backend/data \
+   --opt device=$(pwd)/packages/dillinger-core/data \
      --opt o=bind \
      dillinger_root
    ```

@@ -14,8 +14,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 # Copy package manifests so pnpm can resolve workspaces without full source
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/dillinger-core/package.json ./packages/dillinger-core/
-COPY packages/dillinger-core/backend/package.json ./packages/dillinger-core/backend/
-COPY packages/dillinger-core/frontend/package.json ./packages/dillinger-core/frontend/
 
 # Install dependencies (workspace-aware)
 RUN pnpm install --frozen-lockfile
@@ -23,11 +21,11 @@ RUN pnpm install --frozen-lockfile
 # Copy full source for the build
 COPY packages ./packages
 
-# Build shared libraries consumed by the frontend
+# Build shared libraries consumed by Dillinger Core
 RUN pnpm --filter=@dillinger/shared run build
 
 # Build the Next.js application
-WORKDIR /app/packages/dillinger-core/frontend
+WORKDIR /app/packages/dillinger-core
 ENV NODE_ENV=production
 RUN pnpm run build
 
@@ -45,16 +43,19 @@ RUN pacman -Sy --noconfirm --needed nodejs pulseaudio docker && \
 WORKDIR /app
 
 # Copy the standalone build (includes server.js and bundled node_modules)
-COPY --from=builder /app/packages/dillinger-core/frontend/.next/standalone ./
+COPY --from=builder /app/packages/dillinger-core/.next/standalone ./
 # Copy static files to the correct location relative to server.js
-COPY --from=builder /app/packages/dillinger-core/frontend/.next/static ./packages/dillinger-core/frontend/.next/static
+COPY --from=builder /app/packages/dillinger-core/.next/static ./packages/dillinger-core/.next/static
 
 # Copy worker scripts that are not bundled by Next.js standalone output
-RUN mkdir -p ./packages/dillinger-core/frontend/lib/workers
-COPY --from=builder /app/packages/dillinger-core/frontend/lib/workers/download-worker.js ./packages/dillinger-core/frontend/lib/workers/download-worker.js
+RUN mkdir -p ./packages/dillinger-core/lib/workers
+COPY --from=builder /app/packages/dillinger-core/lib/workers/download-worker.js ./packages/dillinger-core/lib/workers/download-worker.js
 
 # Create empty public directory where server.js expects it
-RUN mkdir -p ./packages/dillinger-core/frontend/public
+RUN mkdir -p ./packages/dillinger-core/public
+
+# Copy default templates/assets used for first-run scaffolding
+COPY --from=builder /app/packages/dillinger-core/assets ./packages/dillinger-core/assets
 
 # Create data directory for persistent JSON storage
 RUN mkdir -p "$DILLINGER_ROOT"
@@ -63,4 +64,4 @@ VOLUME ["/data"]
 EXPOSE 3010
 
 # Start the standalone Next.js server
-CMD ["node", "packages/dillinger-core/frontend/server.js"]
+CMD ["node", "packages/dillinger-core/server.js"]

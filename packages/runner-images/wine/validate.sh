@@ -26,7 +26,7 @@ if [ -z "$REPO_ROOT" ]; then
     echo -e "${RED}Error: Could not find git repository root${NC}"
     exit 1
 fi
-PLATFORM_DIR="$REPO_ROOT/packages/dillinger-core/backend/data/storage/platforms"
+PLATFORM_DIR="$REPO_ROOT/packages/dillinger-core/data/storage/platforms"
 
 echo "Script directory: $SCRIPT_DIR"
 echo "Repository root: $REPO_ROOT"

@@ -1,34 +1,58 @@
 {
   "name": "@dillinger/core",
   "version": "1.0.0",
-  "description": "Dillinger core management platform",
+  "description": "Dillinger Core (Next.js app with integrated API)",
   "private": true,
-  "type": "module",
   "scripts": {
-    "dev": "pnpm run dev:frontend",
-    "build": "pnpm --recursive run build", 
-    "test": "pnpm --recursive run test",
-    "type-check": "pnpm --recursive run type-check",
-    "lint": "pnpm --recursive run lint",
-    "clean": "pnpm --recursive run clean && rm -rf node_modules",
-    "dev:backend": "pnpm --filter=@dillinger/backend run dev",
-    "dev:frontend": "pnpm --filter=@dillinger/frontend run dev",
+    "dev": "DILLINGER_ROOT=${DILLINGER_ROOT:-$(pwd)/data} HOST_WORKSPACE_PATH=/mnt/linuxfast/dev/dillinger PORT=3010 next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write app/**/*.{ts,tsx}",
+    "clean": "rimraf .next out",
     "docker:build": "cd ../.. && pnpm --filter=@dillinger/shared run build && docker build -t dillinger-core:latest -f packages/dillinger-core/Dockerfile .",
     "docker:image": "cd ../.. && docker build -t dillinger-core:latest -f packages/dillinger-core/Dockerfile ."
   },
   "dependencies": {
-    "@dillinger/shared": "workspace:*"
+    "@dillinger/shared": "workspace:*",
+    "@headlessui/react": "^1.7.0",
+    "@heroicons/react": "^2.0.0",
+    "@hookform/resolvers": "^3.3.0",
+    "@types/ws": "^8.18.1",
+    "autoprefixer": "^10.0.1",
+    "axios": "^1.6.0",
+    "clsx": "^2.0.0",
+    "dockerode": "^4.0.0",
+    "fs-extra": "^11.1.0",
+    "next": "14.0.0",
+    "postcss": "^8",
+    "react": "^18",
+    "react-dom": "^18",
+    "react-hook-form": "^7.48.0",
+    "swr": "^2.2.0",
+    "tailwindcss": "^3.3.0",
+    "uuid": "^9.0.1",
+    "winston": "^3.18.3",
+    "winston-daily-rotate-file": "^5.0.0",
+    "winston-transport": "^4.9.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0",
-    "prettier": "^3.0.0",
-    "eslint": "^8.0.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0"
+    "@tailwindcss/forms": "^0.5.10",
+    "@tailwindcss/typography": "^0.5.19",
+    "@types/dockerode": "^3.3.45",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/uuid": "^9.0.8",
+    "eslint": "^8",
+    "eslint-config-next": "14.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "pnpm": ">=8.0.0"
+    "node": ">=18.0.0"
   }
 }
