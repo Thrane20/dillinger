@@ -1,23 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Disable font optimization to avoid network calls during build
-  optimizeFonts: false,
-  
-  // Skip ESLint during production builds (code is linted in dev)
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  
   // Enable standalone output for Docker deployments
   output: 'standalone',
-  
-  // Enable experimental features if needed
-  experimental: {
-    // Mark packages with native bindings as external for server components
-    serverComponentsExternalPackages: ['dockerode', 'ssh2', 'cpu-features', 'winston', 'winston-daily-rotate-file'],
-    // Enable instrumentation hook for server startup initialization
-    instrumentationHook: true,
-  },
+
+  // Mark packages with native bindings as external for the server bundle
+  serverExternalPackages: ['dockerode', 'ssh2', 'cpu-features', 'winston', 'winston-daily-rotate-file'],
   
   // Note: API routes are now handled directly by Next.js App Router
   // No rewrites needed - /api/* routes are served from app/api/*
@@ -37,4 +24,4 @@ const nextConfig = {
   },
 };
 
-  module.exports = nextConfig;
+module.exports = nextConfig;

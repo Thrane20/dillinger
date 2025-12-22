@@ -64,7 +64,7 @@ The problem statement requested:
 **Details**:
 - Platform ID: `windows-wine`
 - Platform Type: `wine`
-- Container Image: `dillinger/runner-wine:latest`
+- Container Image: `ghcr.io/thrane20/dillinger/runner-wine:latest`
 - Supported Extensions: `.exe`, `.msi`, `.bat`, `.cmd`
 - Display Method: `x11`
 - Integration with existing Dillinger architecture
@@ -257,7 +257,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ### Launch the Game:
@@ -270,7 +270,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Next Steps (Future Enhancements)

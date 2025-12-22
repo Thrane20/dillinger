@@ -179,7 +179,7 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
-if jq -e '.configuration.containerImage == "dillinger/runner-wine:latest"' "$PLATFORM_DIR/windows-wine.json" >/dev/null 2>&1; then
+if jq -e '.configuration.containerImage == "ghcr.io/thrane20/runner-wine:latest"' "$PLATFORM_DIR/windows-wine.json" >/dev/null 2>&1; then
     echo -e "${GREEN}✓${NC} Platform uses correct container image"
 else
     echo -e "${RED}✗${NC} Platform does not use correct container image"

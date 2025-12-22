@@ -15,6 +15,127 @@ echo -e "${BLUE}  Wine Runner - Initializing...${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
+#######################################################
+# Optional: xrandr display resolution switching
+#######################################################
+
+# When XRANDR_MODE is set (e.g. "1920x1080"), attempt to change the host display
+# resolution before launching the game, then restore the original mode on exit.
+#
+# IMPORTANT: This affects the *host* X11 display (because we connect to host X).
+# Therefore it's crucial to restore the original mode when the container exits
+# or is stopped.
+
+XRANDR_MODE="${XRANDR_MODE:-}"
+XRANDR_OUTPUT="${XRANDR_OUTPUT:-}"
+
+ORIG_XRANDR_OUTPUT=""
+ORIG_XRANDR_MODE=""
+CHILD_PID=""
+
+detect_xrandr_output() {
+    if [ -n "$XRANDR_OUTPUT" ]; then
+        echo "$XRANDR_OUTPUT"
+        return 0
+    fi
+
+    # Prefer primary output; otherwise take first connected output.
+    xrandr --query 2>/dev/null | awk '
+        / connected primary/ { print $1; exit }
+        / connected/ { print $1; exit }
+    '
+}
+
+detect_current_mode_for_output() {
+    # Prints the currently active mode (the one with a '*') for the given output.
+    local out="$1"
+    xrandr --query 2>/dev/null | awk -v out="$out" '
+        $1 == out { in=1; next }
+        in && $1 ~ /^[0-9]+x[0-9]+$/ && $0 ~ /\*/ { print $1; exit }
+        in && NF==0 { exit }
+    '
+}
+
+apply_xrandr_mode() {
+    if [ -z "$XRANDR_MODE" ]; then
+        return 0
+    fi
+    if ! command -v xrandr >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠ XRANDR_MODE requested but xrandr not installed${NC}"
+        return 0
+    fi
+    if [ -z "$DISPLAY" ]; then
+        echo -e "${YELLOW}⚠ XRANDR_MODE requested but DISPLAY is not set${NC}"
+        return 0
+    fi
+
+    local out
+    out="$(detect_xrandr_output)"
+    if [ -z "$out" ]; then
+        echo -e "${YELLOW}⚠ XRANDR_MODE requested but no connected outputs were detected${NC}"
+        return 0
+    fi
+
+    local current
+    current="$(detect_current_mode_for_output "$out")"
+
+    ORIG_XRANDR_OUTPUT="$out"
+    ORIG_XRANDR_MODE="$current"
+
+    echo -e "${BLUE}Setting display resolution via xrandr...${NC}"
+    echo "  Output: $out"
+    if [ -n "$current" ]; then
+        echo "  Current: $current"
+    else
+        echo "  Current: <unknown>"
+    fi
+    echo "  Target:  $XRANDR_MODE"
+
+    if xrandr --output "$out" --mode "$XRANDR_MODE" >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ Display resolution set to $XRANDR_MODE${NC}"
+    else
+        echo -e "${YELLOW}⚠ Failed to set resolution to $XRANDR_MODE (continuing)${NC}"
+        # If we couldn't set it, don't attempt restore (we didn't change it).
+        ORIG_XRANDR_OUTPUT=""
+        ORIG_XRANDR_MODE=""
+    fi
+    echo ""
+}
+
+restore_xrandr_mode() {
+    if [ -z "$ORIG_XRANDR_OUTPUT" ] || [ -z "$ORIG_XRANDR_MODE" ]; then
+        return 0
+    fi
+    if ! command -v xrandr >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${BLUE}Restoring original display resolution...${NC}"
+    echo "  Output: $ORIG_XRANDR_OUTPUT"
+    echo "  Mode:   $ORIG_XRANDR_MODE"
+    xrandr --output "$ORIG_XRANDR_OUTPUT" --mode "$ORIG_XRANDR_MODE" >/dev/null 2>&1 || true
+    echo -e "${GREEN}✓ Display resolution restored${NC}"
+    echo ""
+
+    ORIG_XRANDR_OUTPUT=""
+    ORIG_XRANDR_MODE=""
+}
+
+on_term() {
+    echo -e "${YELLOW}Received termination signal; stopping game and restoring display...${NC}"
+    if [ -n "$CHILD_PID" ]; then
+        kill -TERM "$CHILD_PID" 2>/dev/null || true
+        # Give the child a moment to exit cleanly
+        sleep 1 || true
+        kill -KILL "$CHILD_PID" 2>/dev/null || true
+    fi
+    restore_xrandr_mode
+    exit 143
+}
+
+trap on_term TERM INT HUP QUIT
+trap restore_xrandr_mode EXIT
+
 # Source the base entrypoint setup functions but don't execute final command
 # The base entrypoint expects to be executed, not sourced, so we need to handle this carefully
 
@@ -302,6 +423,9 @@ echo -e "${GREEN}  Wine Runner Ready${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
+# Apply xrandr mode *after* display has been set up and *before* launching anything.
+apply_xrandr_mode
+
 # Execute command as game user if provided
 if [ "$#" -gt 0 ]; then
     # Check if MangoHUD is enabled
@@ -311,26 +435,26 @@ if [ "$#" -gt 0 ]; then
         if [ "$ENABLE_MANGOHUD" = "true" ]; then
             echo -e "${BLUE}Executing with Gamescope + MangoHUD: mangohud $GAMESCOPE_CMD -- $@${NC}"
             echo ""
-            gosu ${UNAME:-gameuser} mangohud $GAMESCOPE_CMD -- "$@"
+            gosu ${UNAME:-gameuser} mangohud $GAMESCOPE_CMD -- "$@" &
         else
             echo -e "${BLUE}Executing with Gamescope: $GAMESCOPE_CMD -- $@${NC}"
             echo ""
-            gosu ${UNAME:-gameuser} $GAMESCOPE_CMD -- "$@"
+            gosu ${UNAME:-gameuser} $GAMESCOPE_CMD -- "$@" &
         fi
-        else
+    else
         if [ "$ENABLE_MANGOHUD" = "true" ]; then
             echo -e "${BLUE}Executing with MangoHUD: mangohud $@${NC}"
             echo ""
-            gosu ${UNAME:-gameuser} mangohud "$@"
+            gosu ${UNAME:-gameuser} mangohud "$@" &
         else
             echo -e "${BLUE}Executing command: $@${NC}"
             echo ""
-            gosu ${UNAME:-gameuser} "$@"
+            gosu ${UNAME:-gameuser} "$@" &
         fi
     fi
-    
-    # Capture exit code. Wine crashes (SIGSEGV) can bypass normal shell flow,
-    # but we still want KEEP_ALIVE to work whenever the script continues.
+
+    CHILD_PID=$!
+    wait "$CHILD_PID"
     EXIT_CODE=$?
     
     # Wait for Wine to finish writing registry and other files
@@ -338,6 +462,9 @@ if [ "$#" -gt 0 ]; then
     echo -e "${BLUE}Waiting for Wine to finish...${NC}"
     gosu ${UNAME:-gameuser} wineserver -w 2>/dev/null || true
     echo -e "${GREEN}✓ Wine shutdown complete${NC}"
+
+    # Restore display mode before optionally keeping the container alive.
+    restore_xrandr_mode
 
     # Optional: keep container alive for debugging (even on failure)
     if [ "${KEEP_ALIVE}" = "true" ]; then

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import LogPanel from './LogPanel';
 import DownloadMonitor from './DownloadMonitor';
 
@@ -70,12 +70,6 @@ export default function RightSidebar() {
             {/* Container Logs - Permanent at top */}
             <div className="p-4 rounded-lg bg-surface/50 border border-border">
               <LogPanel />
-            </div>
-
-            {/* Core Application Logs */}
-            <div className="p-4 rounded-lg bg-surface/50 border border-border">
-              <h3 className="text-sm font-semibold text-text mb-2">Core Logs</h3>
-              <CoreLogPanel />
             </div>
 
             <div className="p-4 rounded-lg bg-surface/50 border border-border">
@@ -158,59 +152,6 @@ export default function RightSidebar() {
           </div>
         </div>
       </div>
-
-      {/* Core Log Panel - Always at bottom */}
-      <div className="p-4 rounded-lg bg-surface/50 border border-border">
-        <h3 className="text-sm font-semibold text-text mb-2">Core Logs</h3>
-        <CoreLogPanel />
-      </div>
-    </div>
-  );
-}
-
-function CoreLogPanel() {
-  const [logs, setLogs] = useState<string[]>([]);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [logs]);
-
-  useEffect(() => {
-    const eventSource = new EventSource('/api/logs/core/stream');
-    
-    eventSource.onmessage = (event) => {
-      setLogs(prev => {
-        const newLogs = [...prev, event.data];
-        return newLogs.slice(-100);
-      });
-    };
-
-    eventSource.onerror = () => {
-      eventSource.close();
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, []);
-
-  return (
-    <div 
-      ref={scrollRef}
-      className="h-32 overflow-y-auto bg-black/30 rounded p-2 font-mono text-xs text-text/80 whitespace-pre-wrap"
-    >
-      {logs.length === 0 ? (
-        <div className="text-muted italic p-2 text-center">Waiting for core logs...</div>
-      ) : (
-        logs.map((log, i) => (
-          <div key={i} className="border-b border-white/5 last:border-0 pb-0.5 mb-0.5 break-all">
-            {log}
-          </div>
-        ))
-      )}
     </div>
   );
 }

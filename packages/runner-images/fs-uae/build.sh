@@ -25,11 +25,11 @@ if [ "$1" = "--no-cache" ]; then
 fi
 
 # Build the image
-docker build $NO_CACHE -t dillinger/runner-fs-uae:latest .
+docker build $NO_CACHE -t ghcr.io/thrane20/dillinger/runner-fs-uae:latest .
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}FS-UAE Runner Image Built Successfully${NC}"
-echo -e "${BLUE}Tag: dillinger/runner-fs-uae:latest${NC}"
+echo -e "${BLUE}Tag: ghcr.io/thrane20/dillinger/runner-fs-uae:latest${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""

@@ -33,7 +33,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-vice:latest \
+  ghcr.io/thrane20/dillinger/runner-vice:latest \
   x64sc /roms/game.d64
 ```
 
@@ -46,7 +46,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-vice:latest \
+  ghcr.io/thrane20/dillinger/runner-vice:latest \
   x128 /roms/game.d64
 ```
 
@@ -59,7 +59,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-vice:latest \
+  ghcr.io/thrane20/dillinger/runner-vice:latest \
   xvic /roms/game.prg
 ```
 
@@ -128,7 +128,7 @@ docker run -it --rm \
   -v /path/to/roms:/roms:ro \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-vice:latest \
+  ghcr.io/thrane20/dillinger/runner-vice:latest \
   x64sc -autostart /roms/game.d64
 ```
 
@@ -141,7 +141,7 @@ docker run -it --rm \
   -e VICE_VIDEO_FULLSCREEN=1 \
   -e VICE_WARP_MODE=1 \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-vice:latest \
+  ghcr.io/thrane20/dillinger/runner-vice:latest \
   x64sc -autostart /roms/game.d64
 ```
 
@@ -153,7 +153,7 @@ docker run -it --rm \
   -v /path/to/config:/config/vice:rw \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-vice:latest \
+  ghcr.io/thrane20/dillinger/runner-vice:latest \
   x64sc /roms/game.d64
 ```
 

@@ -1,12 +1,68 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 interface LogPanelProps {
   className?: string;
 }
 
 type TabType = 'containers' | 'core';
+
+type LogLevel = 'error' | 'warning' | 'info';
+
+const MAX_LOG_PREVIEW_CHARS = 140;
+
+function inferLogLevel(line: string): LogLevel {
+  const normalized = line.toLowerCase();
+
+  if (
+    normalized.includes('[error]') ||
+    normalized.includes(' error ') ||
+    normalized.startsWith('error') ||
+    normalized.includes('err:') ||
+    normalized.includes('failed')
+  ) {
+    return 'error';
+  }
+
+  if (
+    normalized.includes('[warn]') ||
+    normalized.includes('[warning]') ||
+    normalized.includes(' warn ') ||
+    normalized.startsWith('warn') ||
+    normalized.includes('warning')
+  ) {
+    return 'warning';
+  }
+
+  return 'info';
+}
+
+function toPreviewText(line: string): string {
+  const trimmed = line.trimEnd();
+  if (trimmed.length <= MAX_LOG_PREVIEW_CHARS) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, MAX_LOG_PREVIEW_CHARS - 1)}…`;
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
 
 interface ActiveContainerLog {
   containerId: string;
@@ -22,6 +78,9 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [containerCount, setContainerCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [showErrors, setShowErrors] = useState(true);
+  const [showWarnings, setShowWarnings] = useState(true);
+  const [showInfo, setShowInfo] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,7 +167,7 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
         }
 
         setIsConnected(false);
-        setError('Core log stream disconnected');
+        setError('Log stream disconnected');
         source.close();
 
         if (reconnectTimerRef.current) {
@@ -151,12 +210,43 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
   };
 
   const currentLogs = activeTab === 'containers' ? containerLogs : coreLogs;
+  const tabLabel = activeTab === 'containers' ? 'Runners' : 'Core';
+
+  const filteredLines = useMemo(() => {
+    const lines = (currentLogs || '').split('\n');
+
+    return lines
+      .map((line) => {
+        const level = inferLogLevel(line);
+        return {
+          level,
+          letter: level === 'error' ? 'E' : level === 'warning' ? 'W' : 'I',
+          full: line,
+          preview: toPreviewText(line),
+        };
+      })
+      .filter((entry) => {
+        if (entry.full.trim() === '') return false;
+        if (entry.level === 'error') return showErrors;
+        if (entry.level === 'warning') return showWarnings;
+        return showInfo;
+      });
+  }, [currentLogs, showErrors, showWarnings, showInfo]);
+
+  const handleCopy = async () => {
+    try {
+      const text = filteredLines.map((l) => l.full).join('\n');
+      await copyToClipboard(text);
+    } catch (err) {
+      console.error('Failed to copy logs:', err);
+    }
+  };
 
   return (
     <div className={`space-y-2 ${className}`}>
       {/* Header with controls */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-semibold text-text">Logs</h3>
           {isConnected ? (
             <span className="px-2 py-0.5 text-xs font-medium bg-success/20 text-success rounded-full flex items-center gap-1">
@@ -168,6 +258,44 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
               Disconnected
             </span>
           )}
+
+          {/* Filters (apply to current tab view) */}
+          <button
+            type="button"
+            onClick={() => setShowErrors((v) => !v)}
+            className={`px-2 py-0.5 text-xs font-medium rounded-full border transition-colors ${
+              showErrors
+                ? 'bg-error/20 text-error border-error/30'
+                : 'bg-surface/30 text-muted border-border hover:bg-surface/50'
+            }`}
+            title="Toggle error logs"
+          >
+            Errors
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowWarnings((v) => !v)}
+            className={`px-2 py-0.5 text-xs font-medium rounded-full border transition-colors ${
+              showWarnings
+                ? 'bg-warning/20 text-warning border-warning/30'
+                : 'bg-surface/30 text-muted border-border hover:bg-surface/50'
+            }`}
+            title="Toggle warning logs"
+          >
+            Warnings
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowInfo((v) => !v)}
+            className={`px-2 py-0.5 text-xs font-medium rounded-full border transition-colors ${
+              showInfo
+                ? 'bg-primary/20 text-primary border-primary/30'
+                : 'bg-surface/30 text-muted border-border hover:bg-surface/50'
+            }`}
+            title="Toggle info logs"
+          >
+            Info
+          </button>
         </div>
       </div>
 
@@ -181,7 +309,7 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
                 : 'text-muted hover:text-text hover:bg-surface/50'
             }`}
           >
-            Containers {containerCount > 0 && `(${containerCount})`}
+            Runners {containerCount > 0 && `(${containerCount})`}
           </button>
           <button
             onClick={() => setActiveTab('core')}
@@ -196,10 +324,20 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
       </div>
 
       {/* Control buttons */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-stretch gap-2">
+        <button
+          onClick={handleCopy}
+          className="btn-primary w-1/2 text-xs"
+          title="Copy filtered logs to clipboard"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          Copy
+        </button>
         <button
           onClick={handleClear}
-          className="btn btn-sm btn-error flex-1"
+          className="btn-primary w-1/2 text-xs"
           title="Clear log display"
         >
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -212,27 +350,59 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
       {/* Error display */}
       {error && (
         <div className="p-2 bg-error/10 border border-error/30 rounded text-xs text-error">
-          Error: {error}
+          {error === 'Log stream disconnected' ? error : `Error: ${error}`}
         </div>
       )}
 
       {/* Log display area - 1/6 screen height + scroll */}
       <div
         ref={scrollRef}
-        className="font-mono text-xs bg-black/90 text-green-400 p-3 rounded border border-primary/30 overflow-y-auto whitespace-pre-wrap break-all"
+        className="text-xs bg-surface/30 p-2 rounded border border-border overflow-y-auto scrollbar-visible"
         style={{ 
           height: 'calc(100vh / 6)',
           minHeight: '150px',
           maxHeight: '300px'
         }}
       >
-        {currentLogs || (isConnected ? `Waiting for ${activeTab} logs...` : 'Connecting to log stream...')}
+        <table className="w-full text-xs">
+          <tbody>
+            {filteredLines.length === 0 ? (
+              <tr>
+                <td className="py-6 text-center text-muted italic" colSpan={2}>
+                  {isConnected ? `Waiting for ${tabLabel} logs...` : 'Connecting to log stream...'}
+                </td>
+              </tr>
+            ) : (
+              filteredLines.map((entry, idx) => (
+                <tr key={`${activeTab}-${idx}`} className="border-b border-border/40 last:border-0">
+                  <td className="align-top py-1 pr-2 w-8">
+                    <span
+                      className={`inline-flex items-center justify-center w-6 h-6 rounded font-semibold ${
+                        entry.level === 'error'
+                          ? 'bg-error/20 text-error'
+                          : entry.level === 'warning'
+                          ? 'bg-warning/20 text-warning'
+                          : 'bg-primary/20 text-primary'
+                      }`}
+                      title={entry.level}
+                    >
+                      {entry.letter}
+                    </span>
+                  </td>
+                  <td className="py-1 font-mono text-text break-all" title={entry.full}>
+                    {entry.preview}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
 
       {/* Info text */}
       <p className="text-xs text-muted italic">
         {activeTab === 'containers' 
-            ? 'Real-time logs from active game launches and installations.' 
+            ? 'Real-time logs from active runners (game launches and installers).' 
             : 'System logs from Dillinger Core backend.'}
       </p>
     </div>

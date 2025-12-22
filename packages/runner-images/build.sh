@@ -18,7 +18,13 @@ NC='\033[0m' # No Color
 # Default options
 NO_CACHE=""
 PARALLEL=false
+PUSH=false
 IMAGES=()
+
+# Image registry prefix
+# thrane20 = Gaming On Linux
+# All images default to ghcr.io/thrane20
+IMAGE_PREFIX="ghcr.io/thrane20/runner"
 
 # Function to display usage
 usage() {
@@ -32,6 +38,7 @@ usage() {
     printf "    -n, --no-cache          Build without using Docker cache\n"
     printf "    -p, --parallel          Build images in parallel (experimental)\n"
     printf "    -a, --all               Build all images (default if no images specified)\n"
+    printf "    --push                  Push images after building (requires ghcr.io login)\n"
     printf "\n"
     printf "\033[1;33mIMAGES:\033[0m\n"
     printf "    base                    Build only the base runner image\n"
@@ -40,15 +47,20 @@ usage() {
     printf "    vice                    Build only the vice runner image\n"
     printf "    fs-uae                  Build only the fs-uae runner image\n"
     printf "    mame                    Build only the mame runner image\n"
+    printf "    retroarch               Build only the retroarch runner image\n"
     printf "\n"
     printf "\033[1;33mEXAMPLES:\033[0m\n"
-    printf "    %s                      # Build all images with cache\n" "$0"
-    printf "    %s --all                # Build all images with cache\n" "$0"
+    printf "    %s                      # Build all images\n" "$0"
+    printf "    %s --all                # Build all images\n" "$0"
+    printf "    %s --push               # Build and push to ghcr.io\n" "$0"
     printf "    %s --no-cache           # Build all images without cache\n" "$0"
     printf "    %s base                 # Build only base image\n" "$0"
     printf "    %s base wine            # Build base and wine images\n" "$0"
     printf "    %s --no-cache wine      # Build wine image without cache\n" "$0"
     printf "    %s --parallel --all     # Build all images in parallel\n" "$0"
+    printf "\n"
+    printf "\033[1;33mREGISTRY:\033[0m\n"
+    printf "    All images are tagged for ghcr.io/thrane20 (Gaming On Linux)\n"
     printf "\n"
     printf "\033[1;33mBUILD ORDER:\033[0m\n"
     printf "    The script respects dependency order:\n"
@@ -58,8 +70,15 @@ usage() {
     printf "    4. vice (depends on base)\n"
     printf "    5. fs-uae (depends on base)\n"
     printf "    6. mame (depends on base)\n"
+    printf "    7. retroarch (depends on base)\n"
     printf "\n"
     exit 0
+}
+
+# Get the image tag
+get_tag() {
+    local name=$1
+    echo "${IMAGE_PREFIX}-${name}:latest"
 }
 
 # Function to build an image
@@ -71,12 +90,25 @@ build_image() {
     printf "\n"
     printf "\033[0;34m========================================\033[0m\n"
     printf "\033[0;32mBuilding %s...\033[0m\n" "$image_name"
+    printf "\033[0;34mTag: %s\033[0m\n" "$docker_tag"
     printf "\033[0;34m========================================\033[0m\n"
     
     cd "$SCRIPT_DIR/$image_dir"
     
     if docker build $NO_CACHE -t "$docker_tag" .; then
         printf "\033[0;32m✓ %s built successfully\033[0m\n" "$image_name"
+        
+        # Push if requested
+        if [ "$PUSH" = true ]; then
+            printf "\033[0;34mPushing %s...\033[0m\n" "$docker_tag"
+            if docker push "$docker_tag"; then
+                printf "\033[0;32m✓ Pushed %s\033[0m\n" "$docker_tag"
+            else
+                printf "\033[0;31m✗ Failed to push %s\033[0m\n" "$docker_tag"
+                return 1
+            fi
+        fi
+        
         printf "\n"
         return 0
     else
@@ -119,11 +151,15 @@ while [[ $# -gt 0 ]]; do
             PARALLEL=true
             shift
             ;;
+        --push)
+            PUSH=true
+            shift
+            ;;
         -a|--all)
             # Build all images (default behavior)
             shift
             ;;
-        base|linux-native|wine|vice|fs-uae|mame)
+        base|linux-native|wine|vice|fs-uae|mame|retroarch)
             IMAGES+=("$1")
             shift
             ;;
@@ -153,6 +189,14 @@ else
     printf "  Parallel: \033[1;33mdisabled\033[0m\n"
 fi
 
+printf "  Registry: \033[0;32mghcr.io/thrane20\033[0m\n"
+
+if [ "$PUSH" = true ]; then
+    printf "  Push: \033[0;32menabled\033[0m\n"
+else
+    printf "  Push: \033[1;33mdisabled\033[0m\n"
+fi
+
 if [ ${#IMAGES[@]} -eq 0 ]; then
     printf "  Images: \033[0;32mall\033[0m\n"
 else
@@ -161,8 +205,8 @@ fi
 printf "\n"
 
 # Check for dependency issues
-if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae" || should_build "mame"; then
-    if ! should_build "base" && ! docker images | grep -q "dillinger/runner-base"; then
+if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae" || should_build "mame" || should_build "retroarch"; then
+    if ! should_build "base" && ! docker images | grep -q "${IMAGE_PREFIX}-base"; then
         printf "\033[1;33mWarning: Dependent images require base image, but base not found.\033[0m\n"
         printf "\033[1;33mAdding base to build queue...\033[0m\n"
         IMAGES=("base" "${IMAGES[@]}")
@@ -180,7 +224,7 @@ if [ "$PARALLEL" = true ]; then
     
     # Always build base first
     if should_build "base"; then
-        if ! build_image "Base Runner" "base" "dillinger/runner-base:latest"; then
+        if ! build_image "Base Runner" "base" "$(get_tag base)"; then
             BUILD_FAILED=true
             exit 1
         fi
@@ -190,27 +234,33 @@ if [ "$PARALLEL" = true ]; then
     PIDS=()
     
     if should_build "linux-native"; then
-        build_image "Linux Native Runner" "linux-native" "dillinger/runner-linux-native:latest" &
+        build_image "Linux Native Runner" "linux-native" "$(get_tag linux-native)" &
         PIDS+=($!)
     fi
     
     if should_build "wine"; then
-        build_image "Wine Runner" "wine" "dillinger/runner-wine:latest" &
+        build_image "Wine Runner" "wine" "$(get_tag wine)" &
         PIDS+=($!)
+    fi
     fi
     
     if should_build "vice"; then
-        build_image "VICE Runner" "vice" "dillinger/runner-vice:latest" &
+        build_image "VICE Runner" "vice" "$(get_tag vice)" &
         PIDS+=($!)
     fi
     
     if should_build "fs-uae"; then
-        build_image "FS-UAE Runner" "fs-uae" "dillinger/runner-fs-uae:latest" &
+        build_image "FS-UAE Runner" "fs-uae" "$(get_tag fs-uae)" &
         PIDS+=($!)
     fi
 
     if should_build "mame"; then
-        build_image "MAME Runner" "mame" "dillinger/runner-mame:latest" &
+        build_image "MAME Runner" "mame" "$(get_tag mame)" &
+        PIDS+=($!)
+    fi
+
+    if should_build "retroarch"; then
+        build_image "RetroArch Runner" "retroarch" "$(get_tag retroarch)" &
         PIDS+=($!)
     fi
     
@@ -223,42 +273,49 @@ if [ "$PARALLEL" = true ]; then
 else
     # Sequential build (respects dependencies)
     if should_build "base"; then
-        if ! build_image "Base Runner" "base" "dillinger/runner-base:latest"; then
+        if ! build_image "Base Runner" "base" "$(get_tag base)"; then
             BUILD_FAILED=true
             exit 1
         fi
     fi
     
     if should_build "linux-native"; then
-        if ! build_image "Linux Native Runner" "linux-native" "dillinger/runner-linux-native:latest"; then
+        if ! build_image "Linux Native Runner" "linux-native" "$(get_tag linux-native)"; then
             BUILD_FAILED=true
             exit 1
         fi
     fi
     
     if should_build "wine"; then
-        if ! build_image "Wine Runner" "wine" "dillinger/runner-wine:latest"; then
+        if ! build_image "Wine Runner" "wine" "$(get_tag wine)"; then
             BUILD_FAILED=true
             exit 1
         fi
     fi
     
     if should_build "vice"; then
-        if ! build_image "VICE Runner" "vice" "dillinger/runner-vice:latest"; then
+        if ! build_image "VICE Runner" "vice" "$(get_tag vice)"; then
             BUILD_FAILED=true
             exit 1
         fi
     fi
     
     if should_build "fs-uae"; then
-        if ! build_image "FS-UAE Runner" "fs-uae" "dillinger/runner-fs-uae:latest"; then
+        if ! build_image "FS-UAE Runner" "fs-uae" "$(get_tag fs-uae)"; then
             BUILD_FAILED=true
             exit 1
         fi
     fi
 
     if should_build "mame"; then
-        if ! build_image "MAME Runner" "mame" "dillinger/runner-mame:latest"; then
+        if ! build_image "MAME Runner" "mame" "$(get_tag mame)"; then
+            BUILD_FAILED=true
+            exit 1
+        fi
+    fi
+
+    if should_build "retroarch"; then
+        if ! build_image "RetroArch Runner" "retroarch" "$(get_tag retroarch)"; then
             BUILD_FAILED=true
             exit 1
         fi
@@ -273,15 +330,21 @@ if [ "$BUILD_FAILED" = false ]; then
     printf "\033[0;34m========================================\033[0m\n"
     printf "\n"
     printf "\033[1;33mBuilt images:\033[0m\n"
-    should_build "base" && printf "  - dillinger/runner-base:latest\n"
-    should_build "linux-native" && printf "  - dillinger/runner-linux-native:latest\n"
-    should_build "wine" && printf "  - dillinger/runner-wine:latest\n"
-    should_build "vice" && printf "  - dillinger/runner-vice:latest\n"
-    should_build "fs-uae" && printf "  - dillinger/runner-fs-uae:latest\n"
-    should_build "mame" && printf "  - dillinger/runner-mame:latest\n"
+    should_build "base" && printf "  - $(get_tag base)\n"
+    should_build "linux-native" && printf "  - $(get_tag linux-native)\n"
+    should_build "wine" && printf "  - $(get_tag wine)\n"
+    should_build "vice" && printf "  - $(get_tag vice)\n"
+    should_build "fs-uae" && printf "  - $(get_tag fs-uae)\n"
+    should_build "mame" && printf "  - $(get_tag mame)\n"
+    should_build "retroarch" && printf "  - $(get_tag retroarch)\n"
     printf "\n"
     printf "\033[1;33mAvailable images:\033[0m\n"
-    docker images | grep "dillinger/runner-" | awk '{printf "  - %-40s %10s %15s\n", $1":"$2, $6" "$7, $NF}'
+    docker images | grep -E "(dillinger/runner-|ghcr.io.*runner-)" | awk '{printf "  - %-50s %10s %15s\n", $1":"$2, $6" "$7, $NF}'
+    
+    if [ "$PUSH" = true ]; then
+        printf "\n"
+        printf "\033[0;32mImages pushed to registry.\033[0m\n"
+    fi
     exit 0
 else
     printf "\033[0;31mSome images failed to build!\033[0m\n"

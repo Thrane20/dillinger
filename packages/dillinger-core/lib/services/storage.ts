@@ -70,9 +70,6 @@ export class JSONStorageService {
     await Promise.all(
       storageDirs.map((dir) => fs.ensureDir(path.join(DATA_PATH, dir)))
     );
-    
-    // Ensure games directory exists (for actual game files)
-    await fs.ensureDir(this.getGamesPath());
   }
 
   /**

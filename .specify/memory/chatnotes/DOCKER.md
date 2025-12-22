@@ -26,7 +26,7 @@ Use the provided build script:
 Build the image manually:
 
 ```bash
-docker build -t thrane20/dillinger:1.0 -f Dockerfile .
+docker build -t dillinger-core:latest -f packages/dillinger-core/Dockerfile .
 ```
 
 The build process uses multi-stage builds to:

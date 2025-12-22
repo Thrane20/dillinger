@@ -2,7 +2,7 @@
 # Build script for Wine runner Docker image
 set -e
 
-IMAGE_NAME="dillinger/runner-wine"
+IMAGE_NAME="ghcr.io/thrane20/dillinger/runner-wine"
 IMAGE_TAG="latest"
 
 echo "Building Wine runner Docker image..."

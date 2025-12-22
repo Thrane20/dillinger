@@ -29,7 +29,7 @@ This runner is based on the Arch Linux architecture and incorporates best practi
 ```bash
 ./build.sh
 # or manually:
-docker build -t dillinger/runner-wine:latest .
+docker build -t ghcr.io/thrane20/dillinger/runner-wine:latest .
 ```
 
 ### Mode 1: Run a Windows Game
@@ -47,7 +47,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ### Mode 2: Run a Windows Installer
@@ -65,7 +65,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 To keep the container running after installation:
@@ -81,7 +81,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ### Example: Installing a Windows Game
@@ -102,7 +102,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 
 # 3. After installation, find the game executable
 ls ~/wine-prefixes/mygame/drive_c/Program\ Files/
@@ -114,7 +114,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Environment Variables
@@ -221,7 +221,7 @@ A test script is included to verify the Wine installation:
 ```bash
 docker run -it --rm \
   -e GAME_EXECUTABLE="/usr/local/bin/test-installer.sh" \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Future Enhancements
@@ -244,7 +244,7 @@ To use this runner with Dillinger, create a platform definition:
   "type": "wine",
   "description": "Windows games via Wine compatibility layer",
   "configuration": {
-    "containerImage": "dillinger/runner-wine:latest",
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-wine:latest",
     "supportedExtensions": [".exe", ".msi", ".bat"],
     "defaultSettings": {
       "environment": {

@@ -93,7 +93,7 @@ The implementation incorporates best practices from the Games on Whales (GoW) pr
 - Platform ID: `windows-wine`
 - Platform Type: `wine`
 - Supported Extensions: `.exe`, `.msi`, `.bat`, `.cmd`
-- Container Image: `dillinger/runner-wine:latest`
+- Container Image: `ghcr.io/thrane20/dillinger/runner-wine:latest`
 - Display Method: `x11`
 
 The platform definition follows the existing Dillinger schema and integrates seamlessly with the game library management system.

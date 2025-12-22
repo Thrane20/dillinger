@@ -1,7 +1,7 @@
 # Dillinger development container
-# Provides a reproducible Node.js + pnpm environment with Docker CLI support
+# Debian-based environment with latest Node.js ("current") + pnpm
 
-FROM mcr.microsoft.com/devcontainers/typescript-node:18
+FROM node:current-bookworm
 
 ARG PNPM_VERSION=10.20.0
 
@@ -18,7 +18,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Enable pnpm via Corepack at the requested version
-RUN corepack enable \
+RUN if ! command -v corepack >/dev/null 2>&1; then \
+        npm install -g --force --no-fund --no-audit corepack; \
+    fi \
+    && corepack enable \
     && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Pre-create pnpm store directory with correct permissions
@@ -32,6 +35,10 @@ ENV PATH="${PNPM_HOME}/bin:${PATH}"
 # Allow node user to talk to host Docker socket
 RUN groupadd -f docker \
     && usermod -aG docker node
+
+# Allow devcontainer lifecycle commands to use sudo without prompting
+RUN echo 'node ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-node-nopasswd \
+    && chmod 0440 /etc/sudoers.d/99-node-nopasswd
 
 USER node
 RUN pnpm --version

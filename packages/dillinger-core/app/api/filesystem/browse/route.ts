@@ -16,6 +16,52 @@ interface FileItem {
   permissions?: string;
 }
 
+// Browse a path inside the dillinger_installed Docker volume (mounted at /installed)
+async function browseInstalledVolume(containerPath: string): Promise<{ items: FileItem[]; parentPath: string | null }> {
+  const clean = containerPath.startsWith('/installed') ? containerPath : `/installed${containerPath}`;
+  const parentPath = clean !== '/installed' ? path.posix.dirname(clean) : null;
+
+  const cmd = `docker run --rm -v dillinger_installed:/installed:ro alpine:latest sh -c 'ls -la "${clean}" 2>/dev/null | tail -n +2'`;
+
+  try {
+    const { stdout } = await execAsync(cmd, { timeout: 15000 });
+    const lines = stdout.trim().split('\n').filter(Boolean);
+
+    const items: FileItem[] = [];
+    for (const line of lines) {
+      const parts = line.split(/\s+/);
+      if (parts.length < 9) continue;
+
+      const permissions = parts[0];
+      const size = parseInt(parts[4], 10);
+      const name = parts.slice(8).join(' ');
+
+      if (name === '.' || name === '..') continue;
+
+      const isDirectory = permissions.startsWith('d');
+      const itemPath = path.posix.join(clean, name);
+
+      items.push({
+        name,
+        path: itemPath,
+        type: isDirectory ? 'directory' : 'file',
+        size: isDirectory ? undefined : Number.isFinite(size) ? size : undefined,
+        permissions: permissions.slice(1, 10),
+      });
+    }
+
+    items.sort((a, b) => {
+      if (a.type === b.type) return a.name.localeCompare(b.name);
+      return a.type === 'directory' ? -1 : 1;
+    });
+
+    return { items, parentPath };
+  } catch (err) {
+    console.error('Installed volume browse failed:', err);
+    throw new Error(`Cannot access installed volume path: ${clean}`);
+  }
+}
+
 // Browse a path on the host using a temporary Docker container
 async function browseViaDocker(hostPath: string): Promise<{ items: FileItem[]; parentPath: string | null }> {
   const absolutePath = path.resolve(hostPath);
@@ -74,6 +120,28 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const requestedPath = searchParams.get('path') || os.homedir();
+
+    // Canonical installed volume paths
+    if (requestedPath === '/installed' || requestedPath.startsWith('/installed/')) {
+      try {
+        const { items, parentPath } = await browseInstalledVolume(requestedPath);
+        return NextResponse.json({
+          success: true,
+          data: {
+            currentPath: requestedPath,
+            parentPath,
+            items,
+            viaDocker: true,
+            volume: 'dillinger_installed',
+          },
+        });
+      } catch (err) {
+        return NextResponse.json(
+          { success: false, error: err instanceof Error ? err.message : 'Path not found or not accessible' },
+          { status: 404 }
+        );
+      }
+    }
     
     const absolutePath = path.resolve(requestedPath);
     

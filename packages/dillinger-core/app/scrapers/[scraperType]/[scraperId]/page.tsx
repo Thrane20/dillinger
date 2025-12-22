@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import type {
   GetGameDetailResponse,
@@ -13,16 +13,13 @@ import ImageCarousel from '../../../components/ImageCarousel';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
-interface PageProps {
-  params: {
-    scraperType: string;
-    scraperId: string;
-  };
-}
-
-export default function GameDetailPage({ params }: PageProps) {
+export default function GameDetailPage() {
   const router = useRouter();
-  const { scraperType, scraperId } = params;
+  const routeParams = useParams<{ scraperType?: string | string[]; scraperId?: string | string[] }>();
+  const scraperType = Array.isArray(routeParams?.scraperType)
+    ? routeParams.scraperType[0]
+    : routeParams?.scraperType;
+  const scraperId = Array.isArray(routeParams?.scraperId) ? routeParams.scraperId[0] : routeParams?.scraperId;
   const [game, setGame] = useState<GameDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -33,11 +30,18 @@ export default function GameDetailPage({ params }: PageProps) {
   );
 
   useEffect(() => {
+    if (!scraperType || !scraperId) {
+      return;
+    }
     loadGameDetail();
   }, [scraperType, scraperId]);
 
   const loadGameDetail = async () => {
     try {
+      if (!scraperType || !scraperId) {
+        setError('Missing scraper parameters');
+        return;
+      }
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/api/scrapers/game/${scraperType}/${scraperId}`);
       if (!response.ok) {

@@ -25,11 +25,11 @@ if [ "$1" = "--no-cache" ]; then
 fi
 
 # Build the image
-docker build $NO_CACHE -t dillinger/runner-vice:latest .
+docker build $NO_CACHE -t ghcr.io/thrane20/dillinger/runner-vice:latest .
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}VICE Runner Image Built Successfully${NC}"
-echo -e "${BLUE}Tag: dillinger/runner-vice:latest${NC}"
+echo -e "${BLUE}Tag: ghcr.io/thrane20/dillinger/runner-vice:latest${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""

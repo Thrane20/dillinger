@@ -1,7 +1,7 @@
 {
   "name": "Dillinger Dev Environment",
   "build": {
-    "dockerfile": "Dockerfile",
+    "dockerfile": "Dockerfile", 
     "context": ".."
   },
   "features": {

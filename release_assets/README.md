@@ -19,7 +19,7 @@ chmod +x release_assets/*.sh
    ```bash
    ./release_assets/build_release.sh
    ```
-   This creates the `dillinger-core:latest` image and the runner images (`dillinger/runner-*`).
+   This creates the `dillinger-core:latest` image and the runner images (`ghcr.io/thrane20/dillinger/runner-*`).
 
 2. **Start Dillinger Core**
    ```bash

@@ -1,7 +1,7 @@
 # Dillinger Linux Native Game Runner
 # Extends base runner for running native Linux games and applications
 
-FROM dillinger/runner-base:latest
+FROM ghcr.io/dillinger-gol/runner-base:latest
 
 LABEL maintainer="Dillinger Project"
 LABEL description="Linux native game runner extending base runner"

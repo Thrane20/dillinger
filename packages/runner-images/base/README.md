@@ -43,7 +43,7 @@ docker run --rm -it \
     --device /dev/dri \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -e DISPLAY=$DISPLAY \
-    dillinger/runner-base:latest
+    ghcr.io/thrane20/dillinger/runner-base:latest
 ```
 
 ### Extending This Image
@@ -51,7 +51,7 @@ docker run --rm -it \
 Create a new Dockerfile for your specific runner:
 
 ```dockerfile
-FROM dillinger/runner-base:latest
+FROM ghcr.io/thrane20/dillinger/runner-base:latest
 
 # Add your specific runtime (Wine, emulator, etc.)
 RUN apt-get update && apt-get install -y wine
@@ -118,7 +118,7 @@ To enable GPU acceleration:
 docker run --rm -it \
     --device /dev/dri \
     --gpus all \  # For NVIDIA GPUs
-    dillinger/runner-base:latest
+    ghcr.io/thrane20/dillinger/runner-base:latest
 ```
 
 ## Architecture
@@ -134,8 +134,8 @@ This base image follows the Games on Whales (GoW) architecture patterns:
 
 The following runners extend from this base:
 
-- **Wine Runner** (`dillinger/runner-wine`): For Windows games
-- **Linux Native Runner** (`dillinger/runner-linux-native`): For native Linux games
+- **Wine Runner** (`ghcr.io/thrane20/dillinger/runner-wine`): For Windows games
+- **Linux Native Runner** (`ghcr.io/thrane20/dillinger/runner-linux-native`): For native Linux games
 - **Future runners**: PS1, PS2, Amiga, etc.
 
 ## Version

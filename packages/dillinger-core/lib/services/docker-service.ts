@@ -128,6 +128,43 @@ export class DockerService {
   }
 
   /**
+   * Run a command inside a tiny container with `dillinger_installed` mounted at /installed.
+   * Returns combined stdout/stderr output.
+   */
+  private async runInInstalledVolume(command: string): Promise<{ exitCode: number; output: string }> {
+    const container = await docker.createContainer({
+      Image: 'alpine:3.20',
+      Cmd: ['sh', '-lc', command],
+      Tty: true,
+      HostConfig: {
+        AutoRemove: false,
+        Binds: ['dillinger_installed:/installed:ro'],
+      },
+    } as any);
+
+    await container.start();
+    const wait = await container.wait();
+
+    let output = '';
+    try {
+      const logsBuffer = await container.logs({
+        stdout: true,
+        stderr: true,
+        follow: false,
+      });
+      output = logsBuffer.toString('utf8');
+    } finally {
+      try {
+        await container.remove({ force: true });
+      } catch {
+        // ignore
+      }
+    }
+
+    return { exitCode: wait.StatusCode ?? 1, output };
+  }
+
+  /**
    * Build WINEDEBUG environment variable from game settings
    * @param game Game object with optional wine debug configuration
    * @returns WINEDEBUG string (e.g., "-all", "+relay,+seh", "+all")
@@ -522,11 +559,9 @@ export class DockerService {
       // Some Windows games rely on relative paths to DLLs/data next to the EXE.
       // Note: GAME_EXECUTABLE will be rewritten from /wineprefix/... to /installed/... later,
       // so we use the expected rewritten path when computing the working directory.
-      const expectedPrefixRoot = `/installed/${game.id}/wineprefix-${game.id}`;
-      const expectedExecutable = gameExecutable.startsWith('/wineprefix/')
-        ? `${expectedPrefixRoot}${gameExecutable.substring('/wineprefix'.length)}`
-        : gameExecutable;
-      containerWorkingDir = path.posix.dirname(expectedExecutable);
+      // We will rewrite WINEPREFIX + GAME_EXECUTABLE to the real prefix path under /installed later.
+      // For now set a placeholder; we'll overwrite containerWorkingDir once the prefix is resolved.
+      containerWorkingDir = '/installed';
 
       logger.info(`Launching game: ${game.title}`);
       logger.info(`  Container Image: ${platform.configuration.containerImage}`);
@@ -849,7 +884,7 @@ export class DockerService {
       const wineDebug = this.buildWineDebug(game);
       
       // Check if fullscreen/virtual desktop is requested
-      // const fullscreen = game.settings?.launch?.fullscreen || false; // TODO: implement fullscreen mode
+      const fullscreen = game.settings?.launch?.fullscreen || false;
       const resolution = game.settings?.launch?.resolution || '1920x1080';
       const useXrandr = game.settings?.launch?.useXrandr || false;
       const xrandrMode = game.settings?.launch?.xrandrMode || resolution;
@@ -866,6 +901,13 @@ export class DockerService {
         `GAME_EXECUTABLE=${gameExecutable}`,
         `GAME_ARGS=${cleanArgs}`
       );
+
+      // Wine virtual desktop (UI label: "Launch in fullscreen (Wine virtual desktop)")
+      // The wine runner configures the registry when WINE_VIRTUAL_DESKTOP is set.
+      if (fullscreen) {
+        env.push(`WINE_VIRTUAL_DESKTOP=${resolution}`);
+        logger.info(`  Wine virtual desktop enabled: ${resolution}`);
+      }
 
       // Allow per-game selection of D3D renderer (Wine runner consumes WINE_D3D_RENDERER)
       const renderer = game.settings?.wine?.renderer;
@@ -902,8 +944,8 @@ export class DockerService {
     
     // Determine Wine prefix path if this is a Wine game
     // Wine prefix layout:
-    // - Preferred (current installer flow): <installation.installPath>/wineprefix-<slug>
-    // - Legacy fallback: <dillinger_installed volume root>/wineprefix-<slug>
+    // - Preferred (current flow): <installation.installPath> (prefix == install directory)
+    // - Legacy fallback: <installation.installPath>/wineprefix-<slug>
     const gameIdentifier = game.slug || game.id;
     let winePrefixPath: string | null = null;
     let emulatorHomePath: string | null = null;
@@ -919,18 +961,22 @@ export class DockerService {
       const configuredInstallPath = game.installation?.installPath;
 
       const candidates: string[] = [];
-      // Prefer per-game directory (Option A): /installed/<gameId>/wineprefix-<gameId>
-      candidates.push(path.posix.join(gameIdentifier, `wineprefix-${gameIdentifier}`));
-      // Legacy root prefix: /installed/wineprefix-<gameId>
-      candidates.push(`wineprefix-${gameIdentifier}`);
-
-      // If installPath is /installed/<something>, try that too.
+      // Preferred: prefix == install directory (Option A): /installed/<rel>
       if (configuredInstallPath && configuredInstallPath.startsWith('/installed/')) {
         const rel = configuredInstallPath.replace(/^\/installed\//, '');
         if (rel) {
-          candidates.unshift(path.posix.join(rel, `wineprefix-${gameIdentifier}`));
+          candidates.push(rel);
+          // Legacy under install dir
+          candidates.push(path.posix.join(rel, `wineprefix-${gameIdentifier}`));
         }
       }
+
+      // If installPath isn't set as expected, fall back to game id/slug
+      candidates.push(gameIdentifier);
+      // Legacy per-game directory: /installed/<gameId>/wineprefix-<gameId>
+      candidates.push(path.posix.join(gameIdentifier, `wineprefix-${gameIdentifier}`));
+      // Legacy root prefix: /installed/wineprefix-<gameId>
+      candidates.push(`wineprefix-${gameIdentifier}`);
 
       // Deduplicate
       const seen = new Set<string>();
@@ -941,7 +987,8 @@ export class DockerService {
       });
 
       for (const relCandidate of uniqueCandidates) {
-        if (await this.installedVolumePathExists(relCandidate)) {
+        // A valid Wine prefix must contain drive_c.
+        if (await this.installedVolumePathExists(path.posix.join(relCandidate, 'drive_c'))) {
           winePrefixPath = path.posix.join('/installed', relCandidate);
           logger.info(`  Wine prefix (installed volume): ${winePrefixPath}`);
           break;
@@ -953,7 +1000,7 @@ export class DockerService {
         logger.warn(`    installPath: ${configuredInstallPath || '(none)'}`);
         logger.warn(`    Probed container paths:`);
         for (const p of uniqueCandidates) {
-          logger.warn(`      - /installed/${p}`);
+          logger.warn(`      - /installed/${p} (expecting drive_c/)`);
         }
       }
     } else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
@@ -1079,6 +1126,14 @@ export class DockerService {
       const effectiveGameExecutable = env.find((e) => e.startsWith('GAME_EXECUTABLE='));
       if (effectiveWinePrefix) logger.info(`  Effective ${effectiveWinePrefix}`);
       if (effectiveGameExecutable) logger.info(`  Effective ${effectiveGameExecutable}`);
+
+      // Ensure the container working directory matches the rewritten executable path.
+      if (effectiveGameExecutable) {
+        const rewrittenExec = effectiveGameExecutable.substring('GAME_EXECUTABLE='.length);
+        containerWorkingDir = path.posix.dirname(rewrittenExec);
+      } else {
+        containerWorkingDir = winePrefixPath;
+      }
     } 
     else if (platform.type === 'wine' && !winePrefixPath) {
       // Without a prefix mount, the container will get an empty anonymous volume at /wineprefix
@@ -1268,10 +1323,15 @@ export class DockerService {
       const configuredInstallPath = game.installation?.installPath;
       if (configuredInstallPath) {
         const normalizedInstallPath = await this.normalizeInstalledPath(configuredInstallPath);
-        const preferredPrefixPath = path.posix.join(normalizedInstallPath, `wineprefix-${gameIdentifier}`);
-        if (await fs.pathExists(preferredPrefixPath)) {
-          winePrefixPath = preferredPrefixPath;
-          logger.info(`  Debug Wine prefix (per-game installPath): ${winePrefixPath}`);
+        if (await fs.pathExists(path.posix.join(normalizedInstallPath, 'drive_c'))) {
+          winePrefixPath = normalizedInstallPath;
+          logger.info(`  Debug Wine prefix (installPath): ${winePrefixPath}`);
+        } else {
+          const legacyPreferredPrefixPath = path.posix.join(normalizedInstallPath, `wineprefix-${gameIdentifier}`);
+          if (await fs.pathExists(path.posix.join(legacyPreferredPrefixPath, 'drive_c'))) {
+            winePrefixPath = legacyPreferredPrefixPath;
+            logger.info(`  Debug Wine prefix (legacy installPath subdir): ${winePrefixPath}`);
+          }
         }
       }
 
@@ -1413,10 +1473,11 @@ export class DockerService {
 
     const gameIdentifier = game.slug || game.id;
     const hostInstallPath = await this.getInstallVolumeHostPath();
-    const winePrefixPath = path.posix.join(
-      this.getHostPath(hostInstallPath),
-      `wineprefix-${gameIdentifier}`
-    );
+    const configuredInstallPath = game.installation?.installPath;
+    let winePrefixPath = path.posix.join(this.getHostPath(hostInstallPath), gameIdentifier);
+    if (configuredInstallPath) {
+      winePrefixPath = await this.normalizeInstalledPath(configuredInstallPath);
+    }
     
     // The game files are inside the Wine prefix at drive_c/GOG Games/<game>/
     // We need to extract the game directory from the launch command
@@ -1700,9 +1761,8 @@ export class DockerService {
     const displayConfig = await this.getDisplayConfiguration();
     logger.info(`  Display mode: ${displayConfig.mode}`);
 
-    // Use game slug (or ID if no slug) for Wine prefix directory
-    const gameIdentifier = game.slug || game.id;
-    const winePrefixPath = path.posix.join(hostInstallPath, `wineprefix-${gameIdentifier}`);
+    // Preferred: the install directory itself is the Wine prefix (no extra subdirectory)
+    const winePrefixPath = hostInstallPath;
     
     logger.info(`  Wine prefix: ${winePrefixPath}`);
 
@@ -1713,10 +1773,8 @@ export class DockerService {
         const fs = await import('fs-extra');
         // Ensure install root exists too
         await fs.ensureDir(hostInstallPath);
-        // Create directory if it doesn't exist
-        await fs.ensureDir(winePrefixPath);
-        // Set permissions to 777 so Wine user in container can access it
-        await fs.chmod(winePrefixPath, 0o777);
+        // Ensure prefix directory exists and is writable by the runner
+        await fs.chmod(hostInstallPath, 0o777);
         logger.info(`  ✓ Wine prefix directory prepared with correct permissions`);
       } catch (error) {
         logger.warn(`  ⚠ Could not prepare Wine prefix directory:`, error);
@@ -1863,86 +1921,99 @@ export class DockerService {
    * Scan installation directory for game executables
    */
   async scanForGameExecutables(installPath: string): Promise<string[]> {
-    const fs = await import('fs/promises');
-    const path = await import('path');
-    
     try {
-      const hostInstallPath = await this.normalizeInstalledPath(installPath);
-      logger.info(`🔍 Scanning for game executables in: ${installPath}`);
-      if (hostInstallPath !== installPath) {
-        logger.info(`  Host path: ${hostInstallPath}`);
+      if (!installPath.startsWith('/installed')) {
+        logger.warn(`scanForGameExecutables expects an installPath under /installed, got: ${installPath}`);
+        return [];
       }
-      
-      const executables: string[] = [];
-      
-      const scanDirectory = async (dirPath: string, depth: number = 0): Promise<void> => {
-        // Limit recursion depth to avoid scanning too deep
-        if (depth > 3) return;
-        
-        try {
-          const items = await fs.readdir(dirPath, { withFileTypes: true });
-          
-          for (const item of items) {
-            const itemPath = path.join(dirPath, item.name);
-            const relativePath = path.relative(hostInstallPath, itemPath);
-            
-            if (item.isFile()) {
-              const ext = path.extname(item.name).toLowerCase();
-              // Look for executable files
-              if (['.exe', '.bat', '.cmd'].includes(ext)) {
-                // Prioritize likely game executables
-                const name = item.name.toLowerCase();
-                const isMainExecutable = 
-                  name.includes('game') ||
-                  name.includes('main') ||
-                  name.includes('start') ||
-                  name.includes('launcher') ||
-                  name.includes('run') ||
-                  !name.includes('uninstall') &&
-                  !name.includes('setup') &&
-                  !name.includes('install') &&
-                  !name.includes('config') &&
-                  !name.includes('settings');
-                
-                if (isMainExecutable) {
-                  executables.push(relativePath);
-                  logger.info(`  Found executable: ${relativePath}`);
-                }
-              }
-            } else if (item.isDirectory()) {
-              // Skip common non-game directories
-              const dirName = item.name.toLowerCase();
-              if (!['temp', 'tmp', 'cache', 'logs', 'uninstall', '_redist'].includes(dirName)) {
-                await scanDirectory(itemPath, depth + 1);
-              }
-            }
-          }
-        } catch (err) {
-          logger.warn(`Could not scan directory ${dirPath}:`, err);
-        }
-      };
-      
-      await scanDirectory(hostInstallPath);
-      
-      // Sort executables by likelihood (shorter paths and better names first)
-      executables.sort((a, b) => {
-        const depthA = a.split(path.sep).length;
-        const depthB = b.split(path.sep).length;
-        if (depthA !== depthB) return depthA - depthB;
-        
-        const nameA = path.basename(a).toLowerCase();
-        const nameB = path.basename(b).toLowerCase();
-        
-        // Prioritize main-sounding names
-        const scoreA = (nameA.includes('game') ? 10 : 0) + (nameA.includes('main') ? 8 : 0);
-        const scoreB = (nameB.includes('game') ? 10 : 0) + (nameB.includes('main') ? 8 : 0);
-        
-        return scoreB - scoreA;
+
+      logger.info(`🔍 Scanning for game executables in: ${installPath}`);
+
+      const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+      // Limit output size to keep scanning responsive.
+      const findCmd = [
+        `find ${shQuote(installPath)}`,
+        '-maxdepth 12',
+        '-type f',
+        `\\( -iname '*.exe' -o -iname '*.bat' -o -iname '*.cmd' \\)`,
+        // Skip common redist/log/tmp areas
+        `-not -path '*/_redist/*'`,
+        `-not -path '*/redist/*'`,
+        `-not -path '*/__pycache__/*'`,
+        `-not -path '*/tmp/*'`,
+        `-not -path '*/temp/*'`,
+        `-not -path '*/cache/*'`,
+        `-not -path '*/logs/*'`,
+        '-print',
+        "| head -n 500",
+      ].join(' ');
+
+      const { exitCode, output } = await this.runInInstalledVolume(findCmd);
+      if (exitCode !== 0) {
+        logger.warn(`  Executable scan returned exit code ${exitCode}`);
+      }
+
+      const absPaths = output
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .filter((p) => p.startsWith(installPath + '/') || p === installPath);
+
+      const candidates = absPaths
+        .map((p) => path.posix.relative(installPath, p))
+        .filter((rel) => rel && rel !== '.' && !rel.startsWith('..'));
+
+      const executables = candidates.filter((rel) => {
+        const lower = rel.toLowerCase();
+        // Heuristic: exclude obvious non-launch executables
+        if (lower.includes('unins')) return false;
+        if (lower.includes('uninstall')) return false;
+        if (lower.includes('setup')) return false;
+        if (lower.includes('installer')) return false;
+        if (lower.includes('config')) return false;
+        if (lower.includes('settings')) return false;
+        return true;
       });
-      
+
+      const scoreExecutable = (rel: string): number => {
+        const parts = rel.split('/');
+        const depthPenalty = parts.length * 2;
+        const base = parts[parts.length - 1]?.toLowerCase() || '';
+        const full = rel.toLowerCase();
+
+        let score = 0;
+        // Prefer drive_c paths for Wine
+        if (full.startsWith('drive_c/')) score += 10;
+        if (full.includes('/gog games/')) score += 8;
+        if (full.includes('/program files/')) score += 6;
+        if (full.includes('/program files (x86)/')) score += 6;
+        if (full.includes('/bin/')) score += 2;
+
+        // Prefer likely launchers
+        if (base.includes('game')) score += 10;
+        if (base.includes('main')) score += 8;
+        if (base.includes('start')) score += 7;
+        if (base.includes('launcher')) score += 7;
+        if (base.includes('run')) score += 5;
+
+        // Penalize helpers
+        if (base.includes('unins') || base.includes('uninstall')) score -= 50;
+        if (base.includes('setup') || base.includes('install')) score -= 25;
+        if (full.includes('/support/')) score -= 10;
+        if (full.includes('/tools/')) score -= 8;
+
+        score -= depthPenalty;
+        return score;
+      };
+
+      executables.sort((a, b) => scoreExecutable(b) - scoreExecutable(a));
+
+      for (const rel of executables.slice(0, 20)) {
+        logger.info(`  Found executable: ${rel}`);
+      }
+
       logger.info(`✓ Found ${executables.length} potential game executables`);
       return executables;
-      
     } catch (error) {
       logger.error('Error scanning for executables:', error);
       return [];
@@ -1953,53 +2024,42 @@ export class DockerService {
    * Scan for Windows shortcut files (.lnk) in the installation directory
    */
   async scanForShortcuts(installPath: string): Promise<string[]> {
-    const fs = await import('fs/promises');
-    const path = await import('path');
-    
     try {
-      const hostInstallPath = await this.normalizeInstalledPath(installPath);
-      logger.info(`🔍 Scanning for shortcuts in: ${installPath}`);
-      if (hostInstallPath !== installPath) {
-        logger.info(`  Host path: ${hostInstallPath}`);
+      // Prefer scanning inside the docker volume to avoid host permission issues.
+      if (!installPath.startsWith('/installed')) {
+        logger.warn(`scanForShortcuts expects an installPath under /installed, got: ${installPath}`);
+        return [];
       }
-      
-      const shortcuts: string[] = [];
-      
-      const scanDirectory = async (dirPath: string, depth: number = 0): Promise<void> => {
-        // Limit recursion depth but allow deeper for shortcut scanning
-        if (depth > 10) return;
-        
-        try {
-          const items = await fs.readdir(dirPath, { withFileTypes: true });
-          
-          for (const item of items) {
-            const itemPath = path.join(dirPath, item.name);
-            const relativePath = path.relative(hostInstallPath, itemPath);
-            
-            if (item.isFile()) {
-              const ext = path.extname(item.name).toLowerCase();
-              if (ext === '.lnk') {
-                shortcuts.push(relativePath);
-                logger.info(`  Found shortcut: ${relativePath}`);
-              }
-            } else if (item.isDirectory()) {
-              // Look in common shortcut directories
-              const dirName = item.name.toLowerCase();
-              if (['start menu', 'desktop', 'menu', 'shortcuts'].some(keyword => dirName.includes(keyword)) || depth < 5) {
-                await scanDirectory(itemPath, depth + 1);
-              }
-            }
-          }
-        } catch (err) {
-          logger.warn(`Could not scan directory ${dirPath}:`, err);
-        }
-      };
-      
-      await scanDirectory(hostInstallPath);
-      
+
+      const containerInstallPath = installPath;
+
+      logger.info(`🔍 Scanning for shortcuts in: ${installPath}`);
+
+      const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+      const findCmd = `find ${shQuote(containerInstallPath)} -maxdepth 15 -type f -iname '*.lnk' -print`;
+
+      const { exitCode, output } = await this.runInInstalledVolume(findCmd);
+      if (exitCode !== 0) {
+        logger.warn(`  Shortcut scan returned exit code ${exitCode}`);
+      }
+
+      const found = output
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .filter((p) => p.startsWith(containerInstallPath + '/') || p === containerInstallPath);
+
+      const shortcuts = found
+        .filter((p) => p.toLowerCase().endsWith('.lnk'))
+        .map((p) => path.posix.relative(containerInstallPath, p))
+        .filter((rel) => rel && rel !== '.' && !rel.startsWith('..'));
+
+      for (const rel of shortcuts) {
+        logger.info(`  Found shortcut: ${rel}`);
+      }
+
       logger.info(`✓ Found ${shortcuts.length} shortcut files`);
       return shortcuts;
-      
     } catch (error) {
       logger.error('Error scanning for shortcuts:', error);
       return [];
@@ -2020,9 +2080,27 @@ export class DockerService {
     
     try {
       const fs = await import('fs/promises');
-      
+
       // Read the entire .lnk file
-      const buffer = await fs.readFile(shortcutPath);
+      let buffer: Buffer;
+      if (shortcutPath.startsWith('/installed/')) {
+        const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+        // base64 output may wrap; strip newlines.
+        const cmd = `cat ${shQuote(shortcutPath)} | base64 | tr -d '\\n'`;
+        const { exitCode, output } = await this.runInInstalledVolume(cmd);
+        if (exitCode !== 0) {
+          logger.warn(`Failed to read shortcut from installed volume (exit ${exitCode})`);
+          return null;
+        }
+        const b64 = output.trim();
+        if (!b64) {
+          logger.warn('Empty shortcut file output');
+          return null;
+        }
+        buffer = Buffer.from(b64, 'base64');
+      } else {
+        buffer = await fs.readFile(shortcutPath);
+      }
       
       // Verify it's a valid .lnk file (starts with magic bytes)
       if (buffer.length < 76 || buffer.readUInt32LE(0) !== 0x0000004C) {
@@ -2035,6 +2113,12 @@ export class DockerService {
         arguments: '',
         workingDirectory: '',
         description: ''
+      };
+
+      const stripNullTerminators = (value: string): string => {
+        // Windows shortcut strings are typically NUL-terminated (UTF-16LE).
+        // If we keep the terminator, it shows up in UI as a boxed "0000" glyph.
+        return value.replace(/\u0000/g, '').trim();
       };
       
       // Read LinkFlags at offset 0x14
@@ -2098,7 +2182,7 @@ export class DockerService {
         
         // Read UTF-16LE string
         const str = buffer.toString('utf16le', strStart, strEnd);
-        return { str, nextPos: strEnd };
+        return { str: stripNullTerminators(str), nextPos: strEnd };
       };
       
       // Read string data structures
@@ -2127,6 +2211,12 @@ export class DockerService {
         result.arguments = str;
         offset = nextPos;
       }
+
+      // Ensure all user-visible strings are free of embedded NULs.
+      result.target = stripNullTerminators(result.target);
+      result.arguments = stripNullTerminators(result.arguments);
+      result.workingDirectory = stripNullTerminators(result.workingDirectory);
+      result.description = stripNullTerminators(result.description);
       
       logger.info(`✓ Parsed shortcut: ${result.target || 'No target found'}`);
       logger.info(`  Working dir: ${result.workingDirectory || 'None'}`);

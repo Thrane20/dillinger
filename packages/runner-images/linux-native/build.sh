@@ -3,7 +3,7 @@
 
 set -e
 
-IMAGE_NAME="${IMAGE_NAME:-dillinger/runner-linux-native}"
+IMAGE_NAME="${IMAGE_NAME:-ghcr.io/thrane20/dillinger/runner-linux-native}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 echo "Building Dillinger Linux Native Runner..."

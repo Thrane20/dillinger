@@ -25,6 +25,7 @@ interface FileExplorerProps {
   title?: string;
   selectMode?: 'file' | 'directory' | 'both';
   showVolumes?: boolean;
+  initialPath?: string;
 }
 
 export default function FileExplorer({
@@ -34,6 +35,7 @@ export default function FileExplorer({
   title = 'Select Path',
   selectMode = 'both',
   showVolumes = true,
+  initialPath,
 }: FileExplorerProps) {
   const [currentPath, setCurrentPath] = useState('');
   const [items, setItems] = useState<FileItem[]>([]);
@@ -46,7 +48,12 @@ export default function FileExplorer({
   // Load home directory on mount
   useEffect(() => {
     if (isOpen && !currentPath) {
-      loadHome();
+      const start = typeof initialPath === 'string' ? initialPath.trim() : '';
+      if (start) {
+        browsePath(start);
+      } else {
+        loadHome();
+      }
     }
   }, [isOpen]);
 

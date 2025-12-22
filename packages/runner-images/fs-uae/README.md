@@ -51,7 +51,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-fs-uae:latest \
+  ghcr.io/thrane20/dillinger/runner-fs-uae:latest \
   fs-uae /roms/game.adf
 ```
 
@@ -65,7 +65,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-fs-uae:latest \
+  ghcr.io/thrane20/dillinger/runner-fs-uae:latest \
   fs-uae --amiga-model=A1200 /roms/game.lha
 ```
 
@@ -79,7 +79,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-fs-uae:latest \
+  ghcr.io/thrane20/dillinger/runner-fs-uae:latest \
   fs-uae /config/fs-uae/game.fs-uae
 ```
 
@@ -149,7 +149,7 @@ docker run -it --rm \
   -v /path/to/kickstarts:/bios:ro \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-fs-uae:latest \
+  ghcr.io/thrane20/dillinger/runner-fs-uae:latest \
   fs-uae --amiga-model=A500 --floppy-drive-0=/roms/game.adf
 ```
 
@@ -161,7 +161,7 @@ docker run -it --rm \
   -v /path/to/kickstarts:/bios:ro \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-fs-uae:latest \
+  ghcr.io/thrane20/dillinger/runner-fs-uae:latest \
   fs-uae --amiga-model=A1200 /roms/game.adf
 ```
 
@@ -174,7 +174,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -e FSUAE_FULLSCREEN=1 \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-fs-uae:latest \
+  ghcr.io/thrane20/dillinger/runner-fs-uae:latest \
   fs-uae /roms/game.adf
 ```
 
@@ -187,7 +187,7 @@ docker run -it --rm \
   -v /path/to/config:/config/fs-uae:rw \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-fs-uae:latest \
+  ghcr.io/thrane20/dillinger/runner-fs-uae:latest \
   fs-uae /roms/game.adf
 ```
 

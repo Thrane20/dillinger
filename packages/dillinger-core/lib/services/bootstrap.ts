@@ -20,7 +20,6 @@ export async function ensureDillingerRootScaffold(): Promise<void> {
 
   await Promise.all([
     fs.ensureDir(path.join(dillingerRoot, 'bios')),
-    fs.ensureDir(path.join(dillingerRoot, 'games')),
     fs.ensureDir(path.join(dillingerRoot, 'logs')),
     fs.ensureDir(path.join(dillingerRoot, 'saves')),
     fs.ensureDir(path.join(dillingerRoot, 'storage', 'cache')),
@@ -100,7 +99,6 @@ export function getScaffoldPreview(): { directories: string[]; files: string[] }
       'storage/online-sources',
       'storage/platform-configs/arcade',
       'bios',
-      'games',
       'logs',
       'saves',
     ],

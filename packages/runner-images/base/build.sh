@@ -2,7 +2,7 @@
 # Build script for Dillinger Base Runner image
 set -e
 
-IMAGE_NAME="dillinger/runner-base"
+IMAGE_NAME="ghcr.io/thrane20/dillinger/runner-base"
 IMAGE_TAG="${1:-latest}"
 
 echo "Building Dillinger Base Runner image: ${IMAGE_NAME}:${IMAGE_TAG}"

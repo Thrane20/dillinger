@@ -128,16 +128,16 @@ Runs Amiga computer games via FS-UAE emulator.
 
 ```bash
 # Build Linux native runner
-docker build -t dillinger/runner-linux-native:latest ./packages/runner-images/linux-native
+docker build -t ghcr.io/thrane20/dillinger/runner-linux-native:latest ./packages/runner-images/linux-native
 
 # Build Wine runner
-docker build -t dillinger/runner-wine:latest ./packages/runner-images/wine
+docker build -t ghcr.io/thrane20/dillinger/runner-wine:latest ./packages/runner-images/wine
 
 # Build VICE runner
-docker build -t dillinger/runner-vice:latest ./packages/runner-images/vice
+docker build -t ghcr.io/thrane20/dillinger/runner-vice:latest ./packages/runner-images/vice
 
 # Build FS-UAE runner
-docker build -t dillinger/runner-fs-uae:latest ./packages/runner-images/fs-uae
+docker build -t ghcr.io/thrane20/dillinger/runner-fs-uae:latest ./packages/runner-images/fs-uae
 ```
 
 ### Running a Game
@@ -151,7 +151,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-linux-native:latest
+  ghcr.io/thrane20/dillinger/runner-linux-native:latest
 
 # Example: Run a Windows game via Wine
 docker run -it --rm \
@@ -162,7 +162,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 
 # Example: Install a Windows game
 docker run -it --rm \
@@ -174,7 +174,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Environment Variables

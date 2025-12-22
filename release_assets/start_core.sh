@@ -181,3 +181,4 @@ docker run -d \
   "$IMAGE_NAME"
 
 ok "Dillinger Core is running on http://localhost:$CORE_PORT"
+

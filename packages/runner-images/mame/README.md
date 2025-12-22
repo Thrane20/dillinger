@@ -4,7 +4,7 @@ This directory contains the Docker configuration for the MAME (Multiple Arcade M
 
 ## Overview
 
-The MAME runner extends the `dillinger/runner-base` image and adds:
+The MAME runner extends the `ghcr.io/thrane20/dillinger/runner-base` image and adds:
 - MAME emulator
 - MAME tools
 - Configuration for Arcade games

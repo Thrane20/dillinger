@@ -9,7 +9,7 @@
     "dev:all": "pnpm --parallel run dev",
     "build": "pnpm --recursive run build",
     "start": "pnpm --filter=@dillinger/core start",
-    "test": "pnpm --recursive run test", 
+    "test": "pnpm --recursive run test",
     "type-check": "pnpm --recursive run type-check",
     "lint": "pnpm --recursive run lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
@@ -19,12 +19,35 @@
     "docker:build": "cd packages/runner-images && ./build.sh",
     "docker:build:all": "cd packages/runner-images && ./build.sh --all",
     "docker:build:parallel": "cd packages/runner-images && ./build.sh --parallel",
+    "docker:build:core": "pnpm --filter=@dillinger/shared run build && docker build -t ghcr.io/thrane20/dillinger/core:latest -f packages/dillinger-core/Dockerfile .",
     "docker:build:base": "cd packages/runner-images && ./build.sh base",
-    "docker:build:linux-native": "cd packages/runner-images && ./build.sh linux-native",
     "docker:build:wine": "cd packages/runner-images && ./build.sh wine",
     "docker:build:vice": "cd packages/runner-images && ./build.sh vice",
+    "docker:build:retroarch": "cd packages/runner-images && ./build.sh retroarch",
     "docker:build:fs-uae": "cd packages/runner-images && ./build.sh fs-uae",
-    "docker:build:core": "pnpm --filter=@dillinger/shared run build && docker build -t dillinger-core:latest -f packages/dillinger-core/Dockerfile ."
+    "docker:build:mame": "cd packages/runner-images && ./build.sh mame",
+    "docker:build:linux-native": "cd packages/runner-images && ./build.sh linux-native",
+    "publish:versions": "./scripts/publish.sh versions",
+    "publish:all": "./scripts/publish.sh all",
+    "publish:all:build": "./scripts/publish.sh all --build",
+    "publish:core": "./scripts/publish.sh core",
+    "publish:core:build": "./scripts/publish.sh core --build",
+    "publish:runners": "./scripts/publish.sh runners",
+    "publish:runners:build": "./scripts/publish.sh runners --build",
+    "publish:base": "./scripts/publish.sh base",
+    "publish:base:build": "./scripts/publish.sh base --build",
+    "publish:wine": "./scripts/publish.sh wine",
+    "publish:wine:build": "./scripts/publish.sh wine --build",
+    "publish:vice": "./scripts/publish.sh vice",
+    "publish:vice:build": "./scripts/publish.sh vice --build",
+    "publish:retroarch": "./scripts/publish.sh retroarch",
+    "publish:retroarch:build": "./scripts/publish.sh retroarch --build",
+    "publish:fs-uae": "./scripts/publish.sh fs-uae",
+    "publish:fs-uae:build": "./scripts/publish.sh fs-uae --build",
+    "publish:mame": "./scripts/publish.sh mame",
+    "publish:mame:build": "./scripts/publish.sh mame --build",
+    "publish:linux-native": "./scripts/publish.sh linux-native",
+    "publish:linux-native:build": "./scripts/publish.sh linux-native --build"
   },
   "keywords": [
     "game-library",
@@ -48,5 +71,5 @@
     "node": ">=18.0.0",
     "pnpm": ">=10.0.0"
   },
-  "packageManager": "pnpm@10.20.0"
+  "packageManager": "pnpm@10.26.1+sha512.664074abc367d2c9324fdc18037097ce0a8f126034160f709928e9e9f95d98714347044e5c3164d65bd5da6c59c6be362b107546292a8eecb7999196e5ce58fa"
 }

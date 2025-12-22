@@ -1,0 +1,249 @@
+# GitHub Actions workflow to build and publish Dillinger images to ghcr.io
+# 
+# Images are published to:
+#   - ghcr.io/thrane20/dillinger/core:latest         (main application)
+#   - ghcr.io/thrane20/dillinger/runner-{name}:latest (runner images)
+# 
+# NOTE: The images are based on Arch Linux (FROM archlinux:latest).
+# The `runs-on: ubuntu-latest` below refers to the GitHub Actions CI machine that
+# executes `docker build`, NOT the base OS inside the containers. Docker builds
+# are self-contained - the Dockerfile determines the container contents.
+#
+# Triggered on:
+# - Push to main branch with changes to dillinger-core/ or runner-images/
+# - Manual trigger via workflow_dispatch
+# - Release creation
+
+name: Build & Publish Docker Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/dillinger-core/**'
+      - 'packages/shared/**'
+      - 'packages/runner-images/**'
+      - '.github/workflows/publish-runners.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - core
+          - runners
+          - base
+          - wine
+          - vice
+          - retroarch
+          - fs-uae
+          - mame
+          - linux-native
+
+env:
+  REGISTRY: ghcr.io
+  # thrane20 = Gaming On Linux
+  IMAGE_PREFIX: ghcr.io/thrane20
+
+jobs:
+  # Build the core application
+  build-core:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["all", "core"]'), github.event.inputs.target)
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/dillinger-core
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,prefix=
+      
+      - name: Build and push core image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/dillinger-core/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # Determine which runners to build
+  prepare-runners:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name != 'workflow_dispatch' ||
+      !contains(fromJSON('["core"]'), github.event.inputs.target)
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      should_build: ${{ steps.set-matrix.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Determine runners to build
+        id: set-matrix
+        run: |
+          TARGET="${{ github.event.inputs.target }}"
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" || "$TARGET" == "all" || "$TARGET" == "runners" ]]; then
+            echo 'matrix={"runner":["base","wine","vice","retroarch","fs-uae","mame","linux-native"]}' >> $GITHUB_OUTPUT
+            echo 'should_build=true' >> $GITHUB_OUTPUT
+          elif [[ "$TARGET" != "core" ]]; then
+            echo "matrix={\"runner\":[\"$TARGET\"]}" >> $GITHUB_OUTPUT
+            echo 'should_build=true' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix={"runner":[]}' >> $GITHUB_OUTPUT
+            echo 'should_build=false' >> $GITHUB_OUTPUT
+          fi
+
+  # Build base image first (other images depend on it)
+  build-base:
+    runs-on: ubuntu-latest
+    needs: prepare-runners
+    if: needs.prepare-runners.outputs.should_build == 'true' && contains(fromJSON(needs.prepare-runners.outputs.matrix).runner, 'base')
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/dillinger-runner-base
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,prefix=
+      
+      - name: Build and push base image
+        uses: docker/build-push-action@v5
+        with:
+          context: packages/runner-images/base
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # Build other runner images (can run in parallel after base)
+  build-runners:
+    runs-on: ubuntu-latest
+    needs: [prepare-runners, build-base]
+    if: always() && needs.prepare-runners.result == 'success' && needs.prepare-runners.outputs.should_build == 'true'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-runners.outputs.matrix) }}
+    steps:
+      - name: Skip if base runner
+        if: matrix.runner == 'base'
+        run: echo "Base already built, skipping"
+      
+      - uses: actions/checkout@v4
+        if: matrix.runner != 'base'
+      
+      - name: Set up Docker Buildx
+        if: matrix.runner != 'base'
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        if: matrix.runner != 'base'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata for Docker
+        if: matrix.runner != 'base'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/dillinger-runner-${{ matrix.runner }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,prefix=
+      
+      - name: Build and push ${{ matrix.runner }} image
+        if: matrix.runner != 'base'
+        uses: docker/build-push-action@v5
+        with:
+          context: packages/runner-images/${{ matrix.runner }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          build-args: |
+            BASE_IMAGE=${{ env.IMAGE_PREFIX }}/dillinger-runner-base:latest
+
+  # Create a summary of what was built
+  summary:
+    runs-on: ubuntu-latest
+    needs: [build-core, build-base, build-runners]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## Dillinger Docker Image Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| core | ${{ needs.build-core.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| runner-base | ${{ needs.build-base.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| runners | ${{ needs.build-runners.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Published Images" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/core:latest" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/runner-base:latest" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/runner-wine:latest" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/runner-vice:latest" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/runner-retroarch:latest" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/runner-fs-uae:latest" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/runner-mame:latest" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/thrane20/dillinger/runner-linux-native:latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

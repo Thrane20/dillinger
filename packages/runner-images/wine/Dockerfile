@@ -2,7 +2,7 @@
 # Extends base runner with Wine/Proton for running Windows games
 # Based on Dillinger Base Runner with Games on Whales architecture
 
-FROM dillinger/runner-base:latest
+FROM ghcr.io/dillinger-gol/runner-base:latest
 
 LABEL maintainer="Dillinger Project"
 LABEL description="Wine game runner extending base runner for Windows games"

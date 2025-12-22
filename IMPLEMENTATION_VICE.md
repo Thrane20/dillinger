@@ -32,7 +32,7 @@ This implementation adds support for Commodore computer emulation in Dillinger u
 
 **Platform Configuration:**
 - Type: `"emulator"` (distinguishes from Wine's `"wine"` type)
-- Container Image: `dillinger/runner-vice:latest`
+- Container Image: `ghcr.io/thrane20/dillinger/runner-vice:latest`
 - Supported Extensions: `.d64`, `.d71`, `.d81`, `.g64`, `.g71`, `.t64`, `.tap`, `.crt`, `.prg`, `.p00`, `.zip`
 - Launch Command: Emulator-specific (e.g., `x64sc` for C64) with `-autostart` argument
 - Display Streaming: `x11` method
@@ -159,7 +159,7 @@ packages/
 
 ## Compatibility
 
-- **Base Runner:** Requires `dillinger/runner-base:latest`
+- **Base Runner:** Requires `ghcr.io/thrane20/dillinger/runner-base:latest`
 - **Node.js:** 18+ (for backend)
 - **Docker:** 20+ (for building images)
 - **Platforms:** Linux (recommended), macOS, Windows with WSL2

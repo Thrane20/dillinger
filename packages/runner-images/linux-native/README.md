@@ -17,7 +17,7 @@ Docker image for running native Linux games and applications.
 ### Build the Image
 
 ```bash
-docker build -t dillinger/runner-linux-native:latest .
+docker build -t ghcr.io/thrane20/dillinger/runner-linux-native:latest .
 ```
 
 ### Run a Game
@@ -31,7 +31,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-linux-native:latest
+  ghcr.io/thrane20/dillinger/runner-linux-native:latest
 ```
 
 ### Example: SuperTuxKart
@@ -52,7 +52,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-linux-native:latest
+  ghcr.io/thrane20/dillinger/runner-linux-native:latest
 ```
 
 ## Environment Variables
@@ -75,5 +75,5 @@ A simple test game (bash script) is included for testing the runner:
 ```bash
 docker run -it --rm \
   -e GAME_EXECUTABLE="/usr/local/bin/test-game.sh" \
-  dillinger/runner-linux-native:latest
+  ghcr.io/thrane20/dillinger/runner-linux-native:latest
 ```

@@ -1,7 +1,7 @@
 # Multi-stage build for Dillinger Core (Next.js App Router)
 
 # 1) Build stage using Node for faster installs
-FROM node:18-bullseye AS builder
+FROM node:20-bullseye AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 

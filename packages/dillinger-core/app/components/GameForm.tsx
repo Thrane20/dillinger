@@ -115,6 +115,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [installedVolumeMountpoint, setInstalledVolumeMountpoint] = useState<string | null>(null);
+  const stripNullTerminators = (value: string): string => value.replace(/\u0000/g, '').trim();
+  const sanitizeStringArray = (values: unknown): string[] => {
+    if (!Array.isArray(values)) return [];
+    return values
+      .filter((v) => typeof v === 'string')
+      .map((v) => stripNullTerminators(v as string));
+  };
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [showImageSelector, setShowImageSelector] = useState<'primary' | 'backdrop' | null>(null);
@@ -164,6 +172,37 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   // Convenience accessors for the currently selected platform config
   const activePlatformConfig = formData.platforms.find(p => p.platformId === formData.platformId);
   const activeInstallation = activePlatformConfig?.installation || formData._originalGame?.installation;
+
+  const formatInstalledPathForDisplay = (p: string) => {
+    if (p === '/installed') return '${dillinger_installed}';
+    if (p.startsWith('/installed/')) return '${dillinger_installed}' + p.substring('/installed'.length);
+    return p;
+  };
+
+  const toInstalledHostPath = (p: string): string | null => {
+    if (!installedVolumeMountpoint) return null;
+    if (p === '/installed') return installedVolumeMountpoint;
+    if (p.startsWith('/installed/')) return installedVolumeMountpoint + p.substring('/installed'.length);
+    return null;
+  };
+
+  useEffect(() => {
+    // Best-effort: show the real host mountpoint for the dillinger_installed volume when available.
+    const loadInstalledVolumeMountpoint = async () => {
+      try {
+        const response = await fetch('/api/volumes/docker/list');
+        const data = await response.json();
+        if (!data?.success || !Array.isArray(data.data)) return;
+        const installed = data.data.find((v: any) => v?.name === 'dillinger_installed');
+        if (installed?.mountpoint && typeof installed.mountpoint === 'string') {
+          setInstalledVolumeMountpoint(installed.mountpoint);
+        }
+      } catch {
+        // non-fatal
+      }
+    };
+    loadInstalledVolumeMountpoint();
+  }, []);
 
   // Load game data if in edit mode
   useEffect(() => {
@@ -226,10 +265,10 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     debug: activeSettings?.wine?.debug || {},
                   },
                   launch: {
-                    command: activeSettings?.launch?.command || '',
-                    arguments: activeSettings?.launch?.arguments || [],
+                    command: stripNullTerminators(activeSettings?.launch?.command || ''),
+                    arguments: sanitizeStringArray(activeSettings?.launch?.arguments),
                     environment: activeSettings?.launch?.environment || {},
-                    workingDirectory: activeSettings?.launch?.workingDirectory || '',
+                    workingDirectory: stripNullTerminators(activeSettings?.launch?.workingDirectory || ''),
                     fullscreen: activeSettings?.launch?.fullscreen || false,
                     resolution: activeSettings?.launch?.resolution || '1920x1080',
                     useXrandr: activeSettings?.launch?.useXrandr || false,
@@ -646,9 +685,11 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         ...prev.settings,
         launch: {
           ...prev.settings?.launch,
-          command: shortcut.target || prev.settings?.launch?.command || '',
-          arguments: shortcut.arguments ? [shortcut.arguments] : prev.settings?.launch?.arguments || [],
-          workingDirectory: shortcut.workingDirectory || prev.settings?.launch?.workingDirectory || '',
+          command: stripNullTerminators(shortcut.target || prev.settings?.launch?.command || ''),
+          arguments: shortcut.arguments
+            ? [stripNullTerminators(shortcut.arguments)]
+            : sanitizeStringArray(prev.settings?.launch?.arguments),
+          workingDirectory: stripNullTerminators(shortcut.workingDirectory || prev.settings?.launch?.workingDirectory || ''),
         }
       }
     }));
@@ -1153,7 +1194,12 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                         </button>
                       </div>
                       <div className="text-xs text-gray-500 font-mono break-all">
-                        {activeInstallation.installPath}
+                        <div>{formatInstalledPathForDisplay(activeInstallation.installPath)}</div>
+                        {toInstalledHostPath(activeInstallation.installPath) && (
+                          <div className="text-gray-400">
+                            {toInstalledHostPath(activeInstallation.installPath)}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1212,6 +1258,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
                   placeholder="Relative path from game directory"
                 />
+                {!!formData.settings?.launch?.workingDirectory && formData.settings.launch.workingDirectory.startsWith('/installed') && (
+                  <div className="text-xs text-gray-500 mt-2 font-mono break-all">
+                    <div>{formatInstalledPathForDisplay(formData.settings.launch.workingDirectory)}</div>
+                    {toInstalledHostPath(formData.settings.launch.workingDirectory) && (
+                      <div className="text-gray-400">{toInstalledHostPath(formData.settings.launch.workingDirectory)}</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Display Options - only show for Wine platform */}
@@ -2046,6 +2100,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             onSelect={handleFileExplorerSelect}
             selectMode="file"
             title="Select Game Executable"
+            initialPath={formData.settings?.launch?.workingDirectory || activeInstallation.installPath}
           />
         )}
 

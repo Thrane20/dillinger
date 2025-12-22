@@ -33,6 +33,12 @@ export default function ShortcutSelectorDialog({
   const [isScanning, setIsScanning] = useState(false);
   const [isParsing, setParsing] = useState<Set<string>>(new Set());
 
+  const formatInstalledPathForDisplay = (p: string) => {
+    if (p === '/installed') return '${dillinger_installed}';
+    if (p.startsWith('/installed/')) return '${dillinger_installed}' + p.substring('/installed'.length);
+    return p;
+  };
+
   useEffect(() => {
     if (isOpen && gameId) {
       scanForShortcuts();
@@ -63,7 +69,7 @@ export default function ShortcutSelectorDialog({
     setParsing(prev => new Set(prev).add(shortcutPath));
 
     try {
-      const response = await fetch(`/api/games/${gameId}/shortcuts/parse`, {
+      const response = await fetch(`/api/games/${gameId}/shortcuts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shortcutPath: `${installPath}/${shortcutPath}` }),
@@ -110,7 +116,7 @@ export default function ShortcutSelectorDialog({
         <div className="p-4">
           <div className="mb-4">
             <p className="text-sm text-muted mb-2">
-              Installation path: <span className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">{installPath}</span>
+              Installation path: <span className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">{formatInstalledPathForDisplay(installPath)}</span>
             </p>
           </div>
 

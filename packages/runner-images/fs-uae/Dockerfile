@@ -2,7 +2,7 @@
 # Extends base runner with FS-UAE for running Amiga games
 # Based on Dillinger Base Runner with Games on Whales architecture
 
-FROM dillinger/runner-base:latest
+FROM ghcr.io/dillinger-gol/runner-base:latest
 
 LABEL maintainer="Dillinger Project"
 LABEL description="FS-UAE emulator runner extending base runner for Amiga games"

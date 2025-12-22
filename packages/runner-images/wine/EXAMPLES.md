@@ -6,7 +6,7 @@ This document provides practical examples for using the Wine runner with various
 
 - Docker installed and running
 - X11 server available (for GUI applications)
-- Wine runner image built: `docker build -t dillinger/runner-wine:latest .`
+- Wine runner image built: `docker build -t ghcr.io/thrane20/dillinger/runner-wine:latest .`
 
 ## Example 1: Installing a Windows Game
 
@@ -36,7 +36,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ### Step 4: Find the installed game
@@ -56,7 +56,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 2: Running a Portable Windows Game
@@ -82,7 +82,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 3: Installing and Configuring a Game
@@ -99,7 +99,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 
 # Step 2: Run winecfg to adjust settings
 docker run -it --rm \
@@ -107,7 +107,7 @@ docker run -it --rm \
   -e GAME_EXECUTABLE="winecfg" \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 
 # Step 3: Launch the game
 docker run -it --rm \
@@ -117,7 +117,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 4: Using winetricks
@@ -131,14 +131,14 @@ docker run -it --rm \
   -e GAME_EXECUTABLE="winetricks" \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 
 # Or install specific components
 docker run -it --rm \
   -v ~/wine-prefixes/game:/wineprefix:rw \
   -e GAME_EXECUTABLE="winetricks" \
   -e GAME_ARGS="d3dx9 vcrun2015" \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 5: 32-bit Windows Application
@@ -158,7 +158,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 6: Running with GPU Acceleration (NVIDIA)
@@ -175,7 +175,7 @@ docker run -it --rm \
   --device /dev/snd \
   --gpus all \
   --runtime=nvidia \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 7: Silent Installation
@@ -189,7 +189,7 @@ docker run -it --rm \
   -e INSTALLER_MODE=true \
   -e INSTALLER_PATH="/installers/setup.exe" \
   -e INSTALLER_ARGS="/S /D=C:\Program Files\MyGame" \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 8: Debugging Wine Issues
@@ -204,7 +204,7 @@ docker run -it --rm \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
-  dillinger/runner-wine:latest 2>&1 | tee wine-debug.log
+  ghcr.io/thrane20/dillinger/runner-wine:latest 2>&1 | tee wine-debug.log
 ```
 
 ## Example 9: Multiple Game Installations
@@ -222,7 +222,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 
 # Game 2
 mkdir -p ~/wine-prefixes/game2 ~/game-saves/game2
@@ -234,7 +234,7 @@ docker run -it --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri \
   --device /dev/snd \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Example 10: Testing the Runner
@@ -244,7 +244,7 @@ Use the included test script:
 ```bash
 docker run -it --rm \
   -e GAME_EXECUTABLE="/usr/local/bin/test-installer.sh" \
-  dillinger/runner-wine:latest
+  ghcr.io/thrane20/dillinger/runner-wine:latest
 ```
 
 ## Common Issues and Solutions
