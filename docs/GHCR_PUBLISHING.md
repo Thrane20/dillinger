@@ -21,7 +21,7 @@ ghcr.io/thrane20/dillinger/runner-{name}:latest     # Runner images
 | `runner-vice` | Commodore 64/128/VIC-20/Plus4/PET |
 | `runner-retroarch` | Multi-system emulation |
 | `runner-fs-uae` | Amiga emulation |
-| `runner-mame` | Standalone MAME arcade |
+| `runner-retroarch` | RetroArch with libretro cores (MAME, etc) |
 | `runner-linux-native` | Native Linux games |
 
 ## Quick Start (End Users)
@@ -196,7 +196,7 @@ pnpm publish:wine:build
 pnpm publish:vice:build
 pnpm publish:retroarch:build
 pnpm publish:fs-uae:build
-pnpm publish:mame:build
+pnpm publish:retroarch:build
 pnpm publish:linux-native:build
 ```
 

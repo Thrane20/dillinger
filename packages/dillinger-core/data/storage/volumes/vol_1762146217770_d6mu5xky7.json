@@ -6,5 +6,6 @@
   "hostPath": "/mnt/valinor/roms/installers",
   "createdAt": "2025-11-03T05:03:37.770Z",
   "type": "docker",
-  "status": "active"
+  "status": "active",
+  "purpose": "installers"
 }

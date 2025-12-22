@@ -6,5 +6,6 @@
   "hostPath": "/mnt/linuxfast/dillinger_installed",
   "createdAt": "2025-11-03T05:51:13.083Z",
   "type": "docker",
-  "status": "active"
+  "status": "active",
+  "purpose": "installed"
 }

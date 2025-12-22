@@ -72,7 +72,13 @@ async function browseViaDocker(hostPath: string): Promise<{ items: FileItem[]; p
   const cmd = `docker run --rm -v "${absolutePath}":"${absolutePath}":ro alpine:latest sh -c 'ls -la "${absolutePath}" 2>/dev/null | tail -n +2'`;
   
   try {
-    const { stdout } = await execAsync(cmd, { timeout: 10000 });
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
+    
+    // Check if mount failed
+    if (stderr && stderr.includes('no such file or directory')) {
+      throw new Error('Path not accessible. You can only traverse Docker volumes already created. Full access to the file system is not possible without adding a volume mount first.');
+    }
+    
     const lines = stdout.trim().split('\n').filter(Boolean);
     
     const items: FileItem[] = [];
@@ -111,7 +117,8 @@ async function browseViaDocker(hostPath: string): Promise<{ items: FileItem[]; p
     return { items, parentPath };
   } catch (err) {
     console.error('Docker browse failed:', err);
-    throw new Error(`Cannot access path: ${absolutePath}`);
+    const errorMsg = err instanceof Error ? err.message : 'Cannot access path';
+    throw new Error(errorMsg.includes('volume mount') ? errorMsg : `Cannot access path: ${absolutePath}. You can only traverse Docker volumes already created. Full access to the file system is not possible without adding a volume mount first.`);
   }
 }
 

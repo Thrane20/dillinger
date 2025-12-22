@@ -19,6 +19,7 @@ interface Download {
 export default function DownloadMonitor() {
   const [downloads, setDownloads] = useState<Map<string, Download>>(new Map());
   const [downloadSpeeds, setDownloadSpeeds] = useState<Record<string, number>>({});
+  const [sparklineHeights, setSparklineHeights] = useState<number[]>([]);
   const prevProgressRef = useRef<Record<string, { progress: number; time: number }>>({});
 
   // Fetch downloads from API
@@ -89,6 +90,11 @@ export default function DownloadMonitor() {
     } catch (error) {
       console.error('[DownloadMonitor] Error fetching downloads:', error);
     }
+  }, []);
+
+  // Initialize sparkline heights only on client
+  useEffect(() => {
+    setSparklineHeights(Array.from({ length: 20 }, () => 20 + Math.random() * 30));
   }, []);
 
   useEffect(() => {
@@ -164,12 +170,12 @@ export default function DownloadMonitor() {
           <div className="text-xs text-muted">No active downloads</div>
           {/* Idle sparkline */}
           <div className="flex gap-0.5 h-4">
-            {Array.from({ length: 20 }).map((_, i) => (
+            {sparklineHeights.map((height, i) => (
               <div
                 key={i}
                 className="flex-1 rounded-sm bg-gray-200 dark:bg-gray-700 transition-all"
                 style={{
-                  height: `${20 + Math.random() * 30}%`,
+                  height: `${height}%`,
                   opacity: 0.3,
                 }}
               />

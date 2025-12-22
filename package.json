@@ -25,7 +25,6 @@
     "docker:build:vice": "cd packages/runner-images && ./build.sh vice",
     "docker:build:retroarch": "cd packages/runner-images && ./build.sh retroarch",
     "docker:build:fs-uae": "cd packages/runner-images && ./build.sh fs-uae",
-    "docker:build:mame": "cd packages/runner-images && ./build.sh mame",
     "docker:build:linux-native": "cd packages/runner-images && ./build.sh linux-native",
     "publish:versions": "./scripts/publish.sh versions",
     "publish:all": "./scripts/publish.sh all",
@@ -44,8 +43,6 @@
     "publish:retroarch:build": "./scripts/publish.sh retroarch --build",
     "publish:fs-uae": "./scripts/publish.sh fs-uae",
     "publish:fs-uae:build": "./scripts/publish.sh fs-uae --build",
-    "publish:mame": "./scripts/publish.sh mame",
-    "publish:mame:build": "./scripts/publish.sh mame --build",
     "publish:linux-native": "./scripts/publish.sh linux-native",
     "publish:linux-native:build": "./scripts/publish.sh linux-native --build"
   },

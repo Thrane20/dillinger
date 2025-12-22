@@ -1,7 +1,7 @@
 #!/bin/bash
 # Publish Dillinger Docker images to ghcr.io
 # Usage: ./scripts/publish.sh [target] [--build]
-#   target: all, core, runners, base, wine, vice, retroarch, fs-uae, mame, linux-native
+#   target: all, core, runners, base, wine, vice, retroarch, fs-uae, linux-native
 #   --build: Build before pushing (optional)
 
 set -e
@@ -118,8 +118,8 @@ publish_fs_uae() {
     push_image "dillinger/runner-fs-uae" "$DILLINGER_RUNNER_FS_UAE_VERSION" "$ROOT_DIR/packages/runner-images/fs-uae"
 }
 
-publish_mame() {
-    push_image "dillinger/runner-mame" "$DILLINGER_RUNNER_MAME_VERSION" "$ROOT_DIR/packages/runner-images/mame"
+publish_retroarch() {
+    push_image "dillinger/runner-retroarch" "$DILLINGER_RUNNER_RETROARCH_VERSION" "$ROOT_DIR/packages/runner-images/retroarch"
 }
 
 publish_linux_native() {
@@ -133,7 +133,6 @@ publish_runners() {
     publish_vice
     publish_retroarch
     publish_fs_uae
-    publish_mame
     publish_linux_native
 }
 
@@ -152,7 +151,6 @@ show_versions() {
     echo -e "  ${BLUE}VICE:${NC}          $DILLINGER_RUNNER_VICE_VERSION"
     echo -e "  ${BLUE}RetroArch:${NC}     $DILLINGER_RUNNER_RETROARCH_VERSION"
     echo -e "  ${BLUE}FS-UAE:${NC}        $DILLINGER_RUNNER_FS_UAE_VERSION"
-    echo -e "  ${BLUE}MAME:${NC}          $DILLINGER_RUNNER_MAME_VERSION"
     echo -e "  ${BLUE}Linux Native:${NC}  $DILLINGER_RUNNER_LINUX_NATIVE_VERSION"
     echo ""
 }
@@ -170,7 +168,6 @@ show_usage() {
     echo "  vice          Publish runner-vice only"
     echo "  retroarch     Publish runner-retroarch only"
     echo "  fs-uae        Publish runner-fs-uae only"
-    echo "  mame          Publish runner-mame only"
     echo "  linux-native  Publish runner-linux-native only"
     echo "  versions      Show current versions"
     echo ""
@@ -212,9 +209,6 @@ case "$TARGET" in
         ;;
     fs-uae)
         publish_fs_uae
-        ;;
-    mame)
-        publish_mame
         ;;
     linux-native)
         publish_linux_native

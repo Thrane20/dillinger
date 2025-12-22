@@ -119,16 +119,39 @@ export async function DELETE(
   }
   
   try {
-    const image = docker.getImage(config.image);
+    // First, find the actual image by listing all images and matching tags
+    const images = await docker.listImages({ all: true });
+    const foundImage = images.find(img => 
+      img.RepoTags?.some(tag => 
+        tag === config.image || 
+        tag.startsWith(config.image.split(':')[0])
+      )
+    );
+    
+    if (!foundImage) {
+      return NextResponse.json(
+        { success: false, error: `Image ${config.image} not found locally` },
+        { status: 404 }
+      );
+    }
+    
+    // Use the image ID to remove it
+    const image = docker.getImage(foundImage.Id);
     await image.remove({ force: false });
     
     return NextResponse.json({
       success: true,
       message: `Removed ${config.name}`,
     });
-  } catch {
+  } catch (error) {
+    console.error(`Failed to remove image ${config.image}:`, error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { success: false, error: 'Failed to remove image. It may be in use by a container.' },
+      { 
+        success: false, 
+        error: `Failed to remove image: ${errorMessage}. It may be in use by a container.`,
+        image: config.image
+      },
       { status: 500 }
     );
   }

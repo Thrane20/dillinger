@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import FileExplorer from './FileExplorer';
+import type { VolumePurpose } from '@dillinger/shared';
 
 interface Volume {
   id: string;
@@ -11,6 +12,98 @@ interface Volume {
   createdAt: string;
   type: 'docker' | 'bind';
   status: 'active' | 'error';
+  purpose: VolumePurpose;
+}
+
+interface DockerVolume {
+  name: string;
+  driver: string;
+  mountpoint: string;
+}
+
+// Volume Section Component
+function VolumeSection({
+  title,
+  purpose,
+  volumes,
+  onAdd,
+  onLink,
+  onRemove,
+  recommended = false,
+  showLink = false,
+}: {
+  title: string;
+  purpose: VolumePurpose;
+  volumes: Volume[];
+  onAdd: () => void;
+  onLink?: () => void;
+  onRemove: (id: string) => void;
+  recommended?: boolean;
+  showLink?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h4 className="text-xs font-semibold text-text flex items-center gap-1.5">
+          {title}
+          {recommended && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
+              Recommended
+            </span>
+          )}
+        </h4>
+        <div className="flex items-center gap-1">
+          {showLink && onLink && (
+            <button
+              onClick={onLink}
+              className="text-xs px-2 py-0.5 rounded bg-secondary/10 text-secondary hover:bg-secondary hover:text-white transition-all"
+              title={`Link existing volume to ${title}`}
+            >
+              Link
+            </button>
+          )}
+          <button
+            onClick={onAdd}
+            className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all"
+            title={`Add ${title} volume`}
+          >
+            + Add
+          </button>
+        </div>
+      </div>
+      
+      {volumes.length === 0 ? (
+        <p className="text-xs text-muted italic pl-2">
+          {recommended ? 'Click + Add to configure' : 'No volumes'}
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {volumes.map((volume) => (
+            <div
+              key={volume.id}
+              className="p-2 rounded bg-background border border-border"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-text truncate">{volume.name}</div>
+                  <div className="text-[10px] text-muted truncate font-mono">{volume.hostPath}</div>
+                </div>
+                <button
+                  onClick={() => onRemove(volume.id)}
+                  className="text-danger hover:text-danger-hover transition-colors"
+                  title="Remove volume"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // NOTE: SessionVolumeInfo interface commented out - no longer needed with dillinger_root architecture
@@ -25,11 +118,16 @@ interface SessionVolumeInfo {
 export default function LeftSidebar() {
   const [showFileExplorer, setShowFileExplorer] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(false);
+  const [showLinkVolumeDialog, setShowLinkVolumeDialog] = useState(false);
+  const [showReassignDialog, setShowReassignDialog] = useState(false);
+  const [selectedDockerVolume, setSelectedDockerVolume] = useState<DockerVolume | null>(null);
   // NOTE: Cleanup dialog state commented out - no longer needed with dillinger_root architecture
   // const [showCleanupDialog, setShowCleanupDialog] = useState(false);
   const [selectedPath, setSelectedPath] = useState('');
   const [volumeName, setVolumeName] = useState('');
+  const [selectedPurpose, setSelectedPurpose] = useState<VolumePurpose>('other');
   const [volumes, setVolumes] = useState<Volume[]>([]);
+  const [dockerVolumes, setDockerVolumes] = useState<DockerVolume[]>([]);
   const [loading, setLoading] = useState(true);
   // const [sessionInfo, setSessionInfo] = useState<SessionVolumeInfo | null>(null);
   // const [cleanupInProgress, setCleanupInProgress] = useState(false);
@@ -37,6 +135,7 @@ export default function LeftSidebar() {
   // Load volumes on mount
   useEffect(() => {
     loadVolumes();
+    loadDockerVolumes();
   }, []);
 
   async function loadVolumes() {
@@ -44,7 +143,12 @@ export default function LeftSidebar() {
       const response = await fetch('/api/volumes');
       const data = await response.json();
       if (data.success) {
-        setVolumes(data.data);
+        // Migrate old volumes without purpose to 'other'
+        const migratedVolumes = data.data.map((v: Volume) => ({
+          ...v,
+          purpose: v.purpose || 'other',
+        }));
+        setVolumes(migratedVolumes);
       }
     } catch (error) {
       console.error('Failed to load volumes:', error);
@@ -53,8 +157,58 @@ export default function LeftSidebar() {
     }
   }
 
-  function handleAddVolume() {
+  async function loadDockerVolumes() {
+    try {
+      const response = await fetch('/api/docker-volumes');
+      const data = await response.json();
+      if (data.success) {
+        setDockerVolumes(data.data.volumes || []);
+      }
+    } catch (error) {
+      console.error('Failed to load Docker volumes:', error);
+    }
+  }
+
+  function handleAddVolume(purpose: VolumePurpose) {
+    setSelectedPurpose(purpose);
     setShowFileExplorer(true);
+  }
+
+  function handleLinkVolume(dockerVolume: DockerVolume, purpose: VolumePurpose) {
+    setSelectedDockerVolume(dockerVolume);
+    setSelectedPurpose(purpose);
+    setVolumeName(dockerVolume.name.replace(/^dillinger_/, ''));
+    setSelectedPath(dockerVolume.mountpoint);
+    setShowLinkVolumeDialog(true);
+  }
+
+  function handleReassignVolume(purpose: VolumePurpose) {
+    setSelectedPurpose(purpose);
+    setShowReassignDialog(true);
+  }
+
+  async function handleConfirmReassign(volumeId: string) {
+    try {
+      const response = await fetch(`/api/volumes?id=${volumeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          purpose: selectedPurpose,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await loadVolumes(); // Reload list
+        setShowReassignDialog(false);
+        setSelectedPurpose('other');
+      } else {
+        alert(`Failed to reassign volume: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to reassign volume:', error);
+      alert('Failed to reassign volume');
+    }
   }
 
   function handleVolumeSelected(path: string) {
@@ -77,21 +231,59 @@ export default function LeftSidebar() {
           name: volumeName.trim(),
           hostPath: selectedPath,
           type: 'docker',
+          purpose: selectedPurpose,
         }),
       });
 
       const data = await response.json();
       if (data.success) {
         await loadVolumes(); // Reload list
+        await loadDockerVolumes(); // Reload Docker volumes
         setShowNameDialog(false);
         setVolumeName('');
         setSelectedPath('');
+        setSelectedPurpose('other');
       } else {
-        alert(`Failed to create volume: ${data.error}`);
+        alert(`Failed to create volume: ${data.error}${data.warning ? '\n' + data.warning : ''}`);
       }
     } catch (error) {
       console.error('Failed to create volume:', error);
       alert('Failed to create volume');
+    }
+  }
+
+  async function handleLinkExistingVolume() {
+    if (!volumeName.trim() || !selectedPath || !selectedDockerVolume) return;
+
+    try {
+      const response = await fetch('/api/volumes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: volumeName.trim(),
+          hostPath: selectedPath,
+          type: 'docker',
+          purpose: selectedPurpose,
+          linkExisting: true,
+          dockerVolumeName: selectedDockerVolume.name,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        await loadVolumes(); // Reload list
+        await loadDockerVolumes(); // Reload Docker volumes
+        setShowLinkVolumeDialog(false);
+        setVolumeName('');
+        setSelectedPath('');
+        setSelectedPurpose('other');
+        setSelectedDockerVolume(null);
+      } else {
+        alert(`Failed to link volume: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to link volume:', error);
+      alert('Failed to link volume');
     }
   }
 
@@ -219,52 +411,117 @@ export default function LeftSidebar() {
 
             {/* Volume Manager Section */}
             <div className="pt-2">
-              <div className="p-4 rounded-lg bg-surface/50 border border-border">
-                <div className="flex items-center justify-between mb-3">
+              <div className="p-4 rounded-lg bg-surface/50 border border-border space-y-4">
+                <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-text flex items-center gap-2">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
                     </svg>
                     Volume Manager
                   </h3>
-                  <button
-                    onClick={handleAddVolume}
-                    className="text-xs px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary hover:text-white transition-all"
-                    title="Add Volume"
-                  >
-                    + Add
-                  </button>
                 </div>
-                
-                {volumes.length === 0 ? (
-                  <p className="text-xs text-muted italic">
-                    {loading ? 'Loading...' : 'No volumes configured'}
-                  </p>
+
+                {loading ? (
+                  <p className="text-xs text-muted italic">Loading...</p>
                 ) : (
-                  <div className="space-y-2">
-                    {volumes.map((volume) => (
-                      <div
-                        key={volume.id}
-                        className="p-2 rounded bg-background border border-border"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-semibold text-text truncate">{volume.name}</div>
-                            <div className="text-xs text-muted truncate font-mono">{volume.hostPath}</div>
-                          </div>
-                          <button
-                            onClick={() => handleRemoveVolume(volume.id)}
-                            className="text-danger hover:text-danger-hover transition-colors"
-                            title="Remove volume"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
+                  <>
+                    {/* Installers Section */}
+                    <VolumeSection
+                      title="Installers"
+                      purpose="installers"
+                      volumes={volumes.filter((v) => v.purpose === 'installers')}
+                      onAdd={() => handleAddVolume('installers')}
+                      onLink={() => handleReassignVolume('installers')}
+                      onRemove={handleRemoveVolume}
+                      recommended={volumes.filter((v) => v.purpose === 'installers').length === 0}
+                      showLink={volumes.filter((v) => v.purpose === 'other').length > 0}
+                    />
+
+                    {/* Installed Games Section */}
+                    <VolumeSection
+                      title="Installed Games"
+                      purpose="installed"
+                      volumes={volumes.filter((v) => v.purpose === 'installed')}
+                      onAdd={() => handleAddVolume('installed')}
+                      onLink={() => handleReassignVolume('installed')}
+                      onRemove={handleRemoveVolume}
+                      recommended={volumes.filter((v) => v.purpose === 'installed').length === 0}
+                      showLink={volumes.filter((v) => v.purpose === 'other').length > 0}
+                    />
+
+                    {/* ROMs Section */}
+                    <VolumeSection
+                      title="ROMs"
+                      purpose="roms"
+                      volumes={volumes.filter((v) => v.purpose === 'roms')}
+                      onAdd={() => handleAddVolume('roms')}
+                      onLink={() => handleReassignVolume('roms')}
+                      onRemove={handleRemoveVolume}
+                      recommended={volumes.filter((v) => v.purpose === 'roms').length === 0}
+                      showLink={volumes.filter((v) => v.purpose === 'other').length > 0}
+                    />
+
+                    {/* Other Section */}
+                    <VolumeSection
+                      title="Other"
+                      purpose="other"
+                      volumes={volumes.filter((v) => v.purpose === 'other')}
+                      onAdd={() => handleAddVolume('other')}
+                      onRemove={handleRemoveVolume}
+                    />
+
+                    {/* Host Volumes Section */}
+                    {dockerVolumes.length > 0 && (
+                      <div className="pt-3 border-t border-border">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs font-semibold text-muted uppercase tracking-wider">
+                            Host Docker Volumes
+                          </h4>
+                        </div>
+                        <div className="space-y-1">
+                          {dockerVolumes
+                            .filter((dv) => !volumes.some((v) => v.dockerVolumeName === dv.name))
+                            .map((dv) => (
+                              <div
+                                key={dv.name}
+                                className="p-2 rounded bg-background/50 border border-border/50 text-xs"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-text truncate">{dv.name}</div>
+                                    <div className="text-muted truncate font-mono text-[10px]">
+                                      {dv.mountpoint}
+                                    </div>
+                                  </div>
+                                  <div className="relative group">
+                                    <button
+                                      className="text-primary hover:text-primary-hover transition-colors"
+                                      title="Link to Dillinger"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                      </svg>
+                                    </button>
+                                    {/* Link Dropdown */}
+                                    <div className="absolute right-0 mt-1 w-32 bg-surface border border-border rounded shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                                      {(['installers', 'installed', 'roms', 'other'] as VolumePurpose[]).map((purpose) => (
+                                        <button
+                                          key={purpose}
+                                          onClick={() => handleLinkVolume(dv, purpose)}
+                                          className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-primary/10 transition-colors capitalize"
+                                        >
+                                          {purpose}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
 
                 {/* Clean Session Volumes Button - DEPRECATED
@@ -322,6 +579,15 @@ export default function LeftSidebar() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-text mb-2">
+                  Purpose
+                </label>
+                <div className="px-3 py-2 bg-background/50 border border-border rounded-lg text-sm text-text font-medium capitalize">
+                  {selectedPurpose}
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-text mb-2">
                   Volume Name
                 </label>
                 <input
@@ -350,6 +616,7 @@ export default function LeftSidebar() {
                   setShowNameDialog(false);
                   setVolumeName('');
                   setSelectedPath('');
+                  setSelectedPurpose('other');
                 }}
                 className="flex-1 px-4 py-2 rounded-lg border border-border text-text hover:bg-background transition-all"
               >
@@ -361,6 +628,139 @@ export default function LeftSidebar() {
                 className="flex-1 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Link Volume Dialog */}
+      {showLinkVolumeDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-surface border border-border rounded-lg shadow-xl p-6 w-96">
+            <h3 className="text-lg font-bold text-text mb-4">Link Existing Volume</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-text mb-2">
+                  Purpose
+                </label>
+                <div className="px-3 py-2 bg-background/50 border border-border rounded-lg text-sm text-text font-medium capitalize">
+                  {selectedPurpose}
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-text mb-2">
+                  Volume Name
+                </label>
+                <input
+                  type="text"
+                  value={volumeName}
+                  onChange={(e) => setVolumeName(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="my-games"
+                  autoFocus
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-muted mb-2">
+                  Docker Volume
+                </label>
+                <div className="px-3 py-2 bg-background/50 border border-border rounded-lg text-sm text-muted font-mono truncate">
+                  {selectedDockerVolume?.name}
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-muted mb-2">
+                  Mount Point
+                </label>
+                <div className="px-3 py-2 bg-background/50 border border-border rounded-lg text-sm text-muted font-mono truncate">
+                  {selectedPath}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowLinkVolumeDialog(false);
+                  setVolumeName('');
+                  setSelectedPath('');
+                  setSelectedPurpose('other');
+                  setSelectedDockerVolume(null);
+                }}
+                className="flex-1 px-4 py-2 rounded-lg border border-border text-text hover:bg-background transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLinkExistingVolume}
+                disabled={!volumeName.trim()}
+                className="flex-1 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                Link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reassign Volume Dialog */}
+      {showReassignDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-surface border border-border rounded-lg shadow-xl p-6 w-96">
+            <h3 className="text-lg font-bold text-text mb-4">
+              Link Volume to {selectedPurpose === 'installers' ? 'Installers' : selectedPurpose === 'installed' ? 'Installed Games' : 'ROMs'}
+            </h3>
+            
+            <div className="space-y-2 mb-6">
+              <p className="text-sm text-muted mb-3">
+                Select a volume from "Other" to reassign:
+              </p>
+              
+              {volumes.filter((v) => v.purpose === 'other').length === 0 ? (
+                <p className="text-sm text-muted italic text-center py-4">
+                  No volumes available in "Other" category
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {volumes.filter((v) => v.purpose === 'other').map((volume) => (
+                    <button
+                      key={volume.id}
+                      onClick={() => handleConfirmReassign(volume.id)}
+                      className="w-full text-left p-3 rounded bg-background border border-border hover:bg-primary/10 hover:border-primary transition-all group"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-text group-hover:text-primary truncate">
+                            {volume.name}
+                          </div>
+                          <div className="text-xs text-muted truncate font-mono mt-0.5">
+                            {volume.hostPath}
+                          </div>
+                        </div>
+                        <svg className="w-5 h-5 text-muted group-hover:text-primary transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  setShowReassignDialog(false);
+                  setSelectedPurpose('other');
+                }}
+                className="px-4 py-2 rounded-lg border border-border text-text hover:bg-background transition-all"
+              >
+                Cancel
               </button>
             </div>
           </div>

@@ -59,7 +59,7 @@ dillinger/
 │       ├── vice/                # C64 emulation
 │       ├── retroarch/           # Multi-system emulation
 │       ├── fs-uae/              # Amiga emulation
-│       ├── mame/                # Arcade emulation
+│       ├── retroarch/           # RetroArch with libretro cores (MAME, etc)
 │       └── linux-native/        # Native Linux games
 ├── scripts/
 │   └── publish.sh               # Publishing script
@@ -142,7 +142,7 @@ pnpm docker:build:wine
 pnpm docker:build:vice
 pnpm docker:build:retroarch
 pnpm docker:build:fs-uae
-pnpm docker:build:mame
+pnpm docker:build:retroarch
 pnpm docker:build:linux-native
 
 # Build all runners sequentially
@@ -201,7 +201,7 @@ pnpm -w run publish:wine:build
 pnpm -w run publish:vice:build
 pnpm -w run publish:retroarch:build
 pnpm -w run publish:fs-uae:build
-pnpm -w run publish:mame:build
+pnpm -w run publish:retroarch:build
 pnpm -w run publish:linux-native:build
 ```
 

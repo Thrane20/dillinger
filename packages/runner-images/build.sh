@@ -23,8 +23,8 @@ IMAGES=()
 
 # Image registry prefix
 # thrane20 = Gaming On Linux
-# All images default to ghcr.io/thrane20
-IMAGE_PREFIX="ghcr.io/thrane20/runner"
+# All images default to ghcr.io/thrane20/dillinger
+IMAGE_PREFIX="ghcr.io/thrane20/dillinger/runner"
 
 # Function to display usage
 usage() {
@@ -46,7 +46,6 @@ usage() {
     printf "    wine                    Build only the wine runner image\n"
     printf "    vice                    Build only the vice runner image\n"
     printf "    fs-uae                  Build only the fs-uae runner image\n"
-    printf "    mame                    Build only the mame runner image\n"
     printf "    retroarch               Build only the retroarch runner image\n"
     printf "\n"
     printf "\033[1;33mEXAMPLES:\033[0m\n"
@@ -69,8 +68,7 @@ usage() {
     printf "    3. wine (depends on base)\n"
     printf "    4. vice (depends on base)\n"
     printf "    5. fs-uae (depends on base)\n"
-    printf "    6. mame (depends on base)\n"
-    printf "    7. retroarch (depends on base)\n"
+    printf "    6. retroarch (depends on base)\n"
     printf "\n"
     exit 0
 }
@@ -159,7 +157,7 @@ while [[ $# -gt 0 ]]; do
             # Build all images (default behavior)
             shift
             ;;
-        base|linux-native|wine|vice|fs-uae|mame|retroarch)
+        base|linux-native|wine|vice|fs-uae|retroarch)
             IMAGES+=("$1")
             shift
             ;;
@@ -205,7 +203,7 @@ fi
 printf "\n"
 
 # Check for dependency issues
-if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae" || should_build "mame" || should_build "retroarch"; then
+if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae" || should_build "retroarch"; then
     if ! should_build "base" && ! docker images | grep -q "${IMAGE_PREFIX}-base"; then
         printf "\033[1;33mWarning: Dependent images require base image, but base not found.\033[0m\n"
         printf "\033[1;33mAdding base to build queue...\033[0m\n"
@@ -251,11 +249,6 @@ if [ "$PARALLEL" = true ]; then
     
     if should_build "fs-uae"; then
         build_image "FS-UAE Runner" "fs-uae" "$(get_tag fs-uae)" &
-        PIDS+=($!)
-    fi
-
-    if should_build "mame"; then
-        build_image "MAME Runner" "mame" "$(get_tag mame)" &
         PIDS+=($!)
     fi
 
@@ -307,13 +300,6 @@ else
         fi
     fi
 
-    if should_build "mame"; then
-        if ! build_image "MAME Runner" "mame" "$(get_tag mame)"; then
-            BUILD_FAILED=true
-            exit 1
-        fi
-    fi
-
     if should_build "retroarch"; then
         if ! build_image "RetroArch Runner" "retroarch" "$(get_tag retroarch)"; then
             BUILD_FAILED=true
@@ -335,7 +321,6 @@ if [ "$BUILD_FAILED" = false ]; then
     should_build "wine" && printf "  - $(get_tag wine)\n"
     should_build "vice" && printf "  - $(get_tag vice)\n"
     should_build "fs-uae" && printf "  - $(get_tag fs-uae)\n"
-    should_build "mame" && printf "  - $(get_tag mame)\n"
     should_build "retroarch" && printf "  - $(get_tag retroarch)\n"
     printf "\n"
     printf "\033[1;33mAvailable images:\033[0m\n"

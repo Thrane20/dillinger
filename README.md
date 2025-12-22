@@ -50,7 +50,7 @@ Dillinger is a **self-hosted game library manager** designed to make gaming on L
 | **Native Linux** | Native | ✅ Ready |
 | **Commodore 64/128** | VICE | ✅ Ready |
 | **Amiga** | FS-UAE | ✅ Ready |
-| **Arcade** | MAME | ✅ Ready |
+| **Arcade** | MAME (via RetroArch) | ✅ Ready |
 | **Multi-System** | RetroArch | ✅ Ready |
 
 Each platform runs in its own optimized Docker container with full GPU acceleration, audio, and controller support.
@@ -94,7 +94,7 @@ Then open http://localhost:3010 in your browser.
 2. **Runner Images** - Specialized containers for each platform
    - Wine runner for Windows games
    - VICE for C64/C128
-   - MAME for arcade games
+   - MAME cores for arcade games (via RetroArch)
    - RetroArch for multi-system emulation
    - Each includes GPU drivers, audio, streaming support
 
@@ -187,7 +187,7 @@ Built with:
 - [Docker](https://www.docker.com/) - Containerization
 - [VICE](https://vice-emu.sourceforge.io/) - C64 emulation
 - [FS-UAE](https://fs-uae.net/) - Amiga emulation
-- [MAME](https://www.mamedev.org/) - Arcade emulation
+- [MAME](https://www.mamedev.org/) - Arcade emulation (via RetroArch cores)
 - [RetroArch](https://www.retroarch.com/) - Multi-system emulation
 
 ---

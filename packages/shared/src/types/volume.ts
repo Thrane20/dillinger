@@ -1,6 +1,11 @@
 import type { VersionedData } from './schema-version.js';
 
 /**
+ * Volume purpose categorization for organizing volumes
+ */
+export type VolumePurpose = 'installers' | 'installed' | 'roms' | 'other';
+
+/**
  * Volume configuration for Docker volumes and bind mounts
  */
 export interface Volume extends VersionedData {
@@ -12,6 +17,7 @@ export interface Volume extends VersionedData {
   type: 'docker' | 'bind';
   status: 'active' | 'error';
   lastVerified?: string;
+  purpose: VolumePurpose;
 }
 
 /**

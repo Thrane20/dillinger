@@ -568,24 +568,22 @@ export default function PlatformsPage() {
 
   const renderArcadeTab = () => {
     const retroarchRunner = runners.find(r => r.id === 'retroarch');
-    const mameRunner = runners.find(r => r.id === 'mame');
     
     return (
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-semibold">Arcade / MAME</h2>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Classic arcade game emulation via MAME (standalone or RetroArch core).
+            Classic arcade game emulation via MAME cores in RetroArch.
           </p>
         </div>
 
         <div className="space-y-4">
           <h3 className="text-lg font-medium">Available Runners</h3>
-          {renderRunnerStatus(retroarchRunner, 'RetroArch')}
-          {renderRunnerStatus(mameRunner, 'MAME Standalone')}
+          {renderRunnerStatus(retroarchRunner, 'RetroArch Runner')}
         </div>
 
-        {(retroarchRunner?.installed || mameRunner?.installed) && (
+        {retroarchRunner?.installed && (
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
             <h3 className="text-lg font-medium mb-4">MAME Settings</h3>
             <div className="grid gap-4">

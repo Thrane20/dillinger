@@ -41,12 +41,6 @@ export const RUNNER_IMAGES: Record<string, {
     description: 'Amiga emulation via FS-UAE',
     platforms: ['amiga', 'amiga500', 'amiga1200', 'cd32'],
   },
-  'mame': {
-    image: 'ghcr.io/thrane20/dillinger/runner-mame:latest',
-    name: 'MAME Runner',
-    description: 'Standalone MAME arcade emulation',
-    platforms: ['mame', 'arcade'],
-  },
   'linux-native': {
     image: 'ghcr.io/thrane20/dillinger/runner-linux-native:latest',
     name: 'Linux Native Runner',
