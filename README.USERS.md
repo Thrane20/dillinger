@@ -47,7 +47,7 @@ chmod +x start-dillinger.sh
 
 This script will:
 1. Check if Docker is installed
-2. Create the required `dillinger_data` volume
+2. Create the required `dillinger_root` volume
 3. Pull the latest Dillinger image
 4. Start the container
 5. Show you the URL to access the web interface
@@ -60,20 +60,20 @@ If you prefer to do it manually:
 
 ### Step 1: Create the Data Volume
 
-Dillinger stores all your game library data, metadata, and configuration in a Docker volume called `dillinger_data`.
+Dillinger stores all your game library data, metadata, and configuration in a Docker volume called `dillinger_root`.
 
 **Option A: Use a Docker Named Volume (Recommended)**
 
 This is the simplest approach - Docker manages the volume location automatically:
 
 ```bash
-docker volume create dillinger_data
+docker volume create dillinger_root
 ```
 
 To find where Docker stores this volume:
 ```bash
-docker volume inspect dillinger_data
-# Look for "Mountpoint" - usually /var/lib/docker/volumes/dillinger_data/_data
+docker volume inspect dillinger_root
+# Look for "Mountpoint" - usually /var/lib/docker/volumes/dillinger_root/_data
 ```
 
 **Option B: Use a Bind Mount (Custom Location)**
@@ -103,7 +103,7 @@ docker run -d \
   --name dillinger \
   -p 3010:3010 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v dillinger_data:/data \
+  -v dillinger_root:/data \
   --restart unless-stopped \
   ghcr.io/thrane20/dillinger/core:latest
 ```
@@ -204,7 +204,7 @@ docker start dillinger
 ### Remove Dillinger (keeps your data)
 ```bash
 docker rm -f dillinger
-# Your games and data remain in the dillinger_data volume
+# Your games and data remain in the dillinger_root volume
 ```
 
 ## 💾 Backup Your Data
@@ -215,7 +215,7 @@ docker rm -f dillinger
 ```bash
 # Create a backup
 docker run --rm \
-  -v dillinger_data:/data \
+  -v dillinger_root:/data \
   -v $(pwd):/backup \
   alpine tar czf /backup/dillinger-backup-$(date +%Y%m%d).tar.gz -C /data .
 ```
@@ -231,7 +231,7 @@ tar czf dillinger-backup-$(date +%Y%m%d).tar.gz /path/to/your/dillinger-data
 **For named volume:**
 ```bash
 docker run --rm \
-  -v dillinger_data:/data \
+  -v dillinger_root:/data \
   -v $(pwd):/backup \
   alpine sh -c "cd /data && tar xzf /backup/dillinger-backup-YYYYMMDD.tar.gz"
 ```
@@ -314,7 +314,7 @@ Common issues:
 
 All Dillinger data is stored in the `/data` directory inside the container, which maps to:
 
-- **Named volume**: Managed by Docker (usually `/var/lib/docker/volumes/dillinger_data/_data`)
+- **Named volume**: Managed by Docker (usually `/var/lib/docker/volumes/dillinger_root/_data`)
 - **Bind mount**: Your specified directory
 
 Data structure:
@@ -347,7 +347,7 @@ docker run -d \
   --name dillinger \
   -p 3010:3010 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v dillinger_data:/data \
+  -v dillinger_root:/data \
   --restart unless-stopped \
   ghcr.io/thrane20/dillinger/core:latest
 ```

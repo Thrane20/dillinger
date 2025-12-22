@@ -16,7 +16,7 @@ IMAGE_NAME="ghcr.io/thrane20/dillinger/core"
 IMAGE_TAG="latest"
 CONTAINER_NAME="dillinger"
 PORT="3010"
-VOLUME_NAME="dillinger_data"
+VOLUME_NAME="dillinger_root"
 
 print_header() {
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════${NC}"
