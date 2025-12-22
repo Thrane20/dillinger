@@ -121,7 +121,63 @@ check_volume() {
     fi
 }
 
-# Check if image exists locally
+# Get the current version of local image
+get_local_version() {
+    # Try to get version from image labels
+    local version=$(docker image inspect "$IMAGE_NAME:$IMAGE_TAG" 2>/dev/null | \
+        grep -o '"version":"v[0-9]*\.[0-9]*\.[0-9]*"' | \
+        head -1 | \
+        cut -d'"' -f4)
+    
+    if [ -z "$version" ]; then
+        # Fallback: check for version-tagged image
+        version=$(docker images --format "{{.Tag}}" "$IMAGE_NAME" | \
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | \
+            sort -V | \
+            tail -1)
+    fi
+    
+    echo "$version"
+}
+
+# Get the latest version from GitHub Container Registry
+get_remote_version() {
+    # Query GitHub Container Registry API for available tags
+    local repo_name="dillinger/core"
+    local latest_version=$(curl -s "https://ghcr.io/v2/thrane20/dillinger/core/tags/list" 2>/dev/null | \
+        grep -o '"v[0-9]*\.[0-9]*\.[0-9]*"' | \
+        tr -d '"' | \
+        sort -V | \
+        tail -1)
+    
+    echo "$latest_version"
+}
+
+# Compare semantic versions
+version_greater() {
+    # Returns 0 (true) if $1 > $2
+    local ver1=$1
+    local ver2=$2
+    
+    # Remove 'v' prefix if present
+    ver1=${ver1#v}
+    ver2=${ver2#v}
+    
+    # Use sort -V to compare versions
+    if [ "$ver1" = "$ver2" ]; then
+        return 1  # versions are equal
+    fi
+    
+    local highest=$(printf "%s\n%s" "$ver1" "$ver2" | sort -V | tail -1)
+    
+    if [ "$highest" = "$ver1" ]; then
+        return 0  # ver1 is greater
+    else
+        return 1  # ver2 is greater or equal
+    fi
+}
+
+# Check if image exists locally and if there's an update available
 check_image() {
     print_info "Checking for Dillinger image..."
     
@@ -138,13 +194,52 @@ check_image() {
     else
         print_success "Image exists locally"
         
-        # Ask if user wants to update
-        read -p "Update to latest version? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Pulling latest image..."
-            docker pull "$IMAGE_NAME:$IMAGE_TAG"
-            print_success "Image updated"
+        # Check for updates
+        print_info "Checking for updates..."
+        
+        local current_version=$(get_local_version)
+        local remote_version=$(get_remote_version)
+        
+        if [ -n "$current_version" ]; then
+            print_info "Current version: $current_version"
+        else
+            print_info "Current version: unknown (using :latest tag)"
+            current_version="v0.0.0"
+        fi
+        
+        if [ -n "$remote_version" ]; then
+            print_info "Latest version:  $remote_version"
+            
+            # Compare versions
+            if version_greater "$remote_version" "$current_version"; then
+                echo ""
+                print_warning "A new version of Dillinger Core is available!"
+                echo ""
+                read -p "Do you want to download version $remote_version? [y/N] " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    print_info "Pulling latest image..."
+                    if docker pull "$IMAGE_NAME:$IMAGE_TAG"; then
+                        print_success "Image updated to $remote_version"
+                    else
+                        print_error "Failed to pull update"
+                        print_info "Continuing with current version..."
+                    fi
+                else
+                    print_info "Skipping update, using current version"
+                fi
+            else
+                print_success "You are running the latest version"
+            fi
+        else
+            print_warning "Could not check for updates (registry unavailable)"
+            echo ""
+            read -p "Pull latest image anyway? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Pulling latest image..."
+                docker pull "$IMAGE_NAME:$IMAGE_TAG"
+            fi
         fi
     fi
 }

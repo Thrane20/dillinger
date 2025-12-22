@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import FileExplorer from './FileExplorer';
 import type { VolumePurpose } from '@dillinger/shared';
 
@@ -24,7 +25,7 @@ interface DockerVolume {
 // Volume Section Component
 function VolumeSection({
   title,
-  purpose,
+  description,
   volumes,
   onAdd,
   onLink,
@@ -33,7 +34,7 @@ function VolumeSection({
   showLink = false,
 }: {
   title: string;
-  purpose: VolumePurpose;
+  description?: string;
   volumes: Volume[];
   onAdd: () => void;
   onLink?: () => void;
@@ -46,6 +47,14 @@ function VolumeSection({
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-semibold text-text flex items-center gap-1.5">
           {title}
+          {description && (
+            <span className="group relative">
+              <InformationCircleIcon className="w-3.5 h-3.5 text-muted hover:text-text cursor-help" />
+              <span className="invisible group-hover:visible absolute left-0 top-5 z-50 w-64 p-2 text-xs font-normal bg-gray-900 dark:bg-gray-700 text-white rounded shadow-lg">
+                {description}
+              </span>
+            </span>
+          )}
           {recommended && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
               Recommended
@@ -428,7 +437,7 @@ export default function LeftSidebar() {
                     {/* Installers Section */}
                     <VolumeSection
                       title="Installers"
-                      purpose="installers"
+                      description="Where you place your .msi and .exe files for installation. These are the game setup files before they're installed."
                       volumes={volumes.filter((v) => v.purpose === 'installers')}
                       onAdd={() => handleAddVolume('installers')}
                       onLink={() => handleReassignVolume('installers')}
@@ -440,7 +449,7 @@ export default function LeftSidebar() {
                     {/* Installed Games Section */}
                     <VolumeSection
                       title="Installed Games"
-                      purpose="installed"
+                      description="Where your installed Wine applications and games are stored. This is the final destination after installation from setup files."
                       volumes={volumes.filter((v) => v.purpose === 'installed')}
                       onAdd={() => handleAddVolume('installed')}
                       onLink={() => handleReassignVolume('installed')}
@@ -452,7 +461,7 @@ export default function LeftSidebar() {
                     {/* ROMs Section */}
                     <VolumeSection
                       title="ROMs"
-                      purpose="roms"
+                      description="Storage for game ROM files used by emulators (Commodore, Amiga, arcade, etc.). These are game images, not installers."
                       volumes={volumes.filter((v) => v.purpose === 'roms')}
                       onAdd={() => handleAddVolume('roms')}
                       onLink={() => handleReassignVolume('roms')}
@@ -464,7 +473,6 @@ export default function LeftSidebar() {
                     {/* Other Section */}
                     <VolumeSection
                       title="Other"
-                      purpose="other"
                       volumes={volumes.filter((v) => v.purpose === 'other')}
                       onAdd={() => handleAddVolume('other')}
                       onRemove={handleRemoveVolume}
