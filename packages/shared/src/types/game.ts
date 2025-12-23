@@ -1,12 +1,83 @@
 import type { VersionedData } from './schema-version.js';
 
+// ============================================================================
+// Wine Version Management Types
+// ============================================================================
+
+/** Types of Wine installations supported */
+export type WineVersionType = 'system' | 'wine-staging' | 'ge-proton';
+
+/** An installed Wine version on the system */
+export interface InstalledWineVersion {
+  /** Unique identifier, e.g., "system", "ge-proton-10-27", "wine-staging-9.22" */
+  id: string;
+  /** Type of Wine installation */
+  type: WineVersionType;
+  /** Version string, e.g., "10-27", "9.22", "9.21" */
+  version: string;
+  /** Human-readable display name */
+  displayName: string;
+  /** Path to the Wine installation directory */
+  path: string;
+  /** ISO timestamp when this version was installed */
+  installedAt: string;
+  /** Whether this version uses UMU launcher (true for GE-Proton) */
+  usesUmu: boolean;
+  /** Release notes or changelog excerpt */
+  releaseNotes?: string;
+}
+
+/** Available Wine version that can be downloaded */
+export interface AvailableWineVersion {
+  /** Type of Wine */
+  type: WineVersionType;
+  /** Version string */
+  version: string;
+  /** Human-readable display name */
+  displayName: string;
+  /** Download URL for the tarball */
+  downloadUrl: string;
+  /** Size in bytes */
+  size?: number;
+  /** ISO timestamp of release */
+  releaseDate: string;
+  /** Checksum URL (SHA512 for GE-Proton) */
+  checksumUrl?: string;
+  /** Release notes or changelog */
+  releaseNotes?: string;
+}
+
+/** Index file stored at /data/storage/wine-versions/index.json */
+export interface WineVersionIndex {
+  /** Schema version for migrations */
+  schemaVersion: string;
+  /** List of installed Wine versions */
+  installedVersions: InstalledWineVersion[];
+  /** ID of the default Wine version */
+  defaultVersionId: string;
+  /** Cache of available versions from remote sources */
+  availableCache: {
+    /** GE-Proton releases from GitHub */
+    geProton: AvailableWineVersion[];
+    /** Wine Staging releases */
+    wineStaging: AvailableWineVersion[];
+    /** ISO timestamp of last refresh */
+    lastRefreshed: string;
+  };
+}
+
+// ============================================================================
+// Game Platform Configuration Types
+// ============================================================================
+
 // Platform-specific configuration for a game
 export interface GamePlatformConfig {
   platformId: string; // Reference to Platform entity
   filePath?: string; // Absolute path to executable/ROM (platform-specific)
   settings?: {
     wine?: {
-      version?: string; // Wine version for Windows games
+      version?: string; // Wine version ID (e.g., "system", "ge-proton-10-27")
+      umuGameId?: string; // UMU Game ID for protonfixes (e.g., "umu-skyrim"), defaults to umu-{game.slug}
       prefix?: string; // Wine prefix configuration
       dlls?: Record<string, string>; // DLL overrides (e.g., {"ddraw": "native", "d3d9": "native,builtin"})
       arch?: 'win32' | 'win64'; // Wine architecture (WINEARCH)

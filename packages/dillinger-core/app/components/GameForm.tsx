@@ -8,6 +8,7 @@ import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
 import ContainerLogsDialog from './ContainerLogsDialog';
+import WineVersionSelector from './WineVersionSelector';
 import Link from 'next/link';
 
 interface GameFormData {
@@ -31,6 +32,8 @@ interface GameFormData {
   };
   settings?: {
     wine?: {
+      version?: string; // Wine version ID (e.g., "system", "ge-proton-10-27")
+      umuGameId?: string; // UMU Game ID for protonfixes
       arch?: 'win32' | 'win64';
       useDxvk?: boolean;
       renderer?: 'vulkan' | 'opengl';
@@ -152,6 +155,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     },
     settings: {
       wine: {
+        version: undefined,
+        umuGameId: undefined,
         arch: 'win64',
         renderer: 'vulkan',
         debug: {},
@@ -257,6 +262,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 },
                 settings: {
                   wine: {
+                    version: activeSettings?.wine?.version,
+                    umuGameId: activeSettings?.wine?.umuGameId,
                     arch: activeSettings?.wine?.arch || 'win64',
                     useDxvk: activeSettings?.wine?.useDxvk || false,
                     renderer: activeSettings?.wine?.renderer || 'vulkan',
@@ -1130,6 +1137,28 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           {!['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
             <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
               <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
+
+              {/* Wine Version Selection - only show for Wine platform */}
+              {formData.platformId === 'windows-wine' && (
+                <WineVersionSelector
+                  value={formData.settings?.wine?.version || 'default'}
+                  umuGameId={formData.settings?.wine?.umuGameId || ''}
+                  gameSlug={formData.slug || ''}
+                  onChange={(versionId, umuGameId) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      settings: {
+                        ...prev.settings,
+                        wine: {
+                          ...prev.settings?.wine,
+                          version: versionId === 'default' ? undefined : versionId,
+                          umuGameId: umuGameId || undefined,
+                        },
+                      },
+                    }));
+                  }}
+                />
+              )}
 
               {/* Wine Installation Helper */}
               {formData.platformId === 'windows-wine' && mode === 'edit' && gameId && (

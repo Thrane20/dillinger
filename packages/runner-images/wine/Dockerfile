@@ -44,6 +44,9 @@ LIB32_PKGS=(
     lib32-gst-plugins-base-libs
     lib32-vulkan-icd-loader
     lib32-sdl2
+    lib32-mesa
+    lib32-mesa-utils
+    lib32-libglvnd
 )
 
 # Utilities for Windows software installation
@@ -85,6 +88,53 @@ RUN set -e && \
     echo "DXVK can be installed per-prefix using winetricks dxvk"
 
 #######################################################
+# Install UMU Launcher for GE-Proton support
+# Required for running GE-Proton outside of Steam
+# https://github.com/Open-Wine-Components/umu-launcher
+#######################################################
+
+RUN <<_INSTALL_UMU
+set -e
+echo "**** Installing UMU Launcher ****"
+
+# Install Python dependencies for UMU
+pacman -S --noconfirm --needed \
+    python \
+    python-pip \
+    python-xlib \
+    python-filelock \
+    python-urllib3 \
+    git
+
+# Install UMU from PyPI (most reliable method)
+pip install --break-system-packages umu-launcher || {
+    echo "PyPI install failed, trying from GitHub..."
+    
+    # Clone and install from source
+    cd /tmp
+    git clone --depth 1 https://github.com/Open-Wine-Components/umu-launcher.git
+    cd umu-launcher
+    pip install --break-system-packages . || python -m pip install --break-system-packages .
+    cd /
+    rm -rf /tmp/umu-launcher
+}
+
+# Create directory structure for Wine versions
+mkdir -p /opt/wine-versions
+
+# Verify installation
+if command -v umu-run &>/dev/null; then
+    echo "✓ umu-run installed successfully"
+    umu-run --version 2>/dev/null || true
+else
+    echo "⚠ umu-run not in PATH, checking Python module..."
+    python -c "import umu" && echo "✓ UMU Python module available" || echo "⚠ UMU module not found"
+fi
+
+echo "**** UMU setup complete ****"
+_INSTALL_UMU
+
+#######################################################
 # Configure Wine defaults
 #######################################################
 
@@ -94,9 +144,13 @@ ENV WINEPREFIX=/wineprefix \
     WINEDEBUG=-all \
     WINE_LARGE_ADDRESS_AWARE=1
 
-# Create default Wine prefix structure
+# Create default Wine prefix structure and generate machine-id
+# machine-id is needed by Steam Runtime's dbus/launcher-service
 RUN mkdir -p /wineprefix && \
-    chown -R gameuser:gameuser /wineprefix
+    chown -R gameuser:gameuser /wineprefix && \
+    dbus-uuidgen > /etc/machine-id && \
+    mkdir -p /var/lib/dbus && \
+    ln -sf /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null || true
 
 #######################################################
 # Copy Wine-specific entrypoint

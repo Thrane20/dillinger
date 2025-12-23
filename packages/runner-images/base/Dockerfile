@@ -31,8 +31,10 @@ ENV PUID=1000 \
 # Update system and install base packages + gosu
 RUN set -e && \
     echo "**** Configure pacman (enable multilib) ****" && \
-    sed -i 's/^#\[multilib\]/[multilib]/' /etc/pacman.conf && \
-    sed -i '/^\[multilib\]$/,/^Include/s/^#Include/Include/' /etc/pacman.conf && \
+    # The Arch Docker image doesn't have multilib section, so add it
+    echo "" >> /etc/pacman.conf && \
+    echo "[multilib]" >> /etc/pacman.conf && \
+    echo "Include = /etc/pacman.d/mirrorlist" >> /etc/pacman.conf && \
     \
     echo "**** Configure pacman defaults (parallel downloads + candy) ****" && \
     sed -i 's/^#ParallelDownloads = .*/ParallelDownloads = 10/' /etc/pacman.conf && \

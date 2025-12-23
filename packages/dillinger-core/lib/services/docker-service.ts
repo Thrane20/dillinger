@@ -786,6 +786,20 @@ export class DockerService {
       logger.info(`  DXVK enabled (DirectX to Vulkan translation)`);
     }
 
+    // Add Wine version selection (for GE-Proton / UMU launcher support)
+    if (wineConfig?.version && wineConfig.version !== 'system') {
+      env.push(`WINE_VERSION_ID=${wineConfig.version}`);
+      logger.info(`  Wine version: ${wineConfig.version}`);
+      
+      // If using GE-Proton (starts with "ge-proton"), also set UMU game ID
+      if (wineConfig.version.startsWith('ge-proton')) {
+        const umuGameId = wineConfig.umuGameId || `umu-${game.slug || game.id}`;
+        env.push(`UMU_GAME_ID=${umuGameId}`);
+        env.push(`GAME_SLUG=${game.slug || game.id}`);
+        logger.info(`  UMU Game ID: ${umuGameId}`);
+      }
+    }
+
     // Add Wine DLL overrides if configured
     if (wineConfig?.dlls && Object.keys(wineConfig.dlls).length > 0) {
       const dllOverrides = Object.entries(wineConfig.dlls)

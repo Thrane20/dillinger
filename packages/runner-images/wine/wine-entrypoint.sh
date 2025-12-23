@@ -147,7 +147,21 @@ PGID="${PGID:-1000}"
 # Export display and audio variables if they exist
 export DISPLAY="${DISPLAY:-:0}"
 export PULSE_SERVER="${PULSE_SERVER:-unix:/run/user/1000/pulse/native}"
-export PULSE_COOKIE="${PULSE_COOKIE:-/home/${UNAME}/.config/pulse/cookie}"
+
+# Set up PulseAudio cookie path
+# The cookie might be mounted from host, or might be a mis-created directory
+PULSE_COOKIE_PATH="/home/${UNAME}/.config/pulse/cookie"
+if [ -d "$PULSE_COOKIE_PATH" ] && ! mountpoint -q "$PULSE_COOKIE_PATH" 2>/dev/null; then
+    # It's a directory but not a mount point - safe to remove
+    rm -rf "$PULSE_COOKIE_PATH" 2>/dev/null || true
+fi
+# Only create if it doesn't exist (don't mess with mounted files/dirs)
+if [ ! -e "$PULSE_COOKIE_PATH" ]; then
+    mkdir -p "$(dirname "$PULSE_COOKIE_PATH")" 2>/dev/null || true
+    touch "$PULSE_COOKIE_PATH" 2>/dev/null || true
+fi
+chown -R "${UNAME}:${UNAME}" "/home/${UNAME}/.config/pulse" 2>/dev/null || true
+export PULSE_COOKIE="$PULSE_COOKIE_PATH"
 
 # Set XAUTHORITY if xauth file is mounted
 if [ -f "/home/${UNAME}/.Xauthority" ]; then
@@ -165,6 +179,243 @@ echo ""
 #######################################################
 
 echo -e "${BLUE}Configuring Wine environment...${NC}"
+
+#######################################################
+# Wine Version Selection
+# 
+# Environment Variables:
+#   WINE_VERSION_ID - ID of the Wine version to use (e.g., "system", "ge-proton-10-27")
+#   WINE_VERSION_PATH - Direct path to Wine installation (overrides WINE_VERSION_ID)
+#   WINE_VERSIONS_DIR - Directory containing installed Wine versions (default: /data/storage/wine-versions)
+#   UMU_GAME_ID - UMU Game ID for protonfixes (used with GE-Proton)
+#   GAME_SLUG - Game slug fallback for UMU_GAME_ID
+#######################################################
+
+# Wine versions storage
+WINE_VERSIONS_DIR="${WINE_VERSIONS_DIR:-/data/storage/wine-versions}"
+WINE_VERSION_ID="${WINE_VERSION_ID:-system}"
+WINE_VERSION_PATH="${WINE_VERSION_PATH:-}"
+
+# Function to select Wine binary based on version
+select_wine_version() {
+    local version_id="$1"
+    local version_path="$2"
+    
+    # If direct path is provided, use it
+    if [ -n "$version_path" ] && [ -d "$version_path" ]; then
+        echo -e "${BLUE}Using Wine version from path: ${version_path}${NC}"
+        export WINE_BINARY="${version_path}/bin/wine"
+        export WINE64_BINARY="${version_path}/bin/wine64"
+        export WINESERVER_BINARY="${version_path}/bin/wineserver"
+        export PROTON_PATH="$version_path"
+        return 0
+    fi
+    
+    # System Wine (default)
+    if [ "$version_id" = "system" ]; then
+        echo -e "${BLUE}Using System Wine (built-in)${NC}"
+        export WINE_BINARY="wine"
+        export WINE64_BINARY="wine64"
+        export WINESERVER_BINARY="wineserver"
+        export PROTON_PATH=""
+        return 0
+    fi
+    
+    # Check for installed version in versions directory
+    local installed_path="${WINE_VERSIONS_DIR}/${version_id}"
+    
+    if [ -d "$installed_path" ]; then
+        echo -e "${BLUE}Using installed Wine version: ${version_id}${NC}"
+        echo "  Path: ${installed_path}"
+        
+        # Detect if this is a GE-Proton version
+        if [[ "$version_id" == ge-proton* ]]; then
+            # GE-Proton structure
+            export WINE_BINARY="${installed_path}/files/bin/wine"
+            export WINE64_BINARY="${installed_path}/files/bin/wine64"
+            export WINESERVER_BINARY="${installed_path}/files/bin/wineserver"
+            export PROTON_PATH="$installed_path"
+            export USE_UMU="true"
+        else
+            # Standard Wine structure
+            export WINE_BINARY="${installed_path}/bin/wine"
+            export WINE64_BINARY="${installed_path}/bin/wine64"
+            export WINESERVER_BINARY="${installed_path}/bin/wineserver"
+            export PROTON_PATH=""
+        fi
+        return 0
+    fi
+    
+    # Version not found, fall back to system
+    echo -e "${YELLOW}⚠ Wine version '${version_id}' not found, falling back to System Wine${NC}"
+    export WINE_BINARY="wine"
+    export WINE64_BINARY="wine64"
+    export WINESERVER_BINARY="wineserver"
+    export PROTON_PATH=""
+    return 1
+}
+
+# Select Wine version
+select_wine_version "$WINE_VERSION_ID" "$WINE_VERSION_PATH"
+
+# Display selected version
+if [ -n "$PROTON_PATH" ]; then
+    echo "  Wine type: GE-Proton"
+    echo "  Proton path: $PROTON_PATH"
+    if [ -x "$WINE_BINARY" ]; then
+        WINE_VER=$("$WINE_BINARY" --version 2>/dev/null || echo "unknown")
+        echo "  Wine version: $WINE_VER"
+    fi
+else
+    echo "  Wine type: System"
+    WINE_VER=$(wine --version 2>/dev/null || echo "unknown")
+    echo "  Wine version: $WINE_VER"
+fi
+
+#######################################################
+# UMU Launcher Configuration (for GE-Proton)
+# https://github.com/Open-Wine-Components/umu-launcher
+#######################################################
+
+USE_UMU="${USE_UMU:-false}"
+UMU_GAME_ID="${UMU_GAME_ID:-}"
+GAME_SLUG="${GAME_SLUG:-}"
+
+# Configure UMU if using GE-Proton
+if [ "$USE_UMU" = "true" ] && command -v umu-run &> /dev/null; then
+    echo -e "${BLUE}Configuring UMU Launcher for GE-Proton...${NC}"
+    
+    # Set UMU Game ID (for protonfixes)
+    if [ -z "$UMU_GAME_ID" ] && [ -n "$GAME_SLUG" ]; then
+        UMU_GAME_ID="umu-${GAME_SLUG}"
+    fi
+    
+    if [ -n "$UMU_GAME_ID" ]; then
+        export GAMEID="$UMU_GAME_ID"
+        echo "  UMU Game ID: $GAMEID"
+    else
+        export GAMEID="0"
+        echo "  UMU Game ID: 0 (no protonfixes)"
+    fi
+    
+    # Set Proton path for UMU
+    export PROTONPATH="$PROTON_PATH"
+    echo "  Proton path: $PROTONPATH"
+    
+    # Configure UMU data directories
+    # Store UMU runtime in dillinger_root for persistence across containers
+    # IMPORTANT: We use /data/storage as XDG_DATA_HOME so UMU puts its data at /data/storage/umu
+    # This avoids symlinks which don't work inside pressure-vessel (Steam Runtime container)
+    UMU_DATA_DIR="/data/storage/umu"
+    mkdir -p "$UMU_DATA_DIR"
+    
+    # CRITICAL: Ensure UMU directory is owned by gameuser
+    # The Steam Runtime creates files that UMU needs to write to (lock files, shims)
+    chown -R gameuser:gameuser "$UMU_DATA_DIR" 2>/dev/null || true
+    
+    # Set XDG_DATA_HOME to /data/storage so UMU uses /data/storage/umu directly
+    # This path is accessible from both the host container and pressure-vessel
+    export XDG_DATA_HOME="/data/storage"
+    export XDG_CACHE_HOME="/home/gameuser/.cache"
+    export HOME="/home/gameuser"
+    
+    # Create cache directory
+    mkdir -p /home/gameuser/.cache
+    chown -R gameuser:gameuser /home/gameuser/.cache 2>/dev/null || true
+    
+    # Check if Steam Runtime needs to be downloaded (first run)
+    if [ ! -f "$UMU_DATA_DIR/steamrt3/toolmanifest.vdf" ]; then
+        echo -e "${BLUE}Downloading Steam Runtime for UMU (first run)...${NC}"
+        echo "  This may take several minutes (~500MB download)..."
+        
+        # Bootstrap using Python to call setup_umu directly
+        # This bypasses the bug in umu-run where resolve_runtime is called before setup_umu
+        python3 << 'PYEOF'
+import os
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from urllib3 import PoolManager, Timeout
+from urllib3.util.retry import Retry
+
+os.environ['HOME'] = '/home/gameuser'
+os.environ['XDG_DATA_HOME'] = '/data/storage'
+
+from umu.umu_runtime import setup_umu, RUNTIME_VERSIONS
+
+# Get steamrt3/sniper runtime info (required by GE-Proton)
+runtime_info = RUNTIME_VERSIONS['1628350']
+runtime_version = runtime_info.as_tuple()
+print(f"  Runtime: {runtime_version[0]} ({runtime_version[1]})")
+
+local = Path('/data/storage/umu') / runtime_version[1]
+local.mkdir(parents=True, exist_ok=True)
+
+thread_pool = ThreadPoolExecutor()
+http_pool = PoolManager(
+    timeout=Timeout(connect=60.0, read=120.0),
+    retries=Retry(total=3, redirect=True),
+)
+
+try:
+    with thread_pool, http_pool:
+        session_pools = (thread_pool, http_pool)
+        setup_umu(local, runtime_version, session_pools)
+    print("  Runtime download complete!")
+except Exception as e:
+    print(f"  Runtime download failed: {e}")
+    exit(1)
+PYEOF
+        
+        if [ $? -eq 0 ] && [ -f "$UMU_DATA_DIR/steamrt3/toolmanifest.vdf" ]; then
+            # CRITICAL: Fix ownership of downloaded files so gameuser can write lock files/shims
+            chown -R gameuser:gameuser "$UMU_DATA_DIR" 2>/dev/null || true
+            echo -e "${GREEN}✓ Steam Runtime downloaded successfully${NC}"
+        else
+            echo -e "${YELLOW}⚠ Steam Runtime download failed, falling back to direct Wine${NC}"
+            USE_UMU="false"
+        fi
+    else
+        echo "  Steam Runtime already available"
+        # Ensure ownership is correct even for existing runtime
+        chown -R gameuser:gameuser "$UMU_DATA_DIR" 2>/dev/null || true
+    fi
+    
+    # Verify UMU is working
+    if [ "$USE_UMU" = "true" ] && [ -f "$UMU_DATA_DIR/steamrt3/toolmanifest.vdf" ]; then
+        # UMU-specific wrapper function
+        umu_wine() {
+            umu-run "$@"
+        }
+        
+        # Override wine commands to use UMU
+        wine() {
+            umu-run "$@"
+        }
+        
+        export -f wine umu_wine
+        echo -e "${GREEN}✓ UMU Launcher configured${NC}"
+    elif [ "$USE_UMU" = "true" ]; then
+        echo -e "${YELLOW}⚠ UMU Steam Runtime not available, using GE-Proton directly${NC}"
+        USE_UMU="false"
+        
+        # Set up direct GE-Proton wine binaries
+        if [ -x "$WINE_BINARY" ]; then
+            echo "  Using GE-Proton Wine directly: $WINE_BINARY"
+            wine() {
+                "$WINE_BINARY" "$@"
+            }
+            export -f wine
+        else
+            echo -e "${YELLOW}⚠ GE-Proton wine binary not found, falling back to system Wine${NC}"
+            export WINE_BINARY="wine"
+        fi
+    fi
+elif [ "$USE_UMU" = "true" ]; then
+    echo -e "${YELLOW}⚠ UMU requested but umu-run not found, using standard Wine${NC}"
+    USE_UMU="false"
+fi
+
+echo ""
 
 # Set Wine defaults if not already set
 WINEPREFIX="${WINEPREFIX:-/wineprefix}"
