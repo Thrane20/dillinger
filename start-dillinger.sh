@@ -5,7 +5,7 @@
 set -e
 
 # Script version (update this when publishing new versions)
-SCRIPT_VERSION="0.1.1"
+SCRIPT_VERSION="0.1.2"
 
 # Colors for output
 RED='\033[0;31m'
@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 IMAGE_NAME="ghcr.io/thrane20/dillinger/core"
-IMAGE_TAG="latest"
+IMAGE_TAG=""  # Will be set from versioning.env
 CONTAINER_NAME="dillinger"
 PORT="3010"
 VOLUME_NAME="dillinger_root"
@@ -274,10 +274,10 @@ version_greater() {
 
 # Check if image exists locally and if there's an update available
 check_image() {
-    print_info "Checking for Dillinger image..."
+    print_info "Checking for Dillinger image $IMAGE_NAME:$IMAGE_TAG..."
     
     if ! docker image inspect "$IMAGE_NAME:$IMAGE_TAG" &> /dev/null; then
-        print_warning "Image not found locally"
+        print_warning "Image $IMAGE_NAME:$IMAGE_TAG not found locally"
         print_info "Pulling $IMAGE_NAME:$IMAGE_TAG..."
         
         if docker pull "$IMAGE_NAME:$IMAGE_TAG"; then
@@ -287,53 +287,32 @@ check_image() {
             exit 1
         fi
     else
-        print_success "Image exists locally"
+        print_success "Image $IMAGE_NAME:$IMAGE_TAG exists locally"
         
-        # Check for updates
-        print_info "Checking for updates..."
-        
+        # Check what version we currently have running (if any)
         local current_version=$(get_latest_local_version)
-        local remote_version=$(get_remote_version)
         
-        if [ -n "$current_version" ]; then
-            print_info "Current version: $current_version"
-        else
-            print_info "Current version: unknown (using :latest tag)"
-            current_version="v0.0.0"
-        fi
-        
-        if [ -n "$remote_version" ]; then
-            print_info "Latest version:  $remote_version"
+        if [ -n "$current_version" ] && [ "$current_version" != "$IMAGE_TAG" ]; then
+            print_info "Local version: $current_version"
+            print_info "Target version: $IMAGE_TAG"
             
-            # Compare versions
-            if version_greater "$remote_version" "$current_version"; then
+            if version_greater "$IMAGE_TAG" "$current_version"; then
                 echo ""
-                print_warning "A new version of Dillinger Core is available!"
+                print_warning "A newer version is available!"
                 echo ""
-                read -p "Do you want to download version $remote_version? [y/N] " -n 1 -r
+                read -p "Do you want to download $IMAGE_TAG? [y/N] " -n 1 -r
                 echo
                 if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    print_info "Pulling latest image..."
+                    print_info "Pulling $IMAGE_NAME:$IMAGE_TAG..."
                     if docker pull "$IMAGE_NAME:$IMAGE_TAG"; then
-                        print_success "Image updated to $remote_version"
+                        print_success "Image updated to $IMAGE_TAG"
                     else
                         print_error "Failed to pull update"
                         print_info "Continuing with current version..."
                     fi
                 else
-                    print_info "Skipping update, using current version"
+                    print_info "Skipping update, using current local version"
                 fi
-            else
-                print_success "You are running the latest version"
-            fi
-        else
-            print_warning "Could not check for updates (registry unavailable)"
-            echo ""
-            read -p "Pull latest image anyway? [y/N] " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                print_info "Pulling latest image..."
-                docker pull "$IMAGE_NAME:$IMAGE_TAG"
             fi
         fi
     fi
@@ -379,14 +358,71 @@ check_existing_container() {
 start_container() {
     print_info "Starting Dillinger..."
     
-    if docker run -d \
-        --name "$CONTAINER_NAME" \
-        -p "$PORT:3010" \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v "$VOLUME_NAME:/data" \
-        --restart unless-stopped \
-        "$IMAGE_NAME:$IMAGE_TAG" &> /dev/null; then
+    # Build docker run arguments
+    local DOCKER_ARGS="-d --name $CONTAINER_NAME"
+    DOCKER_ARGS="$DOCKER_ARGS -p $PORT:3010"
+    DOCKER_ARGS="$DOCKER_ARGS -v /var/run/docker.sock:/var/run/docker.sock"
+    DOCKER_ARGS="$DOCKER_ARGS -v $VOLUME_NAME:/data"
+    DOCKER_ARGS="$DOCKER_ARGS --restart unless-stopped"
+    
+    # X11 Display passthrough for GUI games
+    if [ -n "$DISPLAY" ]; then
+        print_info "Configuring X11 display passthrough..."
+        DOCKER_ARGS="$DOCKER_ARGS -e DISPLAY=$DISPLAY"
+        DOCKER_ARGS="$DOCKER_ARGS -v /tmp/.X11-unix:/tmp/.X11-unix:rw"
         
+        # Pass Xauthority if it exists
+        local XAUTH="${XAUTHORITY:-$HOME/.Xauthority}"
+        if [ -f "$XAUTH" ]; then
+            DOCKER_ARGS="$DOCKER_ARGS -e XAUTHORITY=/tmp/.Xauthority"
+            DOCKER_ARGS="$DOCKER_ARGS -v $XAUTH:/tmp/.Xauthority:ro"
+            print_success "X11 authentication configured"
+        else
+            print_warning "No Xauthority file found, you may need: xhost +local:docker"
+        fi
+        print_success "X11 display: $DISPLAY"
+    else
+        print_warning "No DISPLAY set - GUI games will not have display passthrough"
+        echo "  Run this script from a graphical session for full functionality"
+    fi
+    
+    # GPU passthrough
+    if [ -d "/dev/dri" ]; then
+        DOCKER_ARGS="$DOCKER_ARGS --device /dev/dri:/dev/dri"
+        print_success "GPU passthrough enabled"
+    else
+        print_warning "No GPU device found at /dev/dri"
+    fi
+    
+    # Audio passthrough (PulseAudio)
+    local XDG_RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -d "$XDG_RUNTIME/pulse" ]; then
+        DOCKER_ARGS="$DOCKER_ARGS -v $XDG_RUNTIME/pulse:/run/user/1000/pulse:rw"
+        DOCKER_ARGS="$DOCKER_ARGS -e PULSE_SERVER=unix:/run/user/1000/pulse/native"
+        
+        # PulseAudio cookie
+        if [ -f "$HOME/.config/pulse/cookie" ]; then
+            DOCKER_ARGS="$DOCKER_ARGS -v $HOME/.config/pulse/cookie:/home/gameuser/.config/pulse/cookie:ro"
+        fi
+        print_success "PulseAudio passthrough enabled"
+    else
+        print_warning "No PulseAudio socket found"
+    fi
+    
+    # Sound device
+    if [ -d "/dev/snd" ]; then
+        DOCKER_ARGS="$DOCKER_ARGS --device /dev/snd:/dev/snd"
+        print_success "Sound device passthrough enabled"
+    fi
+    
+    # Input devices (for gamepads/joysticks)
+    if [ -d "/dev/input" ]; then
+        DOCKER_ARGS="$DOCKER_ARGS --device /dev/input:/dev/input"
+        print_success "Input device passthrough enabled"
+    fi
+    
+    echo ""
+    if eval docker run $DOCKER_ARGS "$IMAGE_NAME:$IMAGE_TAG" > /dev/null 2>&1; then
         print_success "Container started successfully"
     else
         print_error "Failed to start container"
@@ -443,6 +479,18 @@ show_success_message() {
 # Main execution
 main() {
     print_header "Dillinger Setup Script v${SCRIPT_VERSION}"
+    
+    # Fetch target version from GitHub versioning.env
+    print_info "Fetching latest version info..."
+    local remote_version=$(get_remote_version)
+    if [ -n "$remote_version" ]; then
+        IMAGE_TAG="${remote_version}"
+        print_success "Target version: $IMAGE_TAG"
+    else
+        print_error "Could not determine target version from GitHub"
+        print_info "Please check your internet connection"
+        exit 1
+    fi
     
     check_script_update
     check_docker

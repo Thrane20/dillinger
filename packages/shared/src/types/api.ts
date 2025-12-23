@@ -47,11 +47,14 @@ export interface InstallGameRequest {
   installPath: string; // Target installation directory
   platformId: string; // Platform to use for installation
   installerArgs?: string; // Optional installer arguments (e.g. /S, /VERYSILENT)
+  debugMode?: boolean; // If true, keep container after exit for debugging
 }
 
 export interface InstallGameResponse {
   success: boolean;
   containerId?: string;
+  containerName?: string; // Container name for debugging (e.g., dillinger-install-debug-xxx)
+  debugMode?: boolean; // True if debug mode was enabled
   message?: string;
   error?: string;
 }

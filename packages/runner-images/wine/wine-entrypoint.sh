@@ -450,9 +450,23 @@ if [ -e "$WINEPREFIX" ]; then
     PREFIX_OWNER_UID=$(stat -c "%u" "$WINEPREFIX" 2>/dev/null || echo "?")
     PREFIX_OWNER_GID=$(stat -c "%g" "$WINEPREFIX" 2>/dev/null || echo "?")
     CURRENT_UID=$(id -u)
-    if [ "$PREFIX_OWNER_UID" != "?" ] && [ "$PREFIX_OWNER_UID" != "$CURRENT_UID" ]; then
-        echo -e "${YELLOW}⚠ Wine prefix ownership mismatch: owner=${PREFIX_OWNER_UID}:${PREFIX_OWNER_GID} current=${CURRENT_UID} (Wine may refuse to run)${NC}"
-        echo -e "${YELLOW}  Tip: ensure the host prefix dir is owned by uid=${PUID:-1000} gid=${PGID:-1000}, or run the container entrypoint as root so it can chown.${NC}"
+    TARGET_UID="${PUID:-1000}"
+    
+    # Note: entrypoint runs as root for setup, but gosu switches to gameuser (PUID) for Wine
+    if [ "$PREFIX_OWNER_UID" != "?" ] && [ "$PREFIX_OWNER_UID" != "$TARGET_UID" ]; then
+        echo -e "${YELLOW}⚠ Wine prefix owned by uid=${PREFIX_OWNER_UID}:${PREFIX_OWNER_GID}, gameuser is uid=${TARGET_UID}${NC}"
+        
+        # Try to fix ownership if running as root
+        if [ "$CURRENT_UID" = "0" ]; then
+            echo -e "${BLUE}  Attempting to fix Wine prefix ownership...${NC}"
+            if chown -R "$TARGET_UID:${PGID:-1000}" "$WINEPREFIX" 2>/dev/null; then
+                echo -e "${GREEN}  ✓ Wine prefix ownership fixed to ${TARGET_UID}:${PGID:-1000}${NC}"
+            else
+                echo -e "${YELLOW}  ⚠ Could not fix ownership - Wine may fail if prefix is not accessible${NC}"
+            fi
+        else
+            echo -e "${YELLOW}  Tip: ensure the host prefix dir is owned by uid=${TARGET_UID} gid=${PGID:-1000}${NC}"
+        fi
     fi
 fi
 
@@ -705,8 +719,17 @@ if [ "$#" -gt 0 ]; then
     fi
 
     CHILD_PID=$!
+    echo -e "${BLUE}Process started with PID: $CHILD_PID${NC}"
+    echo -e "${BLUE}Waiting for process to complete...${NC}"
     wait "$CHILD_PID"
     EXIT_CODE=$?
+    
+    echo ""
+    if [ $EXIT_CODE -eq 0 ]; then
+        echo -e "${GREEN}✓ Command completed successfully (exit code: 0)${NC}"
+    else
+        echo -e "${YELLOW}⚠ Command exited with code: $EXIT_CODE${NC}"
+    fi
     
     # Wait for Wine to finish writing registry and other files
     echo ""

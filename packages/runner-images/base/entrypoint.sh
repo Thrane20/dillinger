@@ -200,9 +200,6 @@ setup_gpu() {
     local HAS_AMD_PCI="false"
     if command -v lspci >/dev/null 2>&1 && lspci 2>/dev/null | grep -Ei "VGA|3D" | grep -i "AMD" >/dev/null; then
         HAS_AMD_PCI="true"
-        local HAS_AMD_PCI="false"
-    if command -v lspci >/dev/null 2>&1 && lspci 2>/dev/null | grep -Ei "VGA|3D" | grep -i "AMD" >/dev/null; then
-        HAS_AMD_PCI="true"
     fi
 
     if [ "$GPU_VENDOR" = "nvidia" ] || { [ "$GPU_VENDOR" = "auto" ] && [ "$HAS_NVIDIA_DEV" = "true" ]; }; then

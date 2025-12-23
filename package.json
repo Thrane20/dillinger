@@ -19,7 +19,7 @@
     "docker:build": "cd packages/runner-images && ./build.sh",
     "docker:build:all": "cd packages/runner-images && ./build.sh --all",
     "docker:build:parallel": "cd packages/runner-images && ./build.sh --parallel",
-    "docker:build:core": "pnpm --filter=@dillinger/shared run build && docker build -t ghcr.io/thrane20/dillinger/core:latest -f packages/dillinger-core/Dockerfile .",
+    "docker:build:core": "pnpm --filter=@dillinger/shared run build && . ./versioning.env && docker build --build-arg VERSION=$DILLINGER_CORE_VERSION -t ghcr.io/thrane20/dillinger/core:$DILLINGER_CORE_VERSION -f packages/dillinger-core/Dockerfile .",
     "docker:build:base": "cd packages/runner-images && ./build.sh base",
     "docker:build:wine": "cd packages/runner-images && ./build.sh wine",
     "docker:build:vice": "cd packages/runner-images && ./build.sh vice",

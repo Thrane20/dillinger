@@ -124,9 +124,8 @@ build_image() {
     
     cd "$SCRIPT_DIR/$image_dir"
     
-    # Extract base name and version for latest tag
-    local base_name="${docker_tag%:*}"
-    local latest_tag="${base_name}:latest"
+    # Get base version for child images
+    local base_version="${DILLINGER_RUNNER_BASE_VERSION:-0.1.2}"
     
     # Progress mode: auto (default), plain (verbose), or tty (compact)
     local progress_mode="${DOCKER_PROGRESS:-plain}"
@@ -134,15 +133,16 @@ build_image() {
     # Record start time
     local build_start=$(date +%s)
     
-    # Build with both version and latest tags using buildx
-    if DOCKER_BUILDKIT=1 docker buildx build --network=host --progress="$progress_mode" --load $NO_CACHE -t "$docker_tag" -t "$latest_tag" .; then
+    # Build with version tag only (no :latest) - pass BASE_VERSION for child images
+    if DOCKER_BUILDKIT=1 docker buildx build --network=host --progress="$progress_mode" --load $NO_CACHE \
+        --build-arg BASE_VERSION="$base_version" \
+        -t "$docker_tag" .; then
         local build_end=$(date +%s)
         local build_duration=$((build_end - build_start))
         local minutes=$((build_duration / 60))
         local seconds=$((build_duration % 60))
         printf "\033[0;32m✓ %s built successfully (${minutes}m ${seconds}s)\033[0m\n" "$image_name"
         printf "\033[0;32m  Tagged as: %s\033[0m\n" "$docker_tag"
-        printf "\033[0;32m  Tagged as: %s\033[0m\n" "$latest_tag"
         
         # Push if requested
         if [ "$PUSH" = true ]; then
@@ -151,15 +151,6 @@ build_image() {
                 printf "\033[0;32m✓ Pushed %s\033[0m\n" "$docker_tag"
             else
                 printf "\033[0;31m✗ Failed to push %s\033[0m\n" "$docker_tag"
-                return 1
-            fi
-            
-            # Also push latest tag
-            printf "\033[0;34mPushing %s...\033[0m\n" "$latest_tag"
-            if docker push "$latest_tag"; then
-                printf "\033[0;32m✓ Pushed %s\033[0m\n" "$latest_tag"
-            else
-                printf "\033[0;31m✗ Failed to push %s\033[0m\n" "$latest_tag"
                 return 1
             fi
         fi

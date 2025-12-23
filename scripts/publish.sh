@@ -87,33 +87,28 @@ push_image() {
         if [[ -n "$dockerfile" ]]; then
             docker build \
                 --build-arg VERSION="$version" \
-                -t "$full_name:latest" \
+                --build-arg BASE_VERSION="$DILLINGER_RUNNER_BASE_VERSION" \
+                -t "$full_name:$version" \
                 -f "$dockerfile" \
                 "$build_context"
         else
             docker build \
                 --build-arg VERSION="$version" \
-                -t "$full_name:latest" \
+                --build-arg BASE_VERSION="$DILLINGER_RUNNER_BASE_VERSION" \
+                -t "$full_name:$version" \
                 "$build_context"
         fi
     fi
     
     # Check if image exists locally
-    if ! docker image inspect "$full_name:latest" &>/dev/null; then
-        print_error "Image $full_name:latest not found locally. Build it first or use --build flag."
+    if ! docker image inspect "$full_name:$version" &>/dev/null; then
+        print_error "Image $full_name:$version not found locally. Build it first or use --build flag."
         return 1
     fi
     
-    # Tag with version
-    print_info "Tagging $full_name:$version"
-    docker tag "$full_name:latest" "$full_name:$version"
-    
-    # Push both tags
+    # Push versioned tag only (no :latest)
     print_info "Pushing $full_name:$version"
     docker push "$full_name:$version"
-    
-    print_info "Pushing $full_name:latest"
-    docker push "$full_name:latest"
     
     print_success "Published $image_name v$version"
 }

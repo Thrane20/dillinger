@@ -1,7 +1,9 @@
 # Dillinger RetroArch Runner
 # Extends base runner for multi-system emulation via RetroArch
 
-FROM ghcr.io/thrane20/dillinger/runner-base:latest
+# BASE_VERSION is passed from build.sh (sourced from versioning.env)
+ARG BASE_VERSION
+FROM ghcr.io/thrane20/dillinger/runner-base:${BASE_VERSION}
 
 LABEL maintainer="Dillinger Project"
 LABEL description="RetroArch multi-system emulator extending base runner"

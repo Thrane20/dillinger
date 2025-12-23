@@ -1,7 +1,9 @@
 # Dillinger Linux Native Game Runner
 # Extends base runner for running native Linux games and applications
 
-FROM ghcr.io/thrane20/dillinger/runner-base:latest
+# BASE_VERSION is passed from build.sh (sourced from versioning.env)
+ARG BASE_VERSION
+FROM ghcr.io/thrane20/dillinger/runner-base:${BASE_VERSION}
 
 LABEL maintainer="Dillinger Project"
 LABEL description="Linux native game runner extending base runner"

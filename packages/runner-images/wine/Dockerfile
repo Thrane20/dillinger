@@ -2,7 +2,9 @@
 # Extends base runner with Wine/Proton for running Windows games
 # Based on Dillinger Base Runner with Games on Whales architecture
 
-FROM ghcr.io/thrane20/dillinger/runner-base:latest
+# BASE_VERSION is passed from build.sh (sourced from versioning.env)
+ARG BASE_VERSION
+FROM ghcr.io/thrane20/dillinger/runner-base:${BASE_VERSION}
 
 LABEL maintainer="Dillinger Project"
 LABEL description="Wine game runner extending base runner for Windows games"
