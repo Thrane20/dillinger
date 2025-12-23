@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../schema/platform-v1.0.json",
+  "schemaVersion": "1.0",
+  "id": "linux-native",
+  "name": "Linux Native",
+  "type": "native",
+  "description": "Native Linux games and applications",
+  "configuration": {
+    "containerImage": "dillinger/runner-linux-native:latest",
+    "supportedExtensions": [".sh", ".x86_64", ".x86", ""],
+    "defaultSettings": {
+      "environment": {
+        "DISPLAY": ":0"
+      }
+    }
+  },
+  "validation": {
+    "fileValidation": [".sh", ".x86_64", ".x86", ""]
+  },
+  "displayStreaming": {
+    "method": "x11"
+  },
+  "isActive": true,
+  "created": "2025-10-30T00:00:00Z",
+  "updated": "2025-10-30T00:00:00Z"
+}

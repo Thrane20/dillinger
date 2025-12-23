@@ -77,11 +77,57 @@ export async function ensureDillingerRootScaffold(): Promise<void> {
     }
   }
 
+  // Seed default platform configurations if the platforms directory is empty.
+  // Platform configs define how to launch games for each platform (Wine, VICE, RetroArch, etc.)
+  await seedPlatformConfigs(dillingerRoot);
+
   // Write an explicit marker so the UI can reliably detect completion even if
   // other services create directories like /data/logs during startup.
   const markerPath = path.join(dillingerRoot, BOOTSTRAP_MARKER_RELATIVE_PATH);
   await fs.ensureDir(path.dirname(markerPath));
   await fs.writeFile(markerPath, new Date().toISOString(), 'utf8');
+}
+
+/**
+ * Seed default platform configurations from bundled templates.
+ * Only seeds platforms that don't already exist in the user's storage.
+ */
+async function seedPlatformConfigs(dillingerRoot: string): Promise<void> {
+  const platformsDir = path.join(dillingerRoot, 'storage', 'platforms');
+  await fs.ensureDir(platformsDir);
+
+  // Path to bundled platform configs (baked into Docker image under assets/defaults)
+  const templateDir = path.resolve(
+    process.cwd(),
+    'packages',
+    'dillinger-core',
+    'assets',
+    'defaults',
+    'platforms'
+  );
+
+  if (!(await fs.pathExists(templateDir))) {
+    console.warn('Platform templates not found at:', templateDir);
+    return;
+  }
+
+  try {
+    const templateFiles = await fs.readdir(templateDir);
+    const jsonFiles = templateFiles.filter(f => f.endsWith('.json'));
+
+    for (const file of jsonFiles) {
+      const destPath = path.join(platformsDir, file);
+      
+      // Only seed if the platform config doesn't already exist
+      if (!(await fs.pathExists(destPath))) {
+        const srcPath = path.join(templateDir, file);
+        await fs.copy(srcPath, destPath);
+        console.log(`Seeded platform config: ${file}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error seeding platform configs:', error);
+  }
 }
 
 export function getScaffoldPreview(): { directories: string[]; files: string[] } {
@@ -106,6 +152,7 @@ export function getScaffoldPreview(): { directories: string[]; files: string[] }
       'storage/settings.json',
       'storage/download-state.json',
       'storage/platform-configs/arcade/retroarch.cfg',
+      'storage/platforms/*.json (default platform configs)',
     ],
   };
 }

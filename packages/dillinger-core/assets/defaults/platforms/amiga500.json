@@ -1,0 +1,32 @@
+{
+  "$schema": "../../../schema/platform-v1.0.json",
+  "schemaVersion": "1.0",
+  "id": "amiga500",
+  "name": "Amiga 500",
+  "type": "emulator",
+  "description": "Commodore Amiga 500 via FS-UAE emulator.",
+  "configuration": {
+    "containerImage": "dillinger/runner-fs-uae:latest",
+    "supportedExtensions": [".adf", ".ipf", ".dms", ".lha", ".lzh", ".lzx", ".zip", ".rp9", ".info", ".hdf"],
+    "defaultSettings": {
+      "environment": {
+        "DISPLAY": ":0",
+        "FSUAE_CONFIG_DIR": "/config/fs-uae",
+        "FSUAE_KICKSTARTS_DIR": "/bios"
+      },
+      "launch": {
+        "command": "fs-uae",
+        "arguments": ["--amiga-model=A500"]
+      }
+    }
+  },
+  "validation": {
+    "fileValidation": [".adf", ".ipf", ".dms", ".lha", ".lzh", ".lzx", ".zip", ".rp9", ".info", ".hdf"]
+  },
+  "displayStreaming": {
+    "method": "x11"
+  },
+  "isActive": true,
+  "created": "2025-11-24T12:00:00Z",
+  "updated": "2025-11-24T12:00:00Z"
+}

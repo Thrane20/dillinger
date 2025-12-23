@@ -1,0 +1,29 @@
+{
+  "$schema": "../../../schema/platform-v1.0.json",
+  "schemaVersion": "1.0",
+  "id": "mame",
+  "name": "MAME Arcade (RetroArch)",
+  "type": "emulator",
+  "description": "Arcade games via RetroArch (MAME Core). Supports ROM zip files and CHDs.",
+  "configuration": {
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-retroarch:latest",
+    "supportedExtensions": [".zip", ".chd", ".7z"],
+    "defaultSettings": {
+      "emulator": {
+        "core": "mame"
+      },
+      "environment": {
+        "DISPLAY": ":0"
+      }
+    }
+  },
+  "validation": {
+    "fileValidation": [".zip", ".chd", ".7z"]
+  },
+  "displayStreaming": {
+    "method": "x11"
+  },
+  "isActive": true,
+  "created": "2025-11-29T12:00:00Z",
+  "updated": "2025-11-29T12:00:00Z"
+}

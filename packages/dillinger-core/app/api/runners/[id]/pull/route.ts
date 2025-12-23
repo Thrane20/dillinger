@@ -7,12 +7,19 @@ const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 /**
  * POST /api/runners/[id]/pull
  * Pull a runner image from the registry with progress streaming
+ * 
+ * Query params:
+ *   version - specific version to pull (e.g., "0.1.2"), defaults to "latest"
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  
+  // Get optional version from query params
+  const { searchParams } = new URL(request.url);
+  const version = searchParams.get('version') || 'latest';
   
   const config = RUNNER_IMAGES[id];
   if (!config) {
@@ -21,6 +28,9 @@ export async function POST(
       { status: 404 }
     );
   }
+  
+  // Build the full image reference with specified version
+  const imageRef = `${config.repository}:${version}`;
   
   // Create a streaming response for progress updates
   const encoder = new TextEncoder();
@@ -31,10 +41,10 @@ export async function POST(
       };
       
       try {
-        send({ type: 'start', message: `Pulling ${config.name}...`, image: config.image });
+        send({ type: 'start', message: `Pulling ${config.name} v${version}...`, image: imageRef });
         
         // Start the pull
-        const pullStream = await docker.pull(config.image, {});
+        const pullStream = await docker.pull(imageRef, {});
         
         // Track layer progress
         const layerProgress: Record<string, { current: number; total: number }> = {};
@@ -47,7 +57,7 @@ export async function POST(
                 send({ type: 'error', message: err.message });
                 reject(err);
               } else {
-                send({ type: 'complete', message: 'Pull complete' });
+                send({ type: 'complete', message: 'Pull complete', version });
                 resolve();
               }
             },
@@ -123,14 +133,13 @@ export async function DELETE(
     const images = await docker.listImages({ all: true });
     const foundImage = images.find(img => 
       img.RepoTags?.some(tag => 
-        tag === config.image || 
-        tag.startsWith(config.image.split(':')[0])
+        tag.startsWith(config.repository + ':')
       )
     );
     
     if (!foundImage) {
       return NextResponse.json(
-        { success: false, error: `Image ${config.image} not found locally` },
+        { success: false, error: `Image ${config.repository} not found locally` },
         { status: 404 }
       );
     }
@@ -144,13 +153,13 @@ export async function DELETE(
       message: `Removed ${config.name}`,
     });
   } catch (error) {
-    console.error(`Failed to remove image ${config.image}:`, error);
+    console.error(`Failed to remove image ${config.repository}:`, error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       { 
         success: false, 
         error: `Failed to remove image: ${errorMessage}. It may be in use by a container.`,
-        image: config.image
+        repository: config.repository
       },
       { status: 500 }
     );

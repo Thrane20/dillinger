@@ -70,6 +70,7 @@ COPY --from=builder /app/packages/dillinger-core/lib/workers/download-worker.js 
 RUN mkdir -p ./packages/dillinger-core/public
 
 # Copy default templates/assets used for first-run scaffolding
+# This includes platform configs at assets/defaults/platforms/
 COPY --from=builder /app/packages/dillinger-core/assets ./packages/dillinger-core/assets
 
 # Create data directory for persistent JSON storage
