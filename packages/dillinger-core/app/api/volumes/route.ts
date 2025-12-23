@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { JSONStorageService } from '@/lib/services/storage';
-import type { Volume, VolumePurpose } from '@dillinger/shared';
-import { access } from 'fs/promises';
-import { constants } from 'fs';
+import type { Volume } from '@dillinger/shared';
 
 const execAsync = promisify(exec);
 const storage = JSONStorageService.getInstance();
@@ -30,7 +28,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, hostPath, type = 'bind', purpose = 'other', linkExisting = false, dockerVolumeName: existingVolumeName } = body;
+    const { name, hostPath, type = 'bind', linkExisting = false, dockerVolumeName: existingVolumeName } = body;
 
     if (!name || !hostPath) {
       return NextResponse.json(
@@ -39,25 +37,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate purpose
-    const validPurposes: VolumePurpose[] = ['installers', 'installed', 'roms', 'other'];
-    const volumePurpose: VolumePurpose = validPurposes.includes(purpose) ? purpose : 'other';
-
-    // Validate that path exists and is accessible (only for new volumes)
-    if (!linkExisting) {
-      try {
-        await access(hostPath, constants.F_OK | constants.R_OK);
-      } catch (error) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: 'Path does not exist or is not accessible',
-            warning: 'Please ensure the path exists on the host system'
-          },
-          { status: 400 }
-        );
-      }
-    }
+    // Note: We skip filesystem validation here because the container cannot access host paths
+    // Docker will validate the path exists on the host when creating the volume
 
     let dockerVolumeName: string;
     
@@ -91,7 +72,6 @@ export async function POST(request: NextRequest) {
       createdAt: new Date().toISOString(),
       type,
       status,
-      purpose: volumePurpose,
     };
 
     await storage.writeEntity('volumes', volume.id, volume);
@@ -116,64 +96,3 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PATCH /api/volumes?id=<volumeId> - Update volume purpose
-export async function PATCH(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const volumeId = searchParams.get('id');
-    
-    if (!volumeId) {
-      return NextResponse.json(
-        { success: false, error: 'Volume ID is required' },
-        { status: 400 }
-      );
-    }
-
-    const body = await request.json();
-    const { purpose } = body;
-
-    if (!purpose) {
-      return NextResponse.json(
-        { success: false, error: 'Purpose is required' },
-        { status: 400 }
-      );
-    }
-
-    // Validate purpose
-    const validPurposes: VolumePurpose[] = ['installers', 'installed', 'roms', 'other'];
-    if (!validPurposes.includes(purpose)) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid purpose. Must be one of: installers, installed, roms, other' },
-        { status: 400 }
-      );
-    }
-
-    // Get existing volume
-    const existingVolume = await storage.readEntity<Volume>('volumes', volumeId);
-    if (!existingVolume) {
-      return NextResponse.json(
-        { success: false, error: 'Volume not found' },
-        { status: 404 }
-      );
-    }
-
-    // Update volume
-    const updatedVolume: Volume = {
-      ...existingVolume,
-      purpose,
-    };
-
-    await storage.writeEntity('volumes', volumeId, updatedVolume);
-
-    return NextResponse.json({
-      success: true,
-      data: updatedVolume,
-    });
-  } catch (error) {
-    console.error('Error updating volume:', error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Failed to update volume' },
-      { status: 500 }
-    );
-  }
-}
