@@ -58,7 +58,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { installerPath, installPath, platformId, installerArgs } = body;
+    const { installerPath, installPath, platformId, installerArgs, debugMode } = body;
 
     if (!id || !installerPath || !installPath || !platformId) {
       return NextResponse.json(
@@ -103,6 +103,9 @@ export async function POST(
     if (installerArgs) {
       console.log(`  Installer args: ${installerArgs}`);
     }
+    if (debugMode) {
+      console.log(`  🔧 DEBUG MODE: Container will be kept for inspection`);
+    }
 
     // Start installation container
     const containerInfo = await dockerService.installGame({
@@ -112,6 +115,7 @@ export async function POST(
       sessionId,
       game,
       installerArgs,
+      debugMode,
     });
 
     // Update game with installation information
@@ -180,7 +184,11 @@ export async function POST(
     return NextResponse.json({
       success: true,
       containerId: containerInfo.containerId,
-      message: 'Installation started. The installation GUI should appear on your display.',
+      containerName: debugMode ? `dillinger-install-debug-${sessionId}` : `dillinger-install-${sessionId}`,
+      debugMode: debugMode || false,
+      message: debugMode 
+        ? 'Installation started in DEBUG MODE. Container will be kept for inspection after exit.'
+        : 'Installation started. The installation GUI should appear on your display.',
     });
   } catch (error) {
     console.error('Error starting game installation:', error);

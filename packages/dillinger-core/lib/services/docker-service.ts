@@ -24,6 +24,7 @@ export interface GameInstallOptions {
   sessionId: string;
   game: Game; // Game object for slug and other metadata
   installerArgs?: string; // Optional installer arguments
+  debugMode?: boolean; // If true, keep container after exit for debugging
 }
 
 export interface ContainerInfo {
@@ -162,6 +163,71 @@ export class DockerService {
     }
 
     return { exitCode: wait.StatusCode ?? 1, output };
+  }
+
+  /**
+   * Resolve the actual image reference to use for a runner.
+   * This looks up what version is actually installed locally and returns the full image:tag.
+   * 
+   * @param baseRepository Base repository without tag (e.g., "ghcr.io/thrane20/dillinger/runner-wine")
+   * @returns Full image reference with installed version tag
+   * @throws Error if no matching image is installed
+   */
+  private async resolveInstalledRunnerImage(baseRepository: string): Promise<string> {
+    // Strip any existing tag from the repository
+    const repoWithoutTag = baseRepository.replace(/:.*$/, '');
+    
+    // Extract runner name for user-friendly messages
+    const runnerName = repoWithoutTag.split('/').pop() || repoWithoutTag;
+    
+    try {
+      const images = await docker.listImages({ all: true });
+      
+      // Find installed image by matching repository prefix
+      const matchingImage = images.find(img => 
+        img.RepoTags?.some(tag => tag.startsWith(repoWithoutTag + ':'))
+      );
+      
+      if (!matchingImage || !matchingImage.RepoTags) {
+        const error = new Error(
+          `Runner not installed: ${runnerName}. ` +
+          `Please go to Settings → Platforms and download the ${runnerName} runner first.`
+        );
+        logger.error(error.message);
+        throw error;
+      }
+      
+      // Find the best tag - prefer semver over 'latest'
+      const matchingTags = matchingImage.RepoTags.filter(tag => 
+        tag.startsWith(repoWithoutTag + ':')
+      );
+      
+      // Look for versioned tags first (semver format)
+      const versionedTag = matchingTags.find(tag => {
+        const tagPart = tag.split(':')[1];
+        return tagPart && /^\d+\.\d+\.\d+$/.test(tagPart);
+      });
+      
+      if (versionedTag) {
+        logger.info(`Resolved runner image: ${versionedTag}`);
+        return versionedTag;
+      }
+      
+      // Fallback to any available tag
+      const anyTag = matchingTags[0];
+      if (anyTag) {
+        logger.info(`Resolved runner image (non-versioned): ${anyTag}`);
+        return anyTag;
+      }
+      
+      throw new Error(`No valid tag found for runner: ${runnerName}`);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Runner not installed')) {
+        throw error;  // Re-throw with user-friendly message
+      }
+      logger.error(`Failed to resolve runner image ${repoWithoutTag}:`, error);
+      throw new Error(`Failed to find installed runner: ${runnerName}`);
+    }
   }
 
   /**
@@ -1212,9 +1278,13 @@ export class DockerService {
           ? dockerSettings.autoRemoveContainers
           : false); // Default to false (keep containers)
 
+      // Resolve the actual installed runner image
+      const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-linux-native';
+      const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+
       // Create and start the container
       const containerConfig: any = {
-        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-linux-native:latest',
+        Image: resolvedImage,
         name: `dillinger-session-${sessionId}`,
         Env: env,
         WorkingDir: containerWorkingDir,
@@ -1435,8 +1505,12 @@ export class DockerService {
     }
 
     try {
+      // Resolve the actual installed runner image
+      const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-linux-native';
+      const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+
       const containerConfig: any = {
-        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-linux-native:latest',
+        Image: resolvedImage,
         name: `dillinger-debug-${sessionId}`,
         Env: env,
         WorkingDir: platform.type === 'wine' ? '/wineprefix' : '/game',
@@ -1544,8 +1618,12 @@ export class DockerService {
       
       // Note: WINEARCH should NOT be set when using an existing prefix
       // Wine will auto-detect the architecture from the existing prefix
+      // Resolve the actual installed runner image
+      const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
+      const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+
       const containerConfig: any = {
-        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-wine:latest',
+        Image: resolvedImage,
         Entrypoint: ['/bin/bash', '-c'],
         Cmd: [`cd /game && WINEPREFIX=/wineprefix wine regedit /S dillinger_setup.reg`],
         Env: [
@@ -1839,13 +1917,27 @@ export class DockerService {
     try {
       const quoteForBash = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
+      // Resolve the actual installed runner image
+      const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
+      const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+
+      // In debug mode, keep container for inspection; otherwise auto-remove
+      const autoRemove = !options.debugMode;
+      const containerName = options.debugMode 
+        ? `dillinger-install-debug-${sessionId}`
+        : `dillinger-install-${sessionId}`;
+
+      if (options.debugMode) {
+        logger.info(`  🔧 DEBUG MODE: Container will be kept after exit for inspection`);
+      }
+
       // Create installation container with GUI passthrough
       const container = await docker.createContainer({
-        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-wine:latest',
-        name: `dillinger-install-${sessionId}`,
+        Image: resolvedImage,
+        name: containerName,
         Env: env,
         HostConfig: {
-          AutoRemove: true, // Auto-remove container when installation completes
+          AutoRemove: autoRemove,
           Binds: [
             ...(installerIsInInstallersVolume
               ? []

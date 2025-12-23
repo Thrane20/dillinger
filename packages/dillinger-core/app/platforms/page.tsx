@@ -24,11 +24,15 @@ interface BiosFile {
 
 interface RunnerStatus {
   id: string;
+  repository: string;
   image: string;
   name: string;
   description: string;
   platforms: string[];
   installed: boolean;
+  installedVersion?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
   imageId?: string;
   size?: number;
   created?: string;
@@ -135,7 +139,11 @@ export default function PlatformsPage() {
       const response = await fetch(`${API_BASE_URL}/api/runners`);
       if (response.ok) {
         const data = await response.json();
-        setRunners(data.runners || []);
+        // Filter out runner-base - it's infrastructure, not user-facing
+        const filteredRunners = (data.runners || []).filter(
+          (r: RunnerStatus) => r.id !== 'base'
+        );
+        setRunners(filteredRunners);
       }
     } catch (error) {
       console.error('Failed to load runners:', error);
@@ -350,14 +358,14 @@ export default function PlatformsPage() {
     }
   };
 
-  const pullRunner = useCallback(async (runnerId: string) => {
+  const pullRunner = useCallback(async (runnerId: string, version: string) => {
     setPullProgress(prev => ({
       ...prev,
       [runnerId]: { runnerId, progress: 0, status: 'Starting pull...' }
     }));
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/runners/${runnerId}/pull`, {
+      const response = await fetch(`${API_BASE_URL}/api/runners/${runnerId}/pull?version=${encodeURIComponent(version)}`, {
         method: 'POST',
       });
 
@@ -490,28 +498,71 @@ export default function PlatformsPage() {
     return (
       <div className={`border rounded-lg p-4 mb-6 ${
         runner.installed 
-          ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' 
+          ? runner.updateAvailable
+            ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
+            : 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
           : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
       }`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {runner.installed ? (
-              <CheckCircleIcon className="w-6 h-6 text-green-600 dark:text-green-400" />
+              runner.updateAvailable ? (
+                <ExclamationTriangleIcon className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+              ) : (
+                <CheckCircleIcon className="w-6 h-6 text-green-600 dark:text-green-400" />
+              )
             ) : (
               <ExclamationTriangleIcon className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
             )}
             <div>
-              <h4 className="font-medium text-gray-900 dark:text-gray-100">{runner.name}</h4>
+              <div className="flex items-center gap-2">
+                <h4 className="font-medium text-gray-900 dark:text-gray-100">{runner.name}</h4>
+                {runner.updateAvailable && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 rounded-full">
+                    Update Available
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-gray-500 dark:text-gray-400">{runner.description}</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-1">{runner.image}</p>
+              <div className="flex items-center gap-3 mt-1">
+                {runner.installed && runner.installedVersion && (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    Installed: <span className="font-mono text-green-600 dark:text-green-400">v{runner.installedVersion}</span>
+                  </span>
+                )}
+                {runner.latestVersion && (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    Latest: <span className="font-mono text-blue-600 dark:text-blue-400">v{runner.latestVersion}</span>
+                  </span>
+                )}
+                {runner.installed && runner.size && (
+                  <span className="text-xs text-gray-400">{formatBytes(runner.size)}</span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {runner.installed ? (
               <>
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {runner.size ? formatBytes(runner.size) : ''}
-                </span>
+                {runner.updateAvailable && runner.latestVersion && (
+                  <button
+                    onClick={() => pullRunner(runner.id, runner.latestVersion!)}
+                    disabled={isPulling}
+                    className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isPulling ? (
+                      <>
+                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      <>
+                        <ArrowPathIcon className="w-4 h-4" />
+                        Update to v{runner.latestVersion}
+                      </>
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={() => removeRunner(runner.id)}
                   className="p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
@@ -522,8 +573,8 @@ export default function PlatformsPage() {
               </>
             ) : (
               <button
-                onClick={() => pullRunner(runner.id)}
-                disabled={isPulling}
+                onClick={() => runner.latestVersion && pullRunner(runner.id, runner.latestVersion)}
+                disabled={isPulling || !runner.latestVersion}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isPulling ? (
@@ -534,7 +585,7 @@ export default function PlatformsPage() {
                 ) : (
                   <>
                     <ArrowDownTrayIcon className="w-4 h-4" />
-                    Download
+                    Download {runner.latestVersion ? `v${runner.latestVersion}` : ''}
                   </>
                 )}
               </button>
@@ -570,7 +621,7 @@ export default function PlatformsPage() {
           <h2 className="text-2xl font-semibold">Runner Images</h2>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
             Manage Docker images that power game emulation and compatibility layers.
-            Images are downloaded from <code className="text-sm bg-gray-100 dark:bg-gray-800 px-1 rounded">ghcr.io/dillinger-app</code>
+            Images are downloaded from <code className="text-sm bg-gray-100 dark:bg-gray-800 px-1 rounded">ghcr.io/thrane20/dillinger</code>
           </p>
         </div>
         <button
@@ -595,7 +646,9 @@ export default function PlatformsPage() {
               key={runner.id}
               className={`bg-white dark:bg-gray-800 border rounded-lg p-4 ${
                 runner.installed
-                  ? 'border-green-200 dark:border-green-800'
+                  ? runner.updateAvailable
+                    ? 'border-yellow-300 dark:border-yellow-700'
+                    : 'border-green-200 dark:border-green-800'
                   : 'border-gray-200 dark:border-gray-700'
               }`}
             >
@@ -603,22 +656,42 @@ export default function PlatformsPage() {
                 <div className="flex items-center gap-4">
                   <div className={`p-2 rounded-lg ${
                     runner.installed 
-                      ? 'bg-green-100 dark:bg-green-900/30' 
+                      ? runner.updateAvailable
+                        ? 'bg-yellow-100 dark:bg-yellow-900/30'
+                        : 'bg-green-100 dark:bg-green-900/30' 
                       : 'bg-gray-100 dark:bg-gray-700'
                   }`}>
                     {runner.installed ? (
-                      <CheckCircleIcon className="w-6 h-6 text-green-600 dark:text-green-400" />
+                      runner.updateAvailable ? (
+                        <ExclamationTriangleIcon className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+                      ) : (
+                        <CheckCircleIcon className="w-6 h-6 text-green-600 dark:text-green-400" />
+                      )
                     ) : (
                       <ServerIcon className="w-6 h-6 text-gray-400" />
                     )}
                   </div>
                   <div>
-                    <h3 className="font-medium text-gray-900 dark:text-gray-100">{runner.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium text-gray-900 dark:text-gray-100">{runner.name}</h3>
+                      {runner.updateAvailable && (
+                        <span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 rounded-full">
+                          Update Available
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">{runner.description}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <code className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-600 dark:text-gray-400">
-                        {runner.image}
-                      </code>
+                    <div className="flex items-center gap-3 mt-1">
+                      {runner.installed && runner.installedVersion && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          Installed: <span className="font-mono text-green-600 dark:text-green-400">v{runner.installedVersion}</span>
+                        </span>
+                      )}
+                      {runner.latestVersion && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          Latest: <span className="font-mono text-blue-600 dark:text-blue-400">v{runner.latestVersion}</span>
+                        </span>
+                      )}
                       {runner.installed && runner.size && (
                         <span className="text-xs text-gray-400">{formatBytes(runner.size)}</span>
                       )}
@@ -637,17 +710,38 @@ export default function PlatformsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {runner.installed ? (
-                    <button
-                      onClick={() => removeRunner(runner.id)}
-                      className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                      Remove
-                    </button>
+                    <>
+                      {runner.updateAvailable && runner.latestVersion && (
+                        <button
+                          onClick={() => pullRunner(runner.id, runner.latestVersion!)}
+                          disabled={!!pullProgress[runner.id]}
+                          className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 transition-colors"
+                        >
+                          {pullProgress[runner.id] ? (
+                            <>
+                              <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                              {pullProgress[runner.id].progress}%
+                            </>
+                          ) : (
+                            <>
+                              <ArrowPathIcon className="w-4 h-4" />
+                              Update to v{runner.latestVersion}
+                            </>
+                          )}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeRunner(runner.id)}
+                        className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                        Remove
+                      </button>
+                    </>
                   ) : (
                     <button
-                      onClick={() => pullRunner(runner.id)}
-                      disabled={!!pullProgress[runner.id]}
+                      onClick={() => runner.latestVersion && pullRunner(runner.id, runner.latestVersion)}
+                      disabled={!!pullProgress[runner.id] || !runner.latestVersion}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {pullProgress[runner.id] ? (
@@ -658,7 +752,7 @@ export default function PlatformsPage() {
                       ) : (
                         <>
                           <ArrowDownTrayIcon className="w-4 h-4" />
-                          Download
+                          Download {runner.latestVersion ? `v${runner.latestVersion}` : ''}
                         </>
                       )}
                     </button>

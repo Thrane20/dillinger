@@ -350,6 +350,54 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     return undefined;
   }, [mode, gameId, activeInstallation?.status]);
 
+  // Handle reinstall - reset installation status and show install dialog
+  const handleReinstall = async () => {
+    if (!gameId) return;
+    
+    try {
+      // Reset the installation status via API
+      const response = await fetch(`/api/games/${gameId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          installation: {
+            status: 'not_installed',
+            installPath: undefined,
+            installerPath: undefined,
+            installerArgs: undefined,
+            containerId: undefined,
+            installedAt: undefined,
+            error: undefined,
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to reset installation status');
+      }
+
+      // Update local form state to reflect the change
+      setFormData(prev => ({
+        ...prev,
+        platforms: prev.platforms.map(p => 
+          p.platformId === prev.platformId 
+            ? { ...p, installation: { status: 'not_installed' } }
+            : p
+        ),
+        _originalGame: prev._originalGame ? {
+          ...prev._originalGame,
+          installation: { status: 'not_installed' }
+        } : undefined,
+      }));
+
+      // Show the install dialog
+      setShowInstallDialog(true);
+    } catch (err) {
+      console.error('Failed to reset installation:', err);
+      setError('Failed to reset installation status');
+    }
+  };
+
   // Load available images from scraped metadata
   useEffect(() => {
     if (gameId && mode === 'edit') {
@@ -1196,7 +1244,17 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
 
                   {activeInstallation?.status === 'installed' && activeInstallation?.installPath && (
                     <div className="space-y-2">
-                      <div className="text-sm text-green-700 dark:text-green-300">Installed</div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-green-700 dark:text-green-300">✓ Installed</div>
+                        <button
+                          type="button"
+                          onClick={handleReinstall}
+                          className="px-3 py-1.5 text-sm border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300 rounded-md hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors"
+                          title="Reset installation status and run installer again"
+                        >
+                          Reinstall
+                        </button>
+                      </div>
                       {typeof (activeInstallation as any)?.installerArgs === 'string' && (activeInstallation as any).installerArgs.trim() !== '' && (
                         <div className="text-xs text-gray-500">
                           Installer args: <span className="font-mono break-all">{(activeInstallation as any).installerArgs}</span>

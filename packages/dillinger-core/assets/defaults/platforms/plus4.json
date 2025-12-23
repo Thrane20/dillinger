@@ -6,7 +6,7 @@
   "type": "emulator",
   "description": "Commodore Plus/4 games via VICE emulator. Supports disk images, tapes, cartridges, and program files.",
   "configuration": {
-    "containerImage": "dillinger/runner-vice:latest",
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-vice",
     "supportedExtensions": [".d64", ".d81", ".t64", ".tap", ".crt", ".prg", ".p00", ".zip"],
     "defaultSettings": {
       "environment": {

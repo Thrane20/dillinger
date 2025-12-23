@@ -27,7 +27,7 @@ export async function POST() {
       id: 'arcade',
       type: 'emulator',
       configuration: {
-        containerImage: 'ghcr.io/thrane20/dillinger/runner-retroarch:latest',
+        containerImage: 'ghcr.io/thrane20/dillinger/runner-retroarch:0.1.1',
         supportedExtensions: ['.zip', '.rom', '.bin']
       }
     };

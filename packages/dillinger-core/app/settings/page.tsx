@@ -46,6 +46,11 @@ export default function SettingsPage() {
   // Maintenance
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
+
+  // Factory Reset (Danger Zone)
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
   
   // UI Settings
   const [backdropFadeDuration, setBackdropFadeDuration] = useState(() => {
@@ -322,6 +327,37 @@ export default function SettingsPage() {
     
     // Dispatch custom event to notify games page
     window.dispatchEvent(new CustomEvent('backdropSettingsChanged'));
+  };
+
+  const performFactoryReset = async () => {
+    if (resetConfirmText !== 'DELETE EVERYTHING') {
+      return;
+    }
+
+    try {
+      setResetLoading(true);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/maintenance/factory-reset`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to perform factory reset');
+      }
+
+      // Reset successful - redirect to home page to show setup wizard
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Factory reset failed:', error);
+      setMessage({ 
+        type: 'error', 
+        text: error instanceof Error ? error.message : 'Failed to perform factory reset' 
+      });
+      setResetLoading(false);
+      setShowResetConfirm(false);
+      setResetConfirmText('');
+    }
   };
 
   const saveAudioSettings = async () => {
@@ -958,6 +994,72 @@ export default function SettingsPage() {
             >
               Save UI Settings
             </button>
+          </div>
+        </div>
+
+        {/* Danger Zone */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border-2 border-red-500">
+          <h2 className="text-2xl font-semibold mb-4 text-red-600 dark:text-red-400">⚠️ Danger Zone</h2>
+          
+          <div className="space-y-4">
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+              <h3 className="font-semibold text-red-700 dark:text-red-300 mb-2">Factory Reset</h3>
+              <p className="text-sm text-red-600 dark:text-red-400 mb-3">
+                This will permanently delete <strong>ALL</strong> your data including:
+              </p>
+              <ul className="text-sm text-red-600 dark:text-red-400 list-disc list-inside mb-4 space-y-1">
+                <li>All games and their metadata</li>
+                <li>All save files and states</li>
+                <li>All platform configurations</li>
+                <li>All settings and preferences</li>
+                <li>All downloaded content and BIOS files</li>
+              </ul>
+              <p className="text-sm text-red-700 dark:text-red-300 font-semibold">
+                This action cannot be undone!
+              </p>
+            </div>
+
+            {!showResetConfirm ? (
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+              >
+                Delete Everything and Reset
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Type <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded font-mono">DELETE EVERYTHING</code> to confirm:
+                </p>
+                <input
+                  type="text"
+                  value={resetConfirmText}
+                  onChange={(e) => setResetConfirmText(e.target.value)}
+                  placeholder="Type DELETE EVERYTHING"
+                  className="w-full px-4 py-2 border border-red-300 dark:border-red-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  disabled={resetLoading}
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowResetConfirm(false);
+                      setResetConfirmText('');
+                    }}
+                    disabled={resetLoading}
+                    className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={performFactoryReset}
+                    disabled={resetConfirmText !== 'DELETE EVERYTHING' || resetLoading}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    {resetLoading ? 'Resetting...' : 'Confirm Reset'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

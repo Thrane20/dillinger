@@ -6,7 +6,7 @@
   "type": "emulator",
   "description": "Commodore Amiga CD32 via FS-UAE emulator.",
   "configuration": {
-    "containerImage": "dillinger/runner-fs-uae:latest",
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-fs-uae",
     "supportedExtensions": [".adf", ".ipf", ".dms", ".lha", ".lzh", ".lzx", ".zip", ".rp9", ".info", ".hdf", ".iso", ".cue"],
     "defaultSettings": {
       "environment": {

@@ -9,7 +9,7 @@ const docker = new Docker({ socketPath: '/var/run/docker.sock' });
  * Pull a runner image from the registry with progress streaming
  * 
  * Query params:
- *   version - specific version to pull (e.g., "0.1.2"), defaults to "latest"
+ *   version - specific version to pull (e.g., "0.1.2") - REQUIRED
  */
 export async function POST(
   request: NextRequest,
@@ -17,9 +17,16 @@ export async function POST(
 ) {
   const { id } = await params;
   
-  // Get optional version from query params
+  // Get version from query params - required, no :latest fallback
   const { searchParams } = new URL(request.url);
-  const version = searchParams.get('version') || 'latest';
+  const version = searchParams.get('version');
+  
+  if (!version) {
+    return NextResponse.json(
+      { success: false, error: 'Version parameter is required. No :latest tags are used.' },
+      { status: 400 }
+    );
+  }
   
   const config = RUNNER_IMAGES[id];
   if (!config) {

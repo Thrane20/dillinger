@@ -58,10 +58,9 @@ export async function ensureDillingerRootScaffold(): Promise<void> {
   })();
 
   if (shouldSeedRetroarch) {
+    // In standalone mode, process.cwd() is already /app/packages/dillinger-core
     const templatePath = path.resolve(
       process.cwd(),
-      'packages',
-      'dillinger-core',
       'assets',
       'defaults',
       'retroarch.cfg'
@@ -97,10 +96,9 @@ async function seedPlatformConfigs(dillingerRoot: string): Promise<void> {
   await fs.ensureDir(platformsDir);
 
   // Path to bundled platform configs (baked into Docker image under assets/defaults)
+  // In standalone mode, process.cwd() is already /app/packages/dillinger-core
   const templateDir = path.resolve(
     process.cwd(),
-    'packages',
-    'dillinger-core',
     'assets',
     'defaults',
     'platforms'

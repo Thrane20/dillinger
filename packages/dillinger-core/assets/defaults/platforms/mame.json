@@ -6,7 +6,7 @@
   "type": "emulator",
   "description": "Arcade games via RetroArch (MAME Core). Supports ROM zip files and CHDs.",
   "configuration": {
-    "containerImage": "ghcr.io/thrane20/dillinger/runner-retroarch:latest",
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-retroarch",
     "supportedExtensions": [".zip", ".chd", ".7z"],
     "defaultSettings": {
       "emulator": {

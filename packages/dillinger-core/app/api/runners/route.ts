@@ -79,19 +79,14 @@ function getInstalledVersion(image: Docker.ImageInfo, repository: string): strin
   // Find all tags for this repository
   const matchingTags = image.RepoTags.filter(tag => tag.startsWith(repository + ':'));
   
-  // Prefer versioned tags over 'latest'
+  // Only look for versioned tags (semver format) - no :latest fallback
   const versionTag = matchingTags.find(tag => {
     const tagPart = tag.split(':')[1];
-    return tagPart && tagPart !== 'latest' && /^\d+\.\d+\.\d+$/.test(tagPart);
+    return tagPart && /^\d+\.\d+\.\d+$/.test(tagPart);
   });
   
   if (versionTag) {
     return versionTag.split(':')[1];
-  }
-  
-  // Fall back to 'latest' if that's all we have
-  if (matchingTags.some(tag => tag.endsWith(':latest'))) {
-    return 'latest';
   }
   
   return undefined;

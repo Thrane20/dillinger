@@ -15,6 +15,7 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
   const [installerPath, setInstallerPath] = useState('');
   const [installPath, setInstallPath] = useState('');
   const [installerArgs, setInstallerArgs] = useState('');
+  const [debugMode, setDebugMode] = useState(false);
   const [showFileExplorer, setShowFileExplorer] = useState<'installer' | 'location' | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,8 +57,9 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
         platformId,
       };
 
-      // Backwards-compatible: only include installerArgs if provided
+      // Backwards-compatible: only include optional fields if provided
       (payload as any).installerArgs = installerArgs || undefined;
+      (payload as any).debugMode = debugMode || undefined;
 
       const response = await fetch(`/api/games/${gameId}/install`, {
         method: 'POST',
@@ -180,6 +182,25 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                       <p className="font-mono text-sm mt-1 break-all">{installerArgs}</p>
                     </div>
                   )}
+                </div>
+
+                {/* Debug Mode Option */}
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={debugMode}
+                      onChange={(e) => setDebugMode(e.target.checked)}
+                      className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="font-medium text-gray-900 dark:text-gray-100">Debug Mode</span>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        Keep the installation container after it exits. Use this to inspect logs if installation fails.
+                        You can view container logs with: <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">docker logs dillinger-install-debug-*</code>
+                      </p>
+                    </div>
+                  </label>
                 </div>
 
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">

@@ -6,7 +6,7 @@
   "type": "native",
   "description": "Native Linux games and applications",
   "configuration": {
-    "containerImage": "dillinger/runner-linux-native:latest",
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-linux-native",
     "supportedExtensions": [".sh", ".x86_64", ".x86", ""],
     "defaultSettings": {
       "environment": {
