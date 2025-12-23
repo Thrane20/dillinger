@@ -137,7 +137,7 @@ get_latest_local_version() {
         local highest_tag=$(echo "$version_tags" | tail -1)
         
         # Try to get version from the highest versioned tag's labels
-        local version=$(docker image inspect "$IMAGE_NAME:v${highest_tag}" 2>/dev/null | \
+        local version=$(docker image inspect "$IMAGE_NAME:${highest_tag}" 2>/dev/null | \
             jq -r '.[0].Config.Labels.version // empty' 2>/dev/null)
         
         if [ -n "$version" ]; then
@@ -146,7 +146,7 @@ get_latest_local_version() {
         fi
         
         # If no label, use the tag itself
-        echo "v${highest_tag}"
+        echo "${highest_tag}"
         return
     fi
     
@@ -170,9 +170,9 @@ get_remote_version() {
         tr -d ' ' | \
         sed 's/^v//')
     
-    # Add 'v' prefix if found
+    # Return version without prefix
     if [ -n "$version" ]; then
-        echo "v${version}"
+        echo "${version}"
     fi
 }
 
@@ -187,9 +187,9 @@ get_remote_script_version() {
         tr -d ' ' | \
         sed 's/^v//')
     
-    # Add 'v' prefix if found
+    # Return version without prefix
     if [ -n "$version" ]; then
-        echo "v${version}"
+        echo "${version}"
     fi
 }
 
@@ -197,7 +197,7 @@ get_remote_script_version() {
 check_script_update() {
     print_info "Checking for script updates..."
     
-    local current_version="v${SCRIPT_VERSION}"
+    local current_version="${SCRIPT_VERSION}"
     local remote_version=$(get_remote_script_version)
     
     if [ -z "$remote_version" ]; then
