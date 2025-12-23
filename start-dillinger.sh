@@ -4,6 +4,9 @@
 
 set -e
 
+# Script version (update this when publishing new versions)
+SCRIPT_VERSION="0.1.0"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -121,36 +124,128 @@ check_volume() {
     fi
 }
 
-# Get the current version of local image
-get_local_version() {
-    # Try to get version from image labels
-    local version=$(docker image inspect "$IMAGE_NAME:$IMAGE_TAG" 2>/dev/null | \
-        grep -o '"version":"v[0-9]*\.[0-9]*\.[0-9]*"' | \
-        head -1 | \
-        cut -d'"' -f4)
+# Get the latest local version from available tags
+get_latest_local_version() {
+    # First, find all version tags for this image
+    local version_tags=$(docker images "$IMAGE_NAME" --format "{{.Tag}}" 2>/dev/null | \
+        grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | \
+        sed 's/^v//' | \
+        sort -V)
     
-    if [ -z "$version" ]; then
-        # Fallback: check for version-tagged image
-        version=$(docker images --format "{{.Tag}}" "$IMAGE_NAME" | \
-            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | \
-            sort -V | \
-            tail -1)
+    if [ -n "$version_tags" ]; then
+        # Get the highest version tag
+        local highest_tag=$(echo "$version_tags" | tail -1)
+        
+        # Try to get version from the highest versioned tag's labels
+        local version=$(docker image inspect "$IMAGE_NAME:v${highest_tag}" 2>/dev/null | \
+            jq -r '.[0].Config.Labels.version // empty' 2>/dev/null)
+        
+        if [ -n "$version" ]; then
+            echo "$version"
+            return
+        fi
+        
+        # If no label, use the tag itself
+        echo "v${highest_tag}"
+        return
     fi
     
-    echo "$version"
+    # Fallback: try to get version from :latest tag labels
+    local version=$(docker image inspect "$IMAGE_NAME:$IMAGE_TAG" 2>/dev/null | \
+        jq -r '.[0].Config.Labels.version // empty' 2>/dev/null)
+    
+    if [ -n "$version" ]; then
+        echo "$version"
+    fi
 }
 
-# Get the latest version from GitHub Container Registry
+# Get the latest version from GitHub versioning.env
 get_remote_version() {
-    # Query GitHub Container Registry API for available tags
-    local repo_name="dillinger/core"
-    local latest_version=$(curl -s "https://ghcr.io/v2/thrane20/dillinger/core/tags/list" 2>/dev/null | \
-        grep -o '"v[0-9]*\.[0-9]*\.[0-9]*"' | \
-        tr -d '"' | \
-        sort -V | \
-        tail -1)
+    # Fetch versioning.env from GitHub and extract DILLINGER_CORE_VERSION
+    local github_url="https://raw.githubusercontent.com/Thrane20/dillinger/main/versioning.env"
     
-    echo "$latest_version"
+    local version=$(curl -s "$github_url" 2>/dev/null | \
+        grep '^DILLINGER_CORE_VERSION=' | \
+        cut -d'=' -f2 | \
+        tr -d ' ' | \
+        sed 's/^v//')
+    
+    # Add 'v' prefix if found
+    if [ -n "$version" ]; then
+        echo "v${version}"
+    fi
+}
+
+# Get the latest script version from GitHub versioning.env
+get_remote_script_version() {
+    # Fetch versioning.env from GitHub and extract DILLINGER_START_SCRIPT_VERSION
+    local github_url="https://raw.githubusercontent.com/Thrane20/dillinger/main/versioning.env"
+    
+    local version=$(curl -s "$github_url" 2>/dev/null | \
+        grep '^DILLINGER_START_SCRIPT_VERSION=' | \
+        cut -d'=' -f2 | \
+        tr -d ' ' | \
+        sed 's/^v//')
+    
+    # Add 'v' prefix if found
+    if [ -n "$version" ]; then
+        echo "v${version}"
+    fi
+}
+
+# Check if the script itself needs updating
+check_script_update() {
+    print_info "Checking for script updates..."
+    
+    local current_version="v${SCRIPT_VERSION}"
+    local remote_version=$(get_remote_script_version)
+    
+    if [ -z "$remote_version" ]; then
+        # Silently skip if we can't check
+        return
+    fi
+    
+    print_info "Script version: $current_version"
+    
+    # Compare versions
+    if version_greater "$remote_version" "$current_version"; then
+        echo ""
+        print_warning "A new version of the startup script is available!"
+        print_info "Current: $current_version → Latest: $remote_version"
+        echo ""
+        read -p "Do you want to download the updated script? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Downloading updated script..."
+            
+            local script_url="https://raw.githubusercontent.com/Thrane20/dillinger/main/start-dillinger.sh"
+            local backup_file="${0}.backup"
+            
+            # Backup current script
+            cp "$0" "$backup_file"
+            
+            # Download new script
+            if curl -s "$script_url" -o "$0" 2>/dev/null; then
+                chmod +x "$0"
+                print_success "Script updated to $remote_version"
+                echo ""
+                print_info "Restarting with new version..."
+                echo ""
+                exec "$0" "$@"
+            else
+                print_error "Failed to download script update"
+                # Restore backup
+                mv "$backup_file" "$0"
+                print_info "Continuing with current version..."
+            fi
+        else
+            print_info "Skipping script update"
+        fi
+    else
+        print_success "Script is up to date ($current_version)"
+    fi
+    
+    echo ""
 }
 
 # Compare semantic versions
@@ -197,7 +292,7 @@ check_image() {
         # Check for updates
         print_info "Checking for updates..."
         
-        local current_version=$(get_local_version)
+        local current_version=$(get_latest_local_version)
         local remote_version=$(get_remote_version)
         
         if [ -n "$current_version" ]; then
@@ -347,8 +442,9 @@ show_success_message() {
 
 # Main execution
 main() {
-    print_header "Dillinger Setup Script"
+    print_header "Dillinger Setup Script v${SCRIPT_VERSION}"
     
+    check_script_update
     check_docker
     check_docker_running
     check_docker_permissions

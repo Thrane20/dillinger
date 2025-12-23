@@ -65,9 +65,16 @@ push_image() {
     if [[ "$BUILD_FIRST" == true ]] && [[ -n "$build_context" ]]; then
         print_info "Building $image_name..."
         if [[ -n "$dockerfile" ]]; then
-            docker build -t "$full_name:latest" -f "$dockerfile" "$build_context"
+            docker build \
+                --build-arg VERSION="$version" \
+                -t "$full_name:latest" \
+                -f "$dockerfile" \
+                "$build_context"
         else
-            docker build -t "$full_name:latest" "$build_context"
+            docker build \
+                --build-arg VERSION="$version" \
+                -t "$full_name:latest" \
+                "$build_context"
         fi
     fi
     

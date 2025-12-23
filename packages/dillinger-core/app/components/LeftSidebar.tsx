@@ -20,6 +20,8 @@ interface DockerVolume {
   name: string;
   driver: string;
   mountpoint: string;
+  createdAt?: string;
+  size?: string;
 }
 
 // Volume Section Component
@@ -136,7 +138,6 @@ export default function LeftSidebar() {
   const [volumeName, setVolumeName] = useState('');
   const [selectedPurpose, setSelectedPurpose] = useState<VolumePurpose>('other');
   const [volumes, setVolumes] = useState<Volume[]>([]);
-  const [dockerVolumes, setDockerVolumes] = useState<DockerVolume[]>([]);
   const [loading, setLoading] = useState(true);
   // const [sessionInfo, setSessionInfo] = useState<SessionVolumeInfo | null>(null);
   // const [cleanupInProgress, setCleanupInProgress] = useState(false);
@@ -144,7 +145,6 @@ export default function LeftSidebar() {
   // Load volumes on mount
   useEffect(() => {
     loadVolumes();
-    loadDockerVolumes();
   }, []);
 
   async function loadVolumes() {
@@ -157,7 +157,35 @@ export default function LeftSidebar() {
           ...v,
           purpose: v.purpose || 'other',
         }));
-        setVolumes(migratedVolumes);
+        
+        // Fetch Docker volumes and add unlinked ones as "other"
+        const dockerResponse = await fetch('/api/docker-volumes');
+        const dockerData = await dockerResponse.json();
+        
+        if (dockerData.success) {
+          const hostVolumes = dockerData.data.volumes || [];
+          const linkedVolumeNames = migratedVolumes.map((v: Volume) => v.dockerVolumeName);
+          
+          // Create virtual Volume entries for unlinked Docker volumes
+          const unlinkedAsVolumes: Volume[] = hostVolumes
+            .filter((dv: DockerVolume) => !linkedVolumeNames.includes(dv.name))
+            .map((dv: DockerVolume) => ({
+              id: `host-${dv.name}`,
+              name: dv.name,
+              dockerVolumeName: dv.name,
+              hostPath: dv.mountpoint,
+              createdAt: dv.createdAt || new Date().toISOString(),
+              type: 'docker' as const,
+              status: 'active' as const,
+              purpose: 'other' as VolumePurpose,
+            }));
+          
+          // Merge configured volumes + unlinked host volumes
+          setVolumes([...migratedVolumes, ...unlinkedAsVolumes]);
+          console.log(`[LeftSidebar] Merged ${migratedVolumes.length} configured + ${unlinkedAsVolumes.length} unlinked volumes`);
+        } else {
+          setVolumes(migratedVolumes);
+        }
       }
     } catch (error) {
       console.error('Failed to load volumes:', error);
@@ -166,29 +194,9 @@ export default function LeftSidebar() {
     }
   }
 
-  async function loadDockerVolumes() {
-    try {
-      const response = await fetch('/api/docker-volumes');
-      const data = await response.json();
-      if (data.success) {
-        setDockerVolumes(data.data.volumes || []);
-      }
-    } catch (error) {
-      console.error('Failed to load Docker volumes:', error);
-    }
-  }
-
   function handleAddVolume(purpose: VolumePurpose) {
     setSelectedPurpose(purpose);
     setShowFileExplorer(true);
-  }
-
-  function handleLinkVolume(dockerVolume: DockerVolume, purpose: VolumePurpose) {
-    setSelectedDockerVolume(dockerVolume);
-    setSelectedPurpose(purpose);
-    setVolumeName(dockerVolume.name.replace(/^dillinger_/, ''));
-    setSelectedPath(dockerVolume.mountpoint);
-    setShowLinkVolumeDialog(true);
   }
 
   function handleReassignVolume(purpose: VolumePurpose) {
@@ -246,8 +254,7 @@ export default function LeftSidebar() {
 
       const data = await response.json();
       if (data.success) {
-        await loadVolumes(); // Reload list
-        await loadDockerVolumes(); // Reload Docker volumes
+        await loadVolumes(); // Reload list (includes Docker volumes)
         setShowNameDialog(false);
         setVolumeName('');
         setSelectedPath('');
@@ -280,8 +287,7 @@ export default function LeftSidebar() {
 
       const data = await response.json();
       if (data.success) {
-        await loadVolumes(); // Reload list
-        await loadDockerVolumes(); // Reload Docker volumes
+        await loadVolumes(); // Reload list (includes Docker volumes)
         setShowLinkVolumeDialog(false);
         setVolumeName('');
         setSelectedPath('');
@@ -477,58 +483,6 @@ export default function LeftSidebar() {
                       onAdd={() => handleAddVolume('other')}
                       onRemove={handleRemoveVolume}
                     />
-
-                    {/* Host Volumes Section */}
-                    {dockerVolumes.length > 0 && (
-                      <div className="pt-3 border-t border-border">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-xs font-semibold text-muted uppercase tracking-wider">
-                            Host Docker Volumes
-                          </h4>
-                        </div>
-                        <div className="space-y-1">
-                          {dockerVolumes
-                            .filter((dv) => !volumes.some((v) => v.dockerVolumeName === dv.name))
-                            .map((dv) => (
-                              <div
-                                key={dv.name}
-                                className="p-2 rounded bg-background/50 border border-border/50 text-xs"
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-semibold text-text truncate">{dv.name}</div>
-                                    <div className="text-muted truncate font-mono text-[10px]">
-                                      {dv.mountpoint}
-                                    </div>
-                                  </div>
-                                  <div className="relative group">
-                                    <button
-                                      className="text-primary hover:text-primary-hover transition-colors"
-                                      title="Link to Dillinger"
-                                    >
-                                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                      </svg>
-                                    </button>
-                                    {/* Link Dropdown */}
-                                    <div className="absolute right-0 mt-1 w-32 bg-surface border border-border rounded shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
-                                      {(['installers', 'installed', 'roms', 'other'] as VolumePurpose[]).map((purpose) => (
-                                        <button
-                                          key={purpose}
-                                          onClick={() => handleLinkVolume(dv, purpose)}
-                                          className="w-full text-left px-3 py-1.5 text-xs text-text hover:bg-primary/10 transition-colors capitalize"
-                                        >
-                                          {purpose}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    )}
                   </>
                 )}
 

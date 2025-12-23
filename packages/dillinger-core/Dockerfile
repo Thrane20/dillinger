@@ -31,14 +31,29 @@ RUN pnpm run build
 
 # 2) Runtime stage on Arch Linux base image
 FROM archlinux:base AS runner
+
+# Build-time argument for version (passed from build script)
+ARG VERSION=unknown
+
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production \
     PORT=3010 \
     DILLINGER_ROOT=/data
 
+# Add version label
+LABEL version="${VERSION}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.title="Dillinger Core" \
+      org.opencontainers.image.description="Dillinger Gaming Platform - Core Application"
+
 # Install Node.js LTS, pulseaudio-utils (for pactl), and docker CLI, clean up package cache
 RUN pacman -Sy --noconfirm --needed nodejs pulseaudio docker && \
     pacman -Scc --noconfirm
+
+# Create a user/group that can access the Docker socket
+# The GID should match the host's docker group (usually 999 or similar)
+# We'll run as root for now to avoid socket permission issues
+# In production, consider adding: RUN groupadd -g 999 docker && useradd -m -g docker dillinger
 
 WORKDIR /app
 

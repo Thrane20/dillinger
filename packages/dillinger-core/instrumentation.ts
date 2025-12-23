@@ -9,6 +9,21 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     console.log('[Instrumentation] Initializing server-side services...');
 
+    // Test Docker connectivity
+    try {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+      
+      const { stdout } = await execAsync('docker version --format "{{.Server.Version}}"', {
+        timeout: 5000,
+      });
+      console.log(`[Instrumentation] Docker daemon accessible, version: ${stdout.trim()}`);
+    } catch (error) {
+      console.error('[Instrumentation] WARNING: Docker daemon not accessible!', error instanceof Error ? error.message : error);
+      console.error('[Instrumentation] Make sure /var/run/docker.sock is mounted and accessible');
+    }
+
     // If the user hasn't approved first-run scaffolding yet, skip initialization
     // to avoid creating settings/download state before onboarding completes.
     try {

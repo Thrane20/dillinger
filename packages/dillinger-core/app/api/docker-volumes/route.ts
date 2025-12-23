@@ -17,14 +17,21 @@ interface DockerVolume {
  * Used to show existing volumes that can be linked in the volume manager
  */
 export async function GET() {
+  console.log('[docker-volumes] API called - fetching Docker volumes from host');
+  
   try {
     // Get all Docker volumes with JSON format
+    console.log('[docker-volumes] Running: docker volume ls');
     const { stdout } = await execAsync('docker volume ls --format "{{json .}}"', {
       timeout: 10000,
     });
 
+    console.log('[docker-volumes] Found raw output:', stdout.substring(0, 200));
+    
     const lines = stdout.trim().split('\n').filter(Boolean);
     const volumes: DockerVolume[] = [];
+
+    console.log(`[docker-volumes] Processing ${lines.length} volumes`);
 
     for (const line of lines) {
       try {
@@ -45,10 +52,12 @@ export async function GET() {
           });
         }
       } catch (parseError) {
-        console.error('Failed to parse volume:', line, parseError);
+        console.error('[docker-volumes] Failed to parse volume:', line, parseError);
       }
     }
 
+    console.log(`[docker-volumes] Successfully enumerated ${volumes.length} volumes`);
+    
     return NextResponse.json({
       success: true,
       data: {
@@ -57,11 +66,12 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error('Error listing Docker volumes:', error);
+    console.error('[docker-volumes] Error listing Docker volumes:', error);
     return NextResponse.json(
       {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to list Docker volumes',
+        details: error instanceof Error ? error.stack : undefined,
       },
       { status: 500 }
     );
