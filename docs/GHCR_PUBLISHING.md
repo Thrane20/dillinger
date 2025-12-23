@@ -91,23 +91,57 @@ echo "YOUR_PAT_HERE" | docker login ghcr.io -u YOUR_USERNAME --password-stdin
 
 ### 2. Build Images
 
+All builds now use Docker Buildx with detailed progress output and timing information.
+
 ```bash
 cd packages/runner-images
 
 # Build base first (required by all others)
-docker build -t ghcr.io/thrane20/dillinger/runner-base:latest ./base
+./build.sh base
 
-# Build other images (pass base as build arg if needed)
-docker build -t ghcr.io/thrane20/dillinger/runner-wine:latest \
-  --build-arg BASE_IMAGE=ghcr.io/thrane20/dillinger/runner-base:latest \
-  ./wine
+# Or build all images
+./build.sh all
 
-docker build -t ghcr.io/thrane20/dillinger/runner-vice:latest \
-  --build-arg BASE_IMAGE=ghcr.io/thrane20/dillinger/runner-base:latest \
-  ./vice
+# Build specific runners
+./build.sh wine
+./build.sh vice
+./build.sh retroarch
+./build.sh fs-uae
+./build.sh linux-native
 
-# Repeat for other runners...
+# Build with --no-cache flag
+./build.sh wine --no-cache
+
+# Or use individual build scripts
+cd base && ./build.sh
+cd wine && ./build.sh --no-cache
 ```
+
+**Build Features:**
+- **Docker Buildx**: All builds use BuildKit for better performance and caching
+- **Progress Modes**: Control output verbosity with `DOCKER_PROGRESS` environment variable
+  - `plain` (default) - Verbose output with all build steps visible
+  - `tty` - Compact, interactive progress bars
+  - `auto` - Automatically choose based on terminal type
+- **Build Timing**: Each build displays total time taken (minutes and seconds)
+- **Network Mode**: Uses `--network=host` for faster package downloads
+
+**Progress Mode Examples:**
+```bash
+# Verbose output (default)
+./build.sh base
+
+# Compact progress bars
+DOCKER_PROGRESS=tty ./build.sh base
+
+# Let Docker decide
+DOCKER_PROGRESS=auto ./build.sh base
+
+# Apply to all runners
+DOCKER_PROGRESS=tty ./build.sh all
+```
+
+**Note:** All runners extend the base image (`ghcr.io/thrane20/dillinger/runner-base:latest`), so base must be built first.
 
 ### 3. Push Images
 
@@ -203,6 +237,29 @@ pnpm publish:linux-native:build
 Each publish command pushes both the version tag (e.g., `0.1.0`) and `latest`.
 
 ## Troubleshooting
+
+### Build Performance Issues
+
+**Slow package downloads during build:**
+- All build scripts use `--network=host` to bypass Docker's bridge networking
+- This provides direct access to the host's network stack for faster downloads
+- If builds still hang during package retrieval, check your internet connection or try a different mirror
+
+**Build taking too long:**
+```bash
+# Use compact progress mode to reduce terminal overhead
+DOCKER_PROGRESS=tty ./build.sh base
+
+# Check BuildKit cache
+docker buildx du  # Show cache usage
+docker buildx prune  # Clean up cache if needed
+```
+
+**Want to see detailed step timing:**
+```bash
+# Use plain mode (default) to see each layer's build time
+DOCKER_PROGRESS=plain ./build.sh base
+```
 
 ### "denied: permission_denied"
 

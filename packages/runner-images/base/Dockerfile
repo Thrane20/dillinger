@@ -33,27 +33,39 @@ RUN set -e && \
     echo "**** Configure pacman (enable multilib) ****" && \
     sed -i 's/^#\[multilib\]/[multilib]/' /etc/pacman.conf && \
     sed -i '/^\[multilib\]$/,/^Include/s/^#Include/Include/' /etc/pacman.conf && \
-        \
-        echo "**** Configure pacman mirrors (prefer stable mirror) ****" && \
-        # The default geo mirror can be extremely slow/unreliable in some regions.
-        # Pin to kernel.org which is usually reliable, and keep fallbacks.
-        printf '%s\n' \
-            'Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch' \
-            'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' \
-            'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch' \
-            > /etc/pacman.d/mirrorlist && \
     \
-    echo "**** Configure pacman defaults (non-interactive) ****" && \
+    echo "**** Configure pacman defaults (parallel downloads + candy) ****" && \
     sed -i 's/^#ParallelDownloads = .*/ParallelDownloads = 10/' /etc/pacman.conf && \
     if ! grep -q '^ILoveCandy' /etc/pacman.conf; then echo 'ILoveCandy' >> /etc/pacman.conf; fi && \
-        # Increase transfer timeout and add some retries for flaky mirrors
-        if ! grep -q '^DisableDownloadTimeout' /etc/pacman.conf; then echo 'DisableDownloadTimeout' >> /etc/pacman.conf; fi && \
+    if ! grep -q '^DisableDownloadTimeout' /etc/pacman.conf; then echo 'DisableDownloadTimeout' >> /etc/pacman.conf; fi && \
+    \
+    echo "**** Set Fastly CDN as default mirror ****" && \
+    echo 'Server = https://fastly.mirror.pkgbuild.com/$repo/os/$arch' > /etc/pacman.d/mirrorlist && \
     \
     echo "**** Initialize Arch Linux keyring ****" && \
     pacman-key --init && \
     pacman-key --populate archlinux && \
     \
-    echo "**** Update system ****" && \
+    echo "**** Initial system update (bootstrap reflector) ****" && \
+    pacman -Sy --noconfirm && \
+    \
+    echo "**** Install reflector for fast mirror selection ****" && \
+    pacman -S --noconfirm --needed reflector bc && \
+    \
+    echo "**** Testing Fastly CDN mirror speed ****" && \
+    FASTLY_SPEED=$(curl -o /dev/null -w '%{speed_download}' -s --connect-timeout 5 --max-time 7 https://fastly.mirror.pkgbuild.com/core/os/x86_64/core.db 2>/dev/null || echo 0) && \
+    FASTLY_SPEED_KB=$(printf "%.0f" $(echo "$FASTLY_SPEED / 1024" | bc -l 2>/dev/null || echo 0)) && \
+    echo "**** Fastly mirror speed: ${FASTLY_SPEED_KB} KiB/s ****" && \
+    if [ "$FASTLY_SPEED_KB" -gt 1500 ] 2>/dev/null; then \
+        echo "**** Fastly mirror is fast enough (>1500 KiB/s), using it ****"; \
+    else \
+        echo "**** Fastly mirror too slow or unavailable, scanning alternatives with reflector ****" && \
+        reflector --verbose --latest 10 --protocol https --sort rate --fastest 1 \
+            --download-timeout 5 --save /etc/pacman.d/mirrorlist; \
+    fi && \
+    echo "**** Mirror selection complete ****" && \
+    \
+    echo "**** Full system update with optimized mirrors ****" && \
     pacman -Syyu --noconfirm --needed && \
     \
     echo "**** Install base packages ****" && \

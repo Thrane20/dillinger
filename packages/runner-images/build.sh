@@ -8,6 +8,11 @@ set -e  # Exit on error
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load versions from versioning.env
+if [ -f "../../versioning.env" ]; then
+    source "../../versioning.env"
+fi
+
 # Color output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -73,10 +78,36 @@ usage() {
     exit 0
 }
 
-# Get the image tag
+# Get the image tag (version from versioning.env, fallback to latest)
 get_tag() {
     local name=$1
-    echo "${IMAGE_PREFIX}-${name}:latest"
+    local version=""
+    
+    case $name in
+        base)
+            version="${DILLINGER_RUNNER_BASE_VERSION:-latest}"
+            ;;
+        wine)
+            version="${DILLINGER_RUNNER_WINE_VERSION:-latest}"
+            ;;
+        vice)
+            version="${DILLINGER_RUNNER_VICE_VERSION:-latest}"
+            ;;
+        retroarch)
+            version="${DILLINGER_RUNNER_RETROARCH_VERSION:-latest}"
+            ;;
+        fs-uae)
+            version="${DILLINGER_RUNNER_FS_UAE_VERSION:-latest}"
+            ;;
+        linux-native)
+            version="${DILLINGER_RUNNER_LINUX_NATIVE_VERSION:-latest}"
+            ;;
+        *)
+            version="latest"
+            ;;
+    esac
+    
+    echo "${IMAGE_PREFIX}-${name}:${version}"
 }
 
 # Function to build an image
@@ -93,8 +124,25 @@ build_image() {
     
     cd "$SCRIPT_DIR/$image_dir"
     
-    if docker build $NO_CACHE -t "$docker_tag" .; then
-        printf "\033[0;32m✓ %s built successfully\033[0m\n" "$image_name"
+    # Extract base name and version for latest tag
+    local base_name="${docker_tag%:*}"
+    local latest_tag="${base_name}:latest"
+    
+    # Progress mode: auto (default), plain (verbose), or tty (compact)
+    local progress_mode="${DOCKER_PROGRESS:-plain}"
+    
+    # Record start time
+    local build_start=$(date +%s)
+    
+    # Build with both version and latest tags using buildx
+    if DOCKER_BUILDKIT=1 docker buildx build --network=host --progress="$progress_mode" --load $NO_CACHE -t "$docker_tag" -t "$latest_tag" .; then
+        local build_end=$(date +%s)
+        local build_duration=$((build_end - build_start))
+        local minutes=$((build_duration / 60))
+        local seconds=$((build_duration % 60))
+        printf "\033[0;32m✓ %s built successfully (${minutes}m ${seconds}s)\033[0m\n" "$image_name"
+        printf "\033[0;32m  Tagged as: %s\033[0m\n" "$docker_tag"
+        printf "\033[0;32m  Tagged as: %s\033[0m\n" "$latest_tag"
         
         # Push if requested
         if [ "$PUSH" = true ]; then
@@ -103,6 +151,15 @@ build_image() {
                 printf "\033[0;32m✓ Pushed %s\033[0m\n" "$docker_tag"
             else
                 printf "\033[0;31m✗ Failed to push %s\033[0m\n" "$docker_tag"
+                return 1
+            fi
+            
+            # Also push latest tag
+            printf "\033[0;34mPushing %s...\033[0m\n" "$latest_tag"
+            if docker push "$latest_tag"; then
+                printf "\033[0;32m✓ Pushed %s\033[0m\n" "$latest_tag"
+            else
+                printf "\033[0;31m✗ Failed to push %s\033[0m\n" "$latest_tag"
                 return 1
             fi
         fi
@@ -239,7 +296,6 @@ if [ "$PARALLEL" = true ]; then
     if should_build "wine"; then
         build_image "Wine Runner" "wine" "$(get_tag wine)" &
         PIDS+=($!)
-    fi
     fi
     
     if should_build "vice"; then

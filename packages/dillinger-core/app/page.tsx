@@ -84,6 +84,7 @@ export default function GamesPage() {
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
   const [filterText, setFilterText] = useState('');
   const [sessions, setSessions] = useState<Record<string, Session>>({});
+  const [runners, setRunners] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -239,6 +240,7 @@ export default function GamesPage() {
       return;
     }
     loadGames();
+    loadRunners();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrapChecked, isInitialized]);
 
@@ -452,6 +454,23 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
 
     return () => clearInterval(pollInterval);
   }, [bootstrapChecked, isInitialized, sessions]); // Re-run when sessions change
+
+  async function loadRunners() {
+    try {
+      const response = await fetch('/api/runners');
+      const data = await response.json();
+
+      if (data.success) {
+        const runnerMap: Record<string, boolean> = {};
+        data.runners.forEach((runner: any) => {
+          runnerMap[runner.id] = runner.installed;
+        });
+        setRunners(runnerMap);
+      }
+    } catch (error) {
+      console.error('Failed to load runners:', error);
+    }
+  }
 
   async function loadGames(silent = false) {
     try {
@@ -1090,6 +1109,21 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
 
               const isConfigured = configuredPlatforms.length > 0;
 
+              // Determine required runner based on platform
+              const getRequiredRunner = (platformId: string): string | null => {
+                if (['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(platformId)) return 'vice';
+                if (['arcade', 'mame', 'nes', 'snes', 'genesis'].includes(platformId)) return 'retroarch';
+                if (['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(platformId)) return 'fs-uae';
+                if (platformId === 'windows-wine') return 'wine';
+                if (platformId === 'linux-native') return 'linux-native';
+                return null;
+              };
+
+              const requiredRunner = configuredPlatforms.length > 0 
+                ? getRequiredRunner(configuredPlatforms[0].platformId)
+                : null;
+              const isRunnerAvailable = !requiredRunner || runners[requiredRunner] === true;
+
               const primaryImage = game.metadata?.primaryImage;
 
               // Check if any game is currently running
@@ -1129,12 +1163,25 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
 
                   {/* Primary Image */}
                   {primaryImage && (
-                    <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 overflow-hidden rounded-t-3xl">
+                    <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 overflow-hidden rounded-t-3xl relative">
                       <img
                         src={primaryImage}
                         alt={game.title}
                         className="w-full h-full object-cover"
                       />
+                      {/* Status Badges */}
+                      <div className="absolute top-3 right-3 flex gap-2">
+                        {!isConfigured && (
+                          <span className="flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900 px-3 py-1.5 text-xs font-medium text-yellow-800 dark:text-yellow-100 shadow-lg">
+                            Placeholder
+                          </span>
+                        )}
+                        {!isRunnerAvailable && isConfigured && (
+                          <span className="flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900 px-3 py-1.5 text-xs font-medium text-red-800 dark:text-red-100 shadow-lg">
+                            Runner not available
+                          </span>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -1144,15 +1191,6 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                         <h3 className="text-xl font-semibold text-text w-3/4">
                           {game.title}
                         </h3>
-                        <div className="flex-1 flex justify-end">
-                          {!isConfigured ? (
-                            <span className="inline-flex items-center rounded-full bg-yellow-100 dark:bg-yellow-900 px-2.5 py-0.5 text-xs font-medium text-yellow-800 dark:text-yellow-100">
-                              Placeholder
-                            </span>
-                          ) : (
-                            <div /> /* placeholder to keep equal spacing */
-                          )}
-                        </div>
                       </div>
                       {game.metadata?.developer && (
                         <p className="text-sm text-muted">
@@ -1526,9 +1564,9 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                           <div className="relative inline-flex" data-debug-menu="true">
                             <button
                               onClick={() => launchGame(game.id, 'local')}
-                              disabled={isLaunching}
+                              disabled={isLaunching || !isRunnerAvailable}
                               className="bg-green-700 hover:bg-green-800 text-white rounded-l-md px-3 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              title="Launch normally"
+                              title={!isRunnerAvailable ? "Runner image not available" : "Launch normally"}
                             >
                               Launch
                             </button>
@@ -1538,9 +1576,9 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                                   prev === game.id ? null : game.id
                                 )
                               }
-                              disabled={isLaunching}
+                              disabled={isLaunching || !isRunnerAvailable}
                               className="bg-green-700 hover:bg-green-800 text-white rounded-r-md px-2 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed border-l border-green-900/30"
-                              title="Open debug options"
+                              title={!isRunnerAvailable ? "Runner image not available" : "Open debug options"}
                               aria-label="Open debug options"
                             >
                               <svg

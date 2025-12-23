@@ -9,28 +9,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Load versions
-source "$ROOT_DIR/versioning.env"
-
-# Registry config
-REGISTRY="ghcr.io/thrane20"
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
-
-# Parse arguments
-TARGET="${1:-all}"
-BUILD_FIRST=false
-if [[ "$2" == "--build" ]] || [[ "$1" == "--build" ]]; then
-    BUILD_FIRST=true
-    if [[ "$1" == "--build" ]]; then
-        TARGET="all"
-    fi
-fi
 
 print_header() {
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════${NC}"
@@ -49,6 +33,42 @@ print_info() {
 print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
+
+# Load .env file if it exists
+if [[ -f "$ROOT_DIR/.env" ]]; then
+    print_info "Loading environment from .env file..."
+    export $(grep -v '^#' "$ROOT_DIR/.env" | xargs)
+fi
+
+# Load versions
+source "$ROOT_DIR/versioning.env"
+
+# Registry config
+REGISTRY="ghcr.io/thrane20"
+
+# Docker authentication
+if [[ -n "$GITHUB_TOKEN" ]]; then
+    print_info "Authenticating with GitHub Container Registry..."
+    echo "$GITHUB_TOKEN" | docker login ghcr.io -u thrane20 --password-stdin >/dev/null 2>&1 || {
+        print_error "Failed to authenticate with ghcr.io. Check your GITHUB_TOKEN."
+        exit 1
+    }
+    print_success "Authenticated with ghcr.io"
+else
+    print_error "GITHUB_TOKEN not found in environment or .env file"
+    print_info "Please set GITHUB_TOKEN in .env or run: export GITHUB_TOKEN=your_token"
+    exit 1
+fi
+
+# Parse arguments
+TARGET="${1:-all}"
+BUILD_FIRST=false
+if [[ "$2" == "--build" ]] || [[ "$1" == "--build" ]]; then
+    BUILD_FIRST=true
+    if [[ "$1" == "--build" ]]; then
+        TARGET="all"
+    fi
+fi
 
 # Tag and push an image with both version and latest
 push_image() {

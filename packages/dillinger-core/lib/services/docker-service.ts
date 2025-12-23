@@ -1200,7 +1200,7 @@ export class DockerService {
 
       // Create and start the container
       const containerConfig: any = {
-        Image: platform.configuration.containerImage || 'dillinger/runner-linux-native:latest',
+        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-linux-native:latest',
         name: `dillinger-session-${sessionId}`,
         Env: env,
         WorkingDir: containerWorkingDir,
@@ -1422,7 +1422,7 @@ export class DockerService {
 
     try {
       const containerConfig: any = {
-        Image: platform.configuration.containerImage || 'dillinger/runner-linux-native:latest',
+        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-linux-native:latest',
         name: `dillinger-debug-${sessionId}`,
         Env: env,
         WorkingDir: platform.type === 'wine' ? '/wineprefix' : '/game',
@@ -1531,7 +1531,7 @@ export class DockerService {
       // Note: WINEARCH should NOT be set when using an existing prefix
       // Wine will auto-detect the architecture from the existing prefix
       const containerConfig: any = {
-        Image: platform.configuration.containerImage || 'dillinger/runner-wine:latest',
+        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-wine:latest',
         Entrypoint: ['/bin/bash', '-c'],
         Cmd: [`cd /game && WINEPREFIX=/wineprefix wine regedit /S dillinger_setup.reg`],
         Env: [
@@ -1827,7 +1827,7 @@ export class DockerService {
 
       // Create installation container with GUI passthrough
       const container = await docker.createContainer({
-        Image: platform.configuration.containerImage || 'dillinger/runner-wine:latest',
+        Image: platform.configuration.containerImage || 'ghcr.io/thrane20/dillinger/runner-wine:latest',
         name: `dillinger-install-${sessionId}`,
         Env: env,
         HostConfig: {

@@ -6,7 +6,7 @@
   "type": "wine",
   "description": "Windows games and applications via Wine compatibility layer. Supports installers and pre-installed games.",
   "configuration": {
-    "containerImage": "dillinger/runner-wine:latest",
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-wine:latest",
     "supportedExtensions": [".exe", ".msi", ".bat", ".cmd"],
     "defaultSettings": {
       "environment": {

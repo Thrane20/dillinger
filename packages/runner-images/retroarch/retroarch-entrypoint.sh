@@ -1,111 +1,21 @@
 #!/bin/bash
-# Dillinger RetroArch Runner - Entrypoint Wrapper
+# Dillinger RetroArch Runner - Entrypoint
+# Sources base runner setup and adds RetroArch-specific configuration
 set -e
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Source base entrypoint functions
+source /usr/local/bin/entrypoint.sh
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  RetroArch Runner - Initializing...${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
-
-# Set up basic environment variables
-UNAME="${UNAME:-gameuser}"
-PUID="${PUID:-1000}"
-PGID="${PGID:-1000}"
-
-# Export display and audio variables
-export DISPLAY="${DISPLAY:-:0}"
-export PULSE_SERVER="${PULSE_SERVER:-unix:/run/user/1000/pulse/native}"
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
-
-# Handle PulseAudio cookie
-ORIGINAL_PULSE_COOKIE="${PULSE_COOKIE:-/home/${UNAME}/.config/pulse/cookie}"
-if [ -f "$ORIGINAL_PULSE_COOKIE" ]; then
-    # Create a writable copy in /tmp
-    cp "$ORIGINAL_PULSE_COOKIE" /tmp/pulse-cookie
-    chown "${UNAME}:${UNAME}" /tmp/pulse-cookie
-    chmod 600 /tmp/pulse-cookie
-    export PULSE_COOKIE=/tmp/pulse-cookie
-    echo -e "${GREEN}PulseAudio cookie copied to writable location: $PULSE_COOKIE${NC}"
-else
-    export PULSE_COOKIE="$ORIGINAL_PULSE_COOKIE"
-fi
-
-# Ensure XDG_RUNTIME_DIR exists and has correct permissions
-if [ ! -d "$XDG_RUNTIME_DIR" ]; then
-    mkdir -p "$XDG_RUNTIME_DIR"
-    chown "${UNAME}:${UNAME}" "$XDG_RUNTIME_DIR"
-    chmod 700 "$XDG_RUNTIME_DIR"
-fi
-
-# Fix permissions for /dev/snd/* to ensure audio access
-if [ -d "/dev/snd" ]; then
-    echo -e "${BLUE}Checking audio device permissions...${NC}"
-    # Get GID of /dev/snd/seq or /dev/snd/timer
-    AUDIO_DEV=$(find /dev/snd -name "seq" -o -name "timer" | head -n1)
-    if [ -n "$AUDIO_DEV" ]; then
-        AUDIO_GID=$(stat -c '%g' "$AUDIO_DEV")
-        if ! id -G "${UNAME:-gameuser}" | grep -qw "$AUDIO_GID"; then
-            echo "  Adding ${UNAME:-gameuser} to audio group GID $AUDIO_GID"
-            
-            # Check if group with this GID exists
-            if getent group "$AUDIO_GID" >/dev/null; then
-                EXISTING_GROUP=$(getent group "$AUDIO_GID" | cut -d: -f1)
-                usermod -aG "$EXISTING_GROUP" "${UNAME:-gameuser}"
-            else
-                groupadd -g "$AUDIO_GID" host_audio
-                usermod -aG host_audio "${UNAME:-gameuser}"
-            fi
-        else
-            echo "  User already has access to audio group GID $AUDIO_GID"
-        fi
-    fi
-fi
-
-# Fix permissions for /dev/input/* to ensure controller access
-if [ -d "/dev/input" ]; then
-    echo -e "${BLUE}Checking input device permissions...${NC}"
-    # Get GID of /dev/input/event0 or similar
-    INPUT_DEV=$(find /dev/input -name "event*" | head -n1)
-    if [ -n "$INPUT_DEV" ]; then
-        INPUT_GID=$(stat -c '%g' "$INPUT_DEV")
-        if ! id -G "${UNAME:-gameuser}" | grep -qw "$INPUT_GID"; then
-            echo "  Adding ${UNAME:-gameuser} to input group GID $INPUT_GID"
-            
-            # Check if group with this GID exists
-            if getent group "$INPUT_GID" >/dev/null; then
-                EXISTING_GROUP=$(getent group "$INPUT_GID" | cut -d: -f1)
-                usermod -aG "$EXISTING_GROUP" "${UNAME:-gameuser}"
-            else
-                groupadd -g "$INPUT_GID" host_input
-                usermod -aG host_input "${UNAME:-gameuser}"
-            fi
-        else
-            echo "  User already has access to input group GID $INPUT_GID"
-        fi
-    fi
-fi
-
-# Set XAUTHORITY if xauth file is mounted
-if [ -f "/home/${UNAME}/.Xauthority" ]; then
-    export XAUTHORITY="/home/${UNAME}/.Xauthority"
-fi
-
-echo -e "${GREEN}Display configured: ${DISPLAY}${NC}"
+# Run base setup
+run_base_setup
 
 #######################################################
-# RetroArch Setup
+# RetroArch-Specific Setup
 #######################################################
 
-echo -e "${BLUE}Configuring RetroArch environment...${NC}"
+log_section "Configuring RetroArch environment..."
 
-# Default paths
-# Use the home directory for config so it persists (mounted volume)
+# Default paths (use home directory for config persistence)
 RETROARCH_CONFIG_DIR="/home/${UNAME}/.config/retroarch"
 RETROARCH_CONFIG_FILE="$RETROARCH_CONFIG_DIR/retroarch.cfg"
 
@@ -120,7 +30,7 @@ set_config() {
     local key="$1"
     local value="$2"
     local file="$3"
-    if grep -q "^$key =" "$file"; then
+    if grep -q "^$key =" "$file" 2>/dev/null; then
         sed -i "s|^$key = .*|$key = \"$value\"|" "$file"
     else
         echo "$key = \"$value\"" >> "$file"
@@ -129,9 +39,7 @@ set_config() {
 
 # Generate default config if missing
 if [ ! -f "$RETROARCH_CONFIG_FILE" ]; then
-    echo -e "${BLUE}Generating default RetroArch config...${NC}"
-    # We can let RetroArch generate it, or write a minimal one
-    # For now, let's write some defaults
+    log_section "Generating default RetroArch config..."
     cat > "$RETROARCH_CONFIG_FILE" <<EOF
 system_directory = "/system"
 savefile_directory = "/saves"
@@ -145,9 +53,97 @@ EOF
     chown "${UNAME}:${UNAME}" "$RETROARCH_CONFIG_FILE"
 fi
 
-# Enforce critical drivers to match known working host config
-# This ensures that even if the config exists (from a previous run), we update it to what works
-echo -e "${BLUE}Enforcing drivers...${NC}"
+# Enforce critical drivers to match known working config
+log_section "Enforcing RetroArch drivers..."
+set_config "input_driver" "sdl2" "$RETROARCH_CONFIG_FILE"
+set_config "input_joypad_driver" "udev" "$RETROARCH_CONFIG_FILE"
+set_config "video_driver" "gl" "$RETROARCH_CONFIG_FILE"
+set_config "audio_driver" "pulse" "$RETROARCH_CONFIG_FILE"
+
+# Configure Joystick if specified
+if [ -n "$JOYSTICK_DEVICE_NAME" ]; then
+    log_section "Configuring Joystick: $JOYSTICK_DEVICE_NAME"
+    
+    TARGET_NAME="$JOYSTICK_DEVICE_NAME"
+    CURRENT_INDEX=0
+    MATCHED_INDEX=""
+    CURRENT_NAME=""
+    
+    # Prefer mounted host file to avoid /proc restrictions
+    INPUT_DEVICES_FILE="/proc/bus/input/devices"
+    if [ -f "/tmp/host-input-devices" ]; then
+        INPUT_DEVICES_FILE="/tmp/host-input-devices"
+    fi
+    
+    # Parse input devices block by block
+    while read -r line; do
+        if [[ "$line" =~ ^N:\ Name=\"(.*)\"$ ]]; then
+            CURRENT_NAME="${BASH_REMATCH[1]}"
+        fi
+        
+        if [[ "$line" =~ ^H:\ Handlers=.*(js[0-9]+).*$ ]]; then
+            # This is a joystick
+            if [[ "$CURRENT_NAME" == "$TARGET_NAME" ]]; then
+                MATCHED_INDEX=$CURRENT_INDEX
+                break
+            fi
+            CURRENT_INDEX=$((CURRENT_INDEX + 1))
+        fi
+    done < "$INPUT_DEVICES_FILE"
+    
+    if [ -n "$MATCHED_INDEX" ]; then
+        echo "  Found joystick at index $MATCHED_INDEX"
+        set_config "input_player1_joypad_index" "$MATCHED_INDEX" "$RETROARCH_CONFIG_FILE"
+    else
+        log_warning "Could not find joystick index for '$TARGET_NAME'"
+    fi
+fi
+
+# Determine Core path
+CORE_PATH=""
+if [ -n "$RETROARCH_CORE" ]; then
+    # Check common locations
+    if [ -f "/usr/lib/libretro/${RETROARCH_CORE}_libretro.so" ]; then
+        CORE_PATH="/usr/lib/libretro/${RETROARCH_CORE}_libretro.so"
+    elif [ -f "/usr/lib/libretro/${RETROARCH_CORE}.so" ]; then
+        CORE_PATH="/usr/lib/libretro/${RETROARCH_CORE}.so"
+    fi
+fi
+
+# Default to MAME if not specified and we have arguments
+if [ -z "$CORE_PATH" ] && [ "$#" -gt 0 ]; then
+    if [ -f "/usr/lib/libretro/mame_libretro.so" ]; then
+        CORE_PATH="/usr/lib/libretro/mame_libretro.so"
+        log_warning "No core specified, defaulting to MAME"
+    fi
+fi
+
+echo "  Core: ${CORE_PATH:-<menu mode>}"
+
+#######################################################
+# Launch RetroArch
+#######################################################
+
+log_header "Launching RetroArch"
+
+# Build command
+CMD="retroarch"
+ARGS=("-c" "$RETROARCH_CONFIG_FILE")
+
+if [ -n "$CORE_PATH" ]; then
+    ARGS+=("-L" "$CORE_PATH")
+fi
+
+# Add ROM path if provided as argument
+if [ "$#" -gt 0 ]; then
+    ARGS+=("$@")
+fi
+
+echo -e "${BLUE}Command: $CMD ${ARGS[*]}${NC}"
+echo ""
+
+exec gosu "${UNAME}" "$CMD" "${ARGS[@]}"
+
 set_config "input_driver" "sdl2" "$RETROARCH_CONFIG_FILE"
 set_config "input_joypad_driver" "udev" "$RETROARCH_CONFIG_FILE"
 set_config "video_driver" "gl" "$RETROARCH_CONFIG_FILE"

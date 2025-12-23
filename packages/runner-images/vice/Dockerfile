@@ -2,7 +2,7 @@
 # Extends base runner with VICE for running Commodore games (C64, C128, VIC-20, etc.)
 # Based on Dillinger Base Runner with Games on Whales architecture
 
-FROM ghcr.io/dillinger-gol/runner-base:latest
+FROM ghcr.io/thrane20/dillinger/runner-base:latest
 
 LABEL maintainer="Dillinger Project"
 LABEL description="VICE emulator runner extending base runner for Commodore games"

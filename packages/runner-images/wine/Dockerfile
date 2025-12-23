@@ -2,7 +2,7 @@
 # Extends base runner with Wine/Proton for running Windows games
 # Based on Dillinger Base Runner with Games on Whales architecture
 
-FROM ghcr.io/dillinger-gol/runner-base:latest
+FROM ghcr.io/thrane20/dillinger/runner-base:latest
 
 LABEL maintainer="Dillinger Project"
 LABEL description="Wine game runner extending base runner for Windows games"
@@ -12,47 +12,68 @@ LABEL version="2.0.0"
 # Install Wine and Windows compatibility layer
 #######################################################
 
-RUN set -e && \
-    echo "**** Installing Wine ****" && \
-    echo "[multilib]" >> /etc/pacman.conf && \
-    echo "Include = /etc/pacman.d/mirrorlist" >> /etc/pacman.conf && \
-    \
-    pacman -Sy --noconfirm && \
-    \
-    pacman -S --noconfirm \
-        wine \
-        wine-mono \
-        wine-gecko \
-        winetricks \
-        lib32-gnutls \
-        lib32-libldap \
-        lib32-mpg123 \
-        lib32-openal \
-        lib32-v4l-utils \
-        lib32-libpulse \
-        lib32-alsa-plugins \
-        lib32-alsa-lib \
-        lib32-libjpeg-turbo \
-        lib32-libxcomposite \
-        lib32-libxinerama \
-        lib32-ncurses \
-        lib32-opencl-icd-loader \
-        lib32-libxslt \
-        lib32-libva \
-        lib32-gtk3 \
-        lib32-gst-plugins-base-libs \
-        lib32-vulkan-icd-loader \
-        lib32-sdl2 && \
-    \
-    echo "**** Installing Windows gaming dependencies ****" && \
-    pacman -S --noconfirm \
-        cabextract \
-        p7zip \
-        unzip \
-        zenity && \
-    \
-    echo "**** Cleanup ****" && \
-    pacman -Scc --noconfirm
+RUN <<_INSTALL_WINE
+set -e
+echo "**** Installing Wine and core dependencies ****"
+
+# Core Wine packages (required)
+CORE_WINE_PKGS=(
+    wine
+    wine-mono
+    wine-gecko
+    winetricks
+)
+
+# 32-bit libraries (best-effort, some may not exist in current repos)
+LIB32_PKGS=(
+    lib32-gnutls
+    lib32-mpg123
+    lib32-openal
+    lib32-v4l-utils
+    lib32-libpulse
+    lib32-alsa-plugins
+    lib32-alsa-lib
+    lib32-libjpeg-turbo
+    lib32-libxcomposite
+    lib32-libxinerama
+    lib32-ncurses
+    lib32-opencl-icd-loader
+    lib32-libxslt
+    lib32-libva
+    lib32-gtk3
+    lib32-gst-plugins-base-libs
+    lib32-vulkan-icd-loader
+    lib32-sdl2
+)
+
+# Utilities for Windows software installation
+UTIL_PKGS=(
+    cabextract
+    p7zip
+    unzip
+    zenity
+)
+
+# Install core Wine packages (these must exist)
+pacman -Sy --noconfirm
+pacman -S --noconfirm --needed "${CORE_WINE_PKGS[@]}"
+
+# Install utilities
+pacman -S --noconfirm --needed "${UTIL_PKGS[@]}"
+
+# Install lib32 packages, skipping any that don't exist
+echo "**** Installing 32-bit libraries (optional) ****"
+for pkg in "${LIB32_PKGS[@]}"; do
+    if pacman -Si "$pkg" >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed "$pkg" || echo "Warning: Failed to install $pkg"
+    else
+        echo "Skipping unavailable package: $pkg"
+    fi
+done
+
+echo "**** Cleanup ****"
+pacman -Scc --noconfirm
+_INSTALL_WINE
 
 #######################################################
 # Install DXVK for DirectX to Vulkan translation

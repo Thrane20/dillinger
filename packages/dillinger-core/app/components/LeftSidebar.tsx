@@ -299,7 +299,7 @@ export default function LeftSidebar() {
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
                     </svg>
-                    Volume Manager
+                    Volume / Bind Mount Manager
                   </h3>
                 </div>
 
@@ -315,7 +315,7 @@ export default function LeftSidebar() {
                         onClick={handleAddVolume}
                         className="text-xs px-3 py-1.5 rounded bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all"
                       >
-                        + Add Volume
+                        + Add Bind Mount
                       </button>
                     </div>
 
@@ -324,8 +324,8 @@ export default function LeftSidebar() {
                         <svg className="w-12 h-12 mx-auto text-muted/50 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                         </svg>
-                        <p className="text-sm text-muted mb-1">No volumes configured</p>
-                        <p className="text-xs text-muted/70">Create a volume to store your games and files</p>
+                        <p className="text-sm text-muted mb-1">No volumes or bind mounts configured</p>
+                        <p className="text-xs text-muted/70">Add a bind mount to access host directories in containers</p>
                       </div>
                     ) : (
                       <div className="space-y-1.5 max-h-96 overflow-y-auto">
@@ -420,7 +420,7 @@ export default function LeftSidebar() {
       {showCreateDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-surface border border-border rounded-lg shadow-xl p-6 w-[480px]">
-            <h3 className="text-lg font-bold text-text mb-4">Create New Volume</h3>
+            <h3 className="text-lg font-bold text-text mb-4">Create New Bind Mount</h3>
             
             <div className="space-y-4">
               <div>
@@ -484,7 +484,7 @@ export default function LeftSidebar() {
                 disabled={!volumeName.trim() || !selectedPath.trim()}
                 className="flex-1 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
-                Create Volume
+                Create Bind Mount
               </button>
             </div>
           </div>
