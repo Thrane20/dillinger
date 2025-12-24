@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { formatLastPlayed } from '../utils/timeFormat';
 
 interface GameSession {
   id: string;
@@ -191,7 +190,7 @@ export default function SessionsPage() {
 
       {/* Timeline */}
       <div className="relative">
-        {timelineGroups.map((group, groupIndex) => (
+        {timelineGroups.map((group) => (
           <div key={group.date} className="relative">
             {/* Month/Year Header */}
             <div className="sticky top-0 z-10 bg-background py-4 mb-6">

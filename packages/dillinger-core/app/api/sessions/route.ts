@@ -18,12 +18,7 @@ interface SessionData {
   screenshots?: string[];
 }
 
-interface GameMetadata {
-  title?: string;
-  primaryImage?: string;
-}
-
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     // Read all session files
     const sessionFiles = await fs.readdir(SESSIONS_DIR).catch(() => []);
@@ -93,7 +88,7 @@ export async function GET(request: NextRequest) {
     
     // Filter out null entries and sort by start time (newest first)
     const validSessions = sessions
-      .filter((s): s is NonNullable<typeof s> => s !== null && s.startTime)
+      .filter((s): s is NonNullable<typeof s> => s !== null && !!s.startTime)
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
     
     return NextResponse.json({ sessions: validSessions });

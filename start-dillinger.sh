@@ -274,48 +274,89 @@ version_greater() {
 
 # Check if image exists locally and if there's an update available
 check_image() {
-    print_info "Checking for Dillinger image $IMAGE_NAME:$IMAGE_TAG..."
+    local remote_version=$(get_remote_version)
+    local local_version=$(get_latest_local_version)
     
-    if ! docker image inspect "$IMAGE_NAME:$IMAGE_TAG" &> /dev/null; then
-        print_warning "Image $IMAGE_NAME:$IMAGE_TAG not found locally"
-        print_info "Pulling $IMAGE_NAME:$IMAGE_TAG..."
+    print_info "Checking Dillinger versions..."
+    
+    # Show what we found
+    if [ -n "$remote_version" ]; then
+        print_info "Latest on GitHub: $remote_version"
+    else
+        print_warning "Could not fetch version from GitHub"
+    fi
+    
+    if [ -n "$local_version" ]; then
+        print_info "Highest local version: $local_version"
+    else
+        print_info "No local versions found"
+    fi
+    
+    # Decision logic
+    if [ -z "$local_version" ]; then
+        # No local version - must pull from GitHub
+        if [ -z "$remote_version" ]; then
+            print_error "No local image and cannot reach GitHub"
+            exit 1
+        fi
         
-        if docker pull "$IMAGE_NAME:$IMAGE_TAG"; then
+        print_info "Pulling $IMAGE_NAME:$remote_version..."
+        if docker pull "$IMAGE_NAME:$remote_version"; then
             print_success "Image pulled successfully"
+            IMAGE_TAG="$remote_version"
         else
             print_error "Failed to pull image"
             exit 1
         fi
-    else
-        print_success "Image $IMAGE_NAME:$IMAGE_TAG exists locally"
-        
-        # Check what version we currently have running (if any)
-        local current_version=$(get_latest_local_version)
-        
-        if [ -n "$current_version" ] && [ "$current_version" != "$IMAGE_TAG" ]; then
-            print_info "Local version: $current_version"
-            print_info "Target version: $IMAGE_TAG"
-            
-            if version_greater "$IMAGE_TAG" "$current_version"; then
-                echo ""
-                print_warning "A newer version is available!"
-                echo ""
-                read -p "Do you want to download $IMAGE_TAG? [y/N] " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    print_info "Pulling $IMAGE_NAME:$IMAGE_TAG..."
-                    if docker pull "$IMAGE_NAME:$IMAGE_TAG"; then
-                        print_success "Image updated to $IMAGE_TAG"
-                    else
-                        print_error "Failed to pull update"
-                        print_info "Continuing with current version..."
-                    fi
-                else
-                    print_info "Skipping update, using current local version"
-                fi
+    elif [ -z "$remote_version" ]; then
+        # Can't reach GitHub - use highest local version
+        print_warning "Cannot reach GitHub, using local version $local_version"
+        IMAGE_TAG="$local_version"
+    elif version_greater "$remote_version" "$local_version"; then
+        # GitHub has a newer version
+        echo ""
+        print_warning "A newer version is available on GitHub!"
+        print_info "Local: $local_version → GitHub: $remote_version"
+        echo ""
+        read -p "Do you want to upgrade to $remote_version? [Y/n] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            print_info "Pulling $IMAGE_NAME:$remote_version..."
+            if docker pull "$IMAGE_NAME:$remote_version"; then
+                print_success "Image updated to $remote_version"
+                IMAGE_TAG="$remote_version"
+            else
+                print_error "Failed to pull update"
+                print_info "Using local version $local_version instead"
+                IMAGE_TAG="$local_version"
+            fi
+        else
+            print_info "Skipping upgrade, using local version $local_version"
+            IMAGE_TAG="$local_version"
+        fi
+    elif version_greater "$local_version" "$remote_version"; then
+        # Local version is newer (dev/testing scenario)
+        print_info "Local version ($local_version) is newer than GitHub ($remote_version)"
+        read -p "Use local version $local_version? [Y/n] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            IMAGE_TAG="$local_version"
+        else
+            IMAGE_TAG="$remote_version"
+            # Make sure we have the remote version
+            if ! docker image inspect "$IMAGE_NAME:$remote_version" &> /dev/null; then
+                print_info "Pulling $IMAGE_NAME:$remote_version..."
+                docker pull "$IMAGE_NAME:$remote_version"
             fi
         fi
+    else
+        # Versions are equal
+        print_success "Already running latest version ($local_version)"
+        IMAGE_TAG="$local_version"
     fi
+    
+    echo ""
+    print_success "Will run version: $IMAGE_TAG"
 }
 
 # Check if container already exists
@@ -479,18 +520,6 @@ show_success_message() {
 # Main execution
 main() {
     print_header "Dillinger Setup Script v${SCRIPT_VERSION}"
-    
-    # Fetch target version from GitHub versioning.env
-    print_info "Fetching latest version info..."
-    local remote_version=$(get_remote_version)
-    if [ -n "$remote_version" ]; then
-        IMAGE_TAG="${remote_version}"
-        print_success "Target version: $IMAGE_TAG"
-    else
-        print_error "Could not determine target version from GitHub"
-        print_info "Please check your internet connection"
-        exit 1
-    fi
     
     check_script_update
     check_docker
