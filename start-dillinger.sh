@@ -364,32 +364,86 @@ check_existing_container() {
     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         print_warning "Container '$CONTAINER_NAME' already exists"
         
+        # Get the image/version the existing container is using
+        local running_image=$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}' 2>/dev/null)
+        local running_version=$(echo "$running_image" | sed 's/.*://')
+        
         if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-            print_info "Container is already running"
-            echo ""
-            print_success "Dillinger is accessible at: http://localhost:$PORT"
-            echo ""
-            echo "Container management:"
-            echo "  docker logs $CONTAINER_NAME       # View logs"
-            echo "  docker restart $CONTAINER_NAME    # Restart"
-            echo "  docker stop $CONTAINER_NAME       # Stop"
-            exit 0
+            print_info "Container is running version: $running_version"
+            
+            # Check if we want to run a different version
+            if [ "$running_version" != "$IMAGE_TAG" ]; then
+                echo ""
+                print_warning "Running version ($running_version) differs from target version ($IMAGE_TAG)"
+                echo ""
+                read -p "Do you want to restart with version $IMAGE_TAG? [Y/n] " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                    print_info "Stopping container..."
+                    docker stop "$CONTAINER_NAME" > /dev/null 2>&1
+                    print_info "Removing old container..."
+                    docker rm "$CONTAINER_NAME" > /dev/null 2>&1
+                    print_success "Ready to start version $IMAGE_TAG"
+                    return 0  # Continue to start_container
+                else
+                    print_info "Keeping current version $running_version"
+                    echo ""
+                    print_success "Dillinger is accessible at: http://localhost:$PORT"
+                    exit 0
+                fi
+            else
+                print_success "Already running correct version ($running_version)"
+                echo ""
+                print_success "Dillinger is accessible at: http://localhost:$PORT"
+                echo ""
+                echo "Container management:"
+                echo "  docker logs $CONTAINER_NAME       # View logs"
+                echo "  docker restart $CONTAINER_NAME    # Restart"
+                echo "  docker stop $CONTAINER_NAME       # Stop"
+                exit 0
+            fi
         fi
         
-        print_info "Starting existing container..."
-        if docker start "$CONTAINER_NAME" &> /dev/null; then
-            print_success "Container started"
-            show_success_message
-            exit 0
-        else
-            print_warning "Failed to start existing container"
-            read -p "Remove and recreate container? [y/N] " -n 1 -r
+        # Container exists but is stopped
+        print_info "Container is stopped (was running version: $running_version)"
+        
+        if [ "$running_version" != "$IMAGE_TAG" ]; then
+            echo ""
+            print_warning "Stopped container version ($running_version) differs from target ($IMAGE_TAG)"
+            read -p "Remove old container and start version $IMAGE_TAG? [Y/n] " -n 1 -r
             echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                docker rm -f "$CONTAINER_NAME" &> /dev/null
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                docker rm "$CONTAINER_NAME" > /dev/null 2>&1
                 print_success "Old container removed"
+                return 0  # Continue to start_container
             else
-                exit 1
+                print_info "Starting existing container (version $running_version)..."
+                if docker start "$CONTAINER_NAME" > /dev/null 2>&1; then
+                    print_success "Container started"
+                    show_success_message
+                    exit 0
+                else
+                    print_error "Failed to start container"
+                    exit 1
+                fi
+            fi
+        else
+            # Same version, just start it
+            print_info "Starting container..."
+            if docker start "$CONTAINER_NAME" > /dev/null 2>&1; then
+                print_success "Container started"
+                show_success_message
+                exit 0
+            else
+                print_warning "Failed to start existing container"
+                read -p "Remove and recreate container? [y/N] " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1
+                    print_success "Old container removed"
+                else
+                    exit 1
+                fi
             fi
         fi
     fi
