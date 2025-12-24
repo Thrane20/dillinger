@@ -153,7 +153,8 @@ export default function ScrapersClient() {
   const hasNoScrapers = enabledScrapers.length === 0;
 
   return (
-    <div className="container mx-auto p-8 max-w-6xl">
+    <div className="h-full overflow-y-auto">
+      <div className="p-4 max-w-6xl mx-auto">
       <div className="mb-8">
         <h1 className="text-4xl font-bold mb-2">
           {similarTitles.length > 0 ? 'Similar Games' : 'Game Metadata Scraper'}
@@ -315,6 +316,7 @@ export default function ScrapersClient() {
           ) : null}
         </>
       )}
+      </div>
     </div>
   );
 }

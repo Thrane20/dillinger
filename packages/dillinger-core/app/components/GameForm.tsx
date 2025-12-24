@@ -942,7 +942,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-6">
+    <form onSubmit={handleSubmit} className="max-w-6xl mx-auto space-y-6">
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-text">

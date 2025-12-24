@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
 import type { Game as SharedGame } from '@dillinger/shared';
 import ConfirmationModal from './components/ConfirmationModal';
+import GameDetailModal from './components/GameDetailModal';
 
 // Frontend Game interface (extends shared but allows UI-specific statuses and properties)
 interface Game extends Omit<SharedGame, 'installation'> {
@@ -97,6 +98,10 @@ export default function GamesPage() {
   const [gridColumns, setGridColumns] = useState(2); // Default to 2 columns
 
   const [debugDialogOpenForGameId, setDebugDialogOpenForGameId] = useState<string | null>(null);
+  const [selectedGameForModal, setSelectedGameForModal] = useState<Game | null>(null);
+
+  // Compact mode for zoom levels 4-6
+  const isCompactMode = gridColumns >= 4;
 
   // Delete game with download confirmation
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
@@ -897,7 +902,7 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
   }
 
   return (
-    <div className="relative min-h-screen">
+    <div className="h-screen flex flex-col relative">
       {/* Background Backdrop with Smooth Transition */}
       {displayedBackdrop && (
         <div
@@ -911,79 +916,85 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
         />
       )}
 
-      {/* Content */}
-      <div className="relative z-10 space-y-6">
-        {/* Filter Input and Grid Size Control */}
-        <div className="card">
-          <div className="card-body">
-            <div className="flex gap-4 items-end">
-              {/* Search Filter - 3/4 width */}
-              <div className="w-3/4">
-                <label
-                  htmlFor="filter"
-                  className="block text-sm font-medium text-muted mb-2"
-                >
-                  Filter Games
-                </label>
-                <input
-                  type="text"
-                  id="filter"
-                  value={filterText}
-                  onChange={(e) => setFilterText(e.target.value)}
-                  placeholder="Search by title..."
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                {filterText && (
-                  <p className="mt-1 text-sm text-muted">
-                    Showing {filteredGames.length} of {games.length} games
-                  </p>
-                )}
-              </div>
-
-              {/* Grid Size Slider - 1/4 width */}
-              <div className="w-1/4">
-                <label
-                  htmlFor="gridSize"
-                  className="block text-sm font-medium text-muted mb-2"
-                >
-                  Grid: {gridColumns} {gridColumns === 1 ? 'col' : 'cols'}
-                </label>
-                <div className="flex items-center gap-3">
+      {/* Content Container - flex column, fills available space */}
+      <div className="relative z-10 flex flex-col h-[80vh]">
+        
+        {/* Filter Bar - Fixed at top, never scrolls */}
+        <div className="flex-shrink-0  p-4 border-b border-border">
+          <div className="card">
+            <div className="card-body">
+              <div className="flex gap-4 items-end">
+                {/* Search Filter - 3/4 width */}
+                <div className="w-3/4">
+                  <label
+                    htmlFor="filter"
+                    className="block text-sm font-medium text-muted mb-2"
+                  >
+                    Filter Games
+                  </label>
                   <input
-                    type="range"
-                    id="gridSize"
-                    min="1"
-                    max="3"
-                    step="1"
-                    value={gridColumns}
-                    onChange={(e) => {
-                      const newValue = parseInt(e.target.value, 10);
-                      setGridColumns(newValue);
-                      localStorage.setItem('gridColumns', newValue.toString());
-                    }}
-                    className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary"
+                    type="text"
+                    id="filter"
+                    value={filterText}
+                    onChange={(e) => setFilterText(e.target.value)}
+                    placeholder="Search by title..."
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  {filterText && (
+                    <p className="mt-1 text-sm text-muted">
+                      Showing {filteredGames.length} of {games.length} games
+                    </p>
+                  )}
                 </div>
-                <div className="flex justify-between mt-1 text-xs text-muted">
-                  {[1, 2, 3].map((num) => (
-                    <button
-                      key={num}
-                      onClick={() => {
-                        setGridColumns(num);
-                        localStorage.setItem('gridColumns', num.toString());
+
+                {/* Grid Size Slider - 1/4 width */}
+                <div className="w-1/4">
+                  <label
+                    htmlFor="gridSize"
+                    className="block text-sm font-medium text-muted mb-2"
+                  >
+                    Zoom: {gridColumns} {gridColumns >= 4 ? '(compact)' : gridColumns === 1 ? 'col' : 'cols'}
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      id="gridSize"
+                      min="1"
+                      max="6"
+                      step="1"
+                      value={gridColumns}
+                      onChange={(e) => {
+                        const newValue = parseInt(e.target.value, 10);
+                        setGridColumns(newValue);
+                        localStorage.setItem('gridColumns', newValue.toString());
                       }}
-                      className={`hover:text-primary transition-colors ${gridColumns === num ? 'text-primary font-semibold' : ''}`}
-                    >
-                      {num}
-                    </button>
-                  ))}
+                      className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1 text-xs text-muted">
+                    {[1, 2, 3, 4, 5, 6].map((num) => (
+                      <button
+                        key={num}
+                        onClick={() => {
+                          setGridColumns(num);
+                          localStorage.setItem('gridColumns', num.toString());
+                        }}
+                        className={`hover:text-primary transition-colors ${gridColumns === num ? 'text-primary font-semibold' : ''}`}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {error && (
+        {/* Scrollable Game Tiles Area - Takes remaining space, scrolls independently */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Error Alert */}
+          {error && (
           <div className="alert-error">
             <div className="flex items-start gap-3">
               <svg
@@ -1067,12 +1078,18 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
           </div>
         ) : (
           <div
-            className={`grid gap-6 ${
+            className={`grid gap-6 p-1 ${
               gridColumns === 1
                 ? 'grid-cols-1'
                 : gridColumns === 2
                   ? 'grid-cols-2'
-                  : 'grid-cols-3'
+                  : gridColumns === 3
+                    ? 'grid-cols-3'
+                    : gridColumns === 4
+                      ? 'grid-cols-4'
+                      : gridColumns === 5
+                        ? 'grid-cols-5'
+                        : 'grid-cols-6'
             }`}
           >
             {filteredGames.map((game) => {
@@ -1153,51 +1170,180 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                   {isLaunching && (
                     <div className="absolute inset-0 bg-white dark:bg-gray-900 bg-opacity-80 dark:bg-opacity-80 z-10 flex items-center justify-center rounded-lg">
                       <div className="flex flex-col items-center gap-3">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-                        <p className="text-sm font-medium text-text">
-                          {isRunning ? 'Stopping...' : 'Launching...'}
-                        </p>
+                        <div className={`animate-spin rounded-full border-b-2 border-primary ${isCompactMode ? 'h-6 w-6' : 'h-12 w-12'}`}></div>
+                        {!isCompactMode && (
+                          <p className="text-sm font-medium text-text">
+                            {isRunning ? 'Stopping...' : 'Launching...'}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
 
                   {/* Primary Image */}
                   {primaryImage && (
-                    <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 overflow-hidden rounded-t-3xl relative">
+                    <div className={`w-full bg-gray-200 dark:bg-gray-700 overflow-hidden rounded-t-3xl relative ${isCompactMode ? 'h-32' : 'h-48'}`}>
                       <img
                         src={primaryImage}
                         alt={game.title}
                         className="w-full h-full object-cover"
                       />
-                      {/* Status Badges */}
-                      <div className="absolute top-3 right-3 flex gap-2">
-                        {!isConfigured && (
-                          <span className="flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900 px-3 py-1.5 text-xs font-medium text-yellow-800 dark:text-yellow-100 shadow-lg">
-                            Placeholder
-                          </span>
-                        )}
-                        {!isRunnerAvailable && isConfigured && (
-                          <span className="flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900 px-3 py-1.5 text-xs font-medium text-red-800 dark:text-red-100 shadow-lg">
-                            Runner not available
-                          </span>
-                        )}
-                      </div>
+                      {/* Status Badges - only show in non-compact mode */}
+                      {!isCompactMode && (
+                        <div className="absolute top-3 right-3 flex gap-2">
+                          {!isConfigured && (
+                            <span className="flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900 px-3 py-1.5 text-xs font-medium text-yellow-800 dark:text-yellow-100 shadow-lg">
+                              Placeholder
+                            </span>
+                          )}
+                          {!isRunnerAvailable && isConfigured && (
+                            <span className="flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900 px-3 py-1.5 text-xs font-medium text-red-800 dark:text-red-100 shadow-lg">
+                              Runner not available
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {/* Compact mode status indicators */}
+                      {isCompactMode && (!isConfigured || (!isRunnerAvailable && isConfigured)) && (
+                        <div className="absolute top-1 right-1">
+                          {!isConfigured && (
+                            <span className="flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900 w-5 h-5 shadow-lg" title="Needs configuration">
+                              <svg className="h-3 w-3 text-yellow-800 dark:text-yellow-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                              </svg>
+                            </span>
+                          )}
+                          {!isRunnerAvailable && isConfigured && (
+                            <span className="flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900 w-5 h-5 shadow-lg" title="Runner not available">
+                              <svg className="h-3 w-3 text-red-800 dark:text-red-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {/* Running indicator for compact mode */}
+                      {isCompactMode && isRunning && (
+                        <div className="absolute bottom-1 left-1">
+                          <span className="inline-block h-3 w-3 rounded-full bg-green-500 animate-pulse shadow-lg" title="Running"></span>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  <div className="card-body space-y-4">
-                    <div>
-                      <div className="flex items-start gap-4">
-                        <h3 className="text-xl font-semibold text-text w-3/4">
-                          {game.title}
-                        </h3>
+                  {/* Compact Mode Card Body */}
+                  {isCompactMode ? (
+                    <div className="card-body p-2 space-y-2">
+                      <h3 className="text-sm font-semibold text-text line-clamp-1" title={game.title}>
+                        {game.title}
+                      </h3>
+                      <div className="flex gap-1 justify-center">
+                        {!isConfigured ? (
+                          <>
+                            <a
+                              href={`/games/${game.id}/edit`}
+                              className="p-1.5 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                              title="Configure Game"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                            </a>
+                            <button
+                              onClick={() => setSelectedGameForModal(game)}
+                              className="p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
+                              title="View Details"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                              </svg>
+                            </button>
+                          </>
+                        ) : isRunning ? (
+                          <>
+                            <button
+                              onClick={() => stopGame(game.id)}
+                              disabled={isLaunching}
+                              className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded transition-colors disabled:opacity-60"
+                              title="Stop Game"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => setSelectedGameForModal(game)}
+                              className="p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
+                              title="View Details"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                              </svg>
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => launchGame(game.id, 'local')}
+                              disabled={isLaunching || !isRunnerAvailable}
+                              className="p-1.5 bg-green-700 hover:bg-green-800 text-white rounded transition-colors disabled:opacity-60"
+                              title={!isRunnerAvailable ? "Runner not available" : "Launch"}
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => launchGame(game.id, 'streaming')}
+                              disabled={isLaunching}
+                              className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors disabled:opacity-60"
+                              title="Stream"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => setSelectedGameForModal(game)}
+                              className="p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
+                              title="View Details"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                              </svg>
+                            </button>
+                          </>
+                        )}
                       </div>
-                      {game.metadata?.developer && (
-                        <p className="text-sm text-muted">
-                          {game.metadata.developer}
-                        </p>
-                      )}
                     </div>
+                  ) : (
+                    /* Full Mode Card Body */
+                    <div className="card-body space-y-4">
+                      <div>
+                        <div className="flex items-start gap-4">
+                          <h3 className="text-xl font-semibold text-text w-3/4">
+                            {game.title}
+                          </h3>
+                          {/* Maximize button for full mode */}
+                          <button
+                            onClick={() => setSelectedGameForModal(game)}
+                            className="ml-auto p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
+                            title="View Details"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                            </svg>
+                          </button>
+                        </div>
+                        {game.metadata?.developer && (
+                          <p className="text-sm text-muted">
+                            {game.metadata.developer}
+                          </p>
+                        )}
+                      </div>
 
                     {game.metadata?.description && (
                       <p className="text-sm text-muted line-clamp-3">
@@ -1717,13 +1863,66 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                         </>
                       )}
                     </div>
-                  </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         )}
+        </div>
+        {/* End of Scrollable Game Tiles Area */}
+
       </div>
+      {/* End of Content Container */}
+
+      {/* Game Detail Modal */}
+      {selectedGameForModal && (
+        <GameDetailModal
+          game={selectedGameForModal}
+          session={sessions[selectedGameForModal.id]}
+          isLaunching={launching[selectedGameForModal.id] || false}
+          isRunnerAvailable={(() => {
+            const platforms = selectedGameForModal.platforms || [];
+            const configuredPlatforms = platforms.filter((p) => {
+              const isEmulatorPlatform = [
+                'c64', 'c128', 'vic20', 'plus4', 'pet',
+                'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32',
+              ].includes(p.platformId);
+              return p.filePath || p.settings?.launch?.command || (isEmulatorPlatform && p.filePath);
+            });
+            if (configuredPlatforms.length === 0) return true;
+            const getRequiredRunner = (platformId: string): string | null => {
+              if (['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(platformId)) return 'vice';
+              if (['arcade', 'mame', 'nes', 'snes', 'genesis'].includes(platformId)) return 'retroarch';
+              if (['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(platformId)) return 'fs-uae';
+              if (platformId === 'windows-wine') return 'wine';
+              if (platformId === 'linux-native') return 'linux-native';
+              return null;
+            };
+            const requiredRunner = getRequiredRunner(configuredPlatforms[0].platformId);
+            return !requiredRunner || runners[requiredRunner] === true;
+          })()}
+          onClose={() => setSelectedGameForModal(null)}
+          onLaunch={(mode) => {
+            launchGame(selectedGameForModal.id, mode);
+          }}
+          onLaunchDebug={() => {
+            launchGame(selectedGameForModal.id, 'local', undefined, {
+              keepContainer: true,
+              keepAlive: true,
+            });
+          }}
+          onStop={() => stopGame(selectedGameForModal.id)}
+          onDelete={() => {
+            deleteGame(selectedGameForModal.id);
+            setSelectedGameForModal(null);
+          }}
+          getPlatformName={getPlatformName}
+          formatLastPlayed={formatLastPlayed}
+          formatPlayTime={formatPlayTime}
+        />
+      )}
 
       {/* Delete Game with Download Confirmation Modal */}
       {deleteConfirmModal && (

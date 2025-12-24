@@ -227,7 +227,8 @@ export default function OnlineSourcesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="h-full overflow-y-auto">
+      <div className="space-y-6 p-4">
       <div className="card">
         <div className="card-body">
           <h2 className="text-2xl font-bold text-text mb-4">Online Game Sources</h2>
@@ -512,6 +513,7 @@ export default function OnlineSourcesPage() {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

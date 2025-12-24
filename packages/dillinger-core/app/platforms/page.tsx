@@ -1239,7 +1239,8 @@ export default function PlatformsPage() {
   };
 
   return (
-    <div className="container mx-auto p-8 max-w-5xl">
+    <div className="h-full overflow-y-auto">
+      <div className="p-4 max-w-5xl mx-auto">
       <h1 className="text-4xl font-bold mb-8">Platform Settings</h1>
 
       {/* Tabs */}
@@ -1279,6 +1280,7 @@ export default function PlatformsPage() {
         {activeTab === 'c64' && renderC64Tab()}
         {activeTab === 'arcade' && renderArcadeTab()}
         {activeTab === 'amiga' && renderAmigaTab()}
+      </div>
       </div>
     </div>
   );

@@ -22,6 +22,32 @@ interface HealthStatus {
     sessions: number;
     collections: number;
   };
+  environment?: {
+    display: {
+      x11: string | null;
+      wayland: string | null;
+      xauthority: string | null;
+      x11SocketMounted: boolean;
+      available: boolean;
+    };
+    docker: {
+      socketMounted: boolean;
+      socketPath: string;
+    };
+    gpu: {
+      available: boolean;
+      devices: string[];
+    };
+    audio: {
+      pulseServer: string | null;
+      pulseSocketMounted: boolean;
+      soundDeviceMounted: boolean;
+      available: boolean;
+    };
+    input: {
+      devicesMounted: boolean;
+    };
+  };
 }
 
 export default function RightSidebar() {
@@ -51,9 +77,8 @@ export default function RightSidebar() {
   }, []);
 
   return (
-    <div className="space-y-4">
-      <div className="card sticky top-4 border-2 border-secondary/30 shadow-lg bg-surface/75 backdrop-blur-sm">
-        <div className="card-body">
+    <div className="h-full flex flex-col card border-2 border-secondary/30 shadow-lg bg-surface/75 backdrop-blur-sm">
+      <div className="card-body flex flex-col h-full overflow-hidden">
           <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
             <div className="w-8 h-8 rounded-lg bg-secondary/20 flex items-center justify-center">
               <svg className="w-5 h-5 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -63,7 +88,7 @@ export default function RightSidebar() {
             <h2 className="text-lg font-bold text-text">Info Panel</h2>
           </div>
           
-          <div className="space-y-4">
+          <div className="space-y-4 flex-1 overflow-y-auto">
             {/* Download Monitor - Show above logs when there are active downloads */}
             <DownloadMonitor />
 
@@ -146,12 +171,89 @@ export default function RightSidebar() {
                       </div>
                     </>
                   )}
+                  {healthStatus.environment && (
+                    <div className="pt-2 border-t border-border">
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Environment Passthrough</dt>
+                      <div className="space-y-2">
+                        {/* Display (X11/Wayland) */}
+                        <div className="flex items-center justify-between bg-surface/30 rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${healthStatus.environment.display.available ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                            <span className="text-xs text-muted">Display</span>
+                          </div>
+                          <span className="text-xs font-mono text-text">
+                            {healthStatus.environment.display.x11 || healthStatus.environment.display.wayland || 'None'}
+                          </span>
+                        </div>
+                        
+                        {/* X11 Socket */}
+                        <div className="flex items-center justify-between bg-surface/30 rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${healthStatus.environment.display.x11SocketMounted ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                            <span className="text-xs text-muted">X11 Socket</span>
+                          </div>
+                          <span className="text-xs font-mono text-text">
+                            {healthStatus.environment.display.x11SocketMounted ? 'Mounted' : 'Missing'}
+                          </span>
+                        </div>
+                        
+                        {/* Docker Socket */}
+                        <div className="flex items-center justify-between bg-surface/30 rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${healthStatus.environment.docker.socketMounted ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                            <span className="text-xs text-muted">Docker Socket</span>
+                          </div>
+                          <span className="text-xs font-mono text-text">
+                            {healthStatus.environment.docker.socketMounted ? 'Mounted' : 'Missing'}
+                          </span>
+                        </div>
+                        
+                        {/* GPU */}
+                        <div className="flex items-center justify-between bg-surface/30 rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${healthStatus.environment.gpu.available ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
+                            <span className="text-xs text-muted">GPU</span>
+                          </div>
+                          <span className="text-xs font-mono text-text">
+                            {healthStatus.environment.gpu.available 
+                              ? healthStatus.environment.gpu.devices.filter(d => d.startsWith('render') || d.startsWith('card')).join(', ') || 'Available'
+                              : 'Not Mounted'}
+                          </span>
+                        </div>
+                        
+                        {/* Audio */}
+                        <div className="flex items-center justify-between bg-surface/30 rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${healthStatus.environment.audio.available ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
+                            <span className="text-xs text-muted">Audio</span>
+                          </div>
+                          <span className="text-xs font-mono text-text">
+                            {healthStatus.environment.audio.pulseSocketMounted 
+                              ? 'PulseAudio' 
+                              : healthStatus.environment.audio.soundDeviceMounted 
+                                ? 'ALSA' 
+                                : 'Not Mounted'}
+                          </span>
+                        </div>
+                        
+                        {/* Input Devices */}
+                        <div className="flex items-center justify-between bg-surface/30 rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${healthStatus.environment.input.devicesMounted ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
+                            <span className="text-xs text-muted">Input Devices</span>
+                          </div>
+                          <span className="text-xs font-mono text-text">
+                            {healthStatus.environment.input.devicesMounted ? 'Mounted' : 'Not Mounted'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </dl>
               </div>
             ) : null}
           </div>
         </div>
       </div>
-    </div>
   );
 }

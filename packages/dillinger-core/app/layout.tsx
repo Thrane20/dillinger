@@ -99,19 +99,19 @@ export default function RootLayout({
           </header>
 
           {/* Three Column Layout */}
-          <div className="flex-1 flex gap-6 w-full px-4 sm:px-6 lg:px-8 pb-24 h-full">
+          <div className="flex gap-6 w-full px-4 sm:px-6 lg:px-8 pb-14 overflow-hidden h-[calc(100vh-140px)]">
             {/* Left Sidebar - 1/5 width, fixed height with own scroll */}
-            <div className="w-1/5 overflow-y-auto py-10" style={{ height: 'calc(100vh - 200px)' }}>
+            <div className="w-1/5 h-full overflow-y-auto py-6">
               <LeftSidebar />
             </div>
 
-            {/* Center Content - 3/5 width, fixed height with own scroll */}
-            <main className="w-3/5 overflow-y-auto py-10" style={{ height: 'calc(100vh - 200px)' }}>
+            {/* Center Content - 3/5 width, fixed height, children handle their own overflow */}
+            <main className="w-3/5 h-full overflow-hidden py-6">
               {children}
             </main>
 
             {/* Right Sidebar - 1/5 width, fixed height with own scroll */}
-            <div className="w-1/5 overflow-y-auto py-10" style={{ height: 'calc(100vh - 200px)' }}>
+            <div className="w-1/5 h-full overflow-y-auto py-6">
               <RightSidebar />
             </div>
           </div>

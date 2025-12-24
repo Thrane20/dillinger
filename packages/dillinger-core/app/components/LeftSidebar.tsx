@@ -41,6 +41,7 @@ export default function LeftSidebar() {
   const [selectedPath, setSelectedPath] = useState('');
   const [volumeName, setVolumeName] = useState('');
   const [volumes, setVolumes] = useState<Volume[]>([]);
+  const [unmountedVolumes, setUnmountedVolumes] = useState<DockerVolume[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Load volumes on mount
@@ -54,37 +55,28 @@ export default function LeftSidebar() {
       const data = await response.json();
       if (data.success) {
         const configuredVolumes = data.data || [];
-        
+
         // Fetch Docker volumes and add unlinked ones automatically
         const dockerResponse = await fetch('/api/docker-volumes');
         const dockerData = await dockerResponse.json();
-        
+
         if (dockerData.success) {
           const hostVolumes = dockerData.data.volumes || [];
           const linkedVolumeNames = configuredVolumes.map((v: Volume) => v.dockerVolumeName);
-          
+
           // Update available Docker volumes for linking (unlinked volumes only)
-          const unlinkedVolumeNames = hostVolumes
-            .filter((dv: DockerVolume) => !linkedVolumeNames.includes(dv.name))
-            .map((dv: DockerVolume) => dv.name);
+          const unlinkedVolumes = hostVolumes
+            .filter((dv: DockerVolume) => !linkedVolumeNames.includes(dv.name));
+          
+          const unlinkedVolumeNames = unlinkedVolumes.map((dv: DockerVolume) => dv.name);
           setAvailableDockerVolumes(unlinkedVolumeNames);
-          
-          // Create virtual Volume entries for unlinked Docker volumes
-          const unlinkedAsVolumes: Volume[] = hostVolumes
-            .filter((dv: DockerVolume) => !linkedVolumeNames.includes(dv.name))
-            .map((dv: DockerVolume) => ({
-              id: `host-${dv.name}`,
-              name: dv.name,
-              dockerVolumeName: dv.name,
-              hostPath: dv.mountpoint,
-              createdAt: dv.createdAt || new Date().toISOString(),
-              type: 'docker' as const,
-              status: 'active' as const,
-            }));
-          
-          // Merge configured volumes + unlinked host volumes
-          setVolumes([...configuredVolumes, ...unlinkedAsVolumes]);
-          console.log(`[LeftSidebar] Loaded ${configuredVolumes.length} configured + ${unlinkedAsVolumes.length} unlinked volumes`);
+
+          // Set unmounted volumes (exist on host but not accessible/mounted)
+          setUnmountedVolumes(unlinkedVolumes);
+
+          // Only show configured (accessible) volumes in main list
+          setVolumes(configuredVolumes);
+          console.log(`[LeftSidebar] Loaded ${configuredVolumes.length} accessible volumes + ${unlinkedVolumes.length} unmounted volumes`);
         } else {
           setVolumes(configuredVolumes);
         }
@@ -242,74 +234,33 @@ export default function LeftSidebar() {
   */
 
   return (
-    <div className="space-y-4">
-      <div className="card sticky top-4 border-2 border-primary/30 shadow-lg bg-surface/75 backdrop-blur-sm">
-        <div className="card-body">
-          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-              <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </div>
-            <h2 className="text-lg font-bold text-text">Quick Actions</h2>
-          </div>
-          
-          <div className="space-y-3">
-            {/* Add Game */}
-            <a 
-              href="/games/add"
-              className="block p-4 rounded-lg bg-primary/10 border border-primary/30 hover:bg-primary/20 transition-all group"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/20 text-primary group-hover:bg-primary group-hover:text-white transition-all">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+    <div className="h-full flex flex-col card border-2 border-primary/30 shadow-lg bg-surface/75 backdrop-blur-sm">
+      <div className="card-body flex flex-col h-full overflow-hidden">
+        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+        </div>
+
+        <div className="space-y-3 flex-1 overflow-y-auto">
+          {/* Volume Manager Section */}
+          <div>
+            <div className="p-4 rounded-lg bg-surface/50 border border-border space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-text flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
                   </svg>
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold text-text group-hover:text-primary transition-colors">Add Game</h3>
-                  <p className="text-xs text-muted mt-1">Add games to your library</p>
-                </div>
+                  Volume / Bind Mount Manager
+                </h3>
               </div>
-            </a>
 
-            {/* Scrape Game */}
-            <a 
-              href="/scrapers"
-              className="block p-4 rounded-lg bg-secondary/10 border border-secondary/30 hover:bg-secondary/20 transition-all group"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary/20 text-secondary group-hover:bg-secondary group-hover:text-white transition-all">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold text-text group-hover:text-secondary transition-colors">Scrape Game</h3>
-                  <p className="text-xs text-muted mt-1">Fetch game metadata from external sources</p>
-                </div>
-              </div>
-            </a>
-
-            {/* Volume Manager Section */}
-            <div className="pt-2">
-              <div className="p-4 rounded-lg bg-surface/50 border border-border space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-text flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-                    </svg>
-                    Volume / Bind Mount Manager
-                  </h3>
-                </div>
-
-                {loading ? (
-                  <p className="text-xs text-muted italic">Loading...</p>
-                ) : (
+              {loading ? (
+                <p className="text-xs text-muted italic">Loading...</p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Accessible Volumes Section */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-xs font-semibold text-text uppercase tracking-wider">
-                        All Volumes ({volumes.length})
+                        Accessible Volumes ({volumes.length})
                       </h4>
                       <button
                         onClick={handleAddVolume}
@@ -319,62 +270,90 @@ export default function LeftSidebar() {
                       </button>
                     </div>
 
-                    {volumes.length === 0 ? (
-                      <div className="text-center py-8">
-                        <svg className="w-12 h-12 mx-auto text-muted/50 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                        </svg>
-                        <p className="text-sm text-muted mb-1">No volumes or bind mounts configured</p>
-                        <p className="text-xs text-muted/70">Add a bind mount to access host directories in containers</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5 max-h-96 overflow-y-auto">
-                        {volumes.map((volume) => (
-                          <div
-                            key={volume.id}
-                            className="p-3 rounded bg-background border border-border/50 hover:border-border transition-colors"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <div className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                                    volume.type === 'docker' 
-                                      ? 'bg-blue-500/20 text-blue-400' 
-                                      : 'bg-green-500/20 text-green-400'
+                  {volumes.length === 0 ? (
+                    <div className="text-center py-8">
+                      <svg className="w-12 h-12 mx-auto text-muted/50 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                      <p className="text-sm text-muted mb-1">No volumes or bind mounts configured</p>
+                      <p className="text-xs text-muted/70">Add a bind mount to access host directories in containers</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {volumes.map((volume) => (
+                        <div
+                          key={volume.id}
+                          className="p-3 rounded bg-background border border-border/50 hover:border-border transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <div className={`px-2 py-0.5 rounded text-[10px] font-medium ${volume.type === 'docker'
+                                    ? 'bg-blue-500/20 text-blue-400'
+                                    : 'bg-green-500/20 text-green-400'
                                   }`}>
-                                    {volume.type === 'docker' ? 'DOCKER' : 'BIND'}
-                                  </div>
-                                  <div className="font-semibold text-text text-sm truncate">{volume.name}</div>
+                                  {volume.type === 'docker' ? 'DOCKER' : 'BIND'}
                                 </div>
-                                <div className="text-muted text-xs mt-1 font-mono truncate" title={volume.hostPath}>
-                                  {volume.hostPath}
-                                </div>
-                                <div className="text-muted/70 text-[10px] mt-1">
-                                  Created {new Date(volume.createdAt).toLocaleDateString()}
-                                </div>
+                                <div className="font-semibold text-text text-sm truncate">{volume.name}</div>
                               </div>
-                              <button
-                                onClick={() => handleRemoveVolume(volume.id)}
-                                className="p-1.5 text-muted hover:text-error hover:bg-error/10 rounded transition-colors flex-shrink-0"
-                                title="Remove volume"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
+                              <div className="text-muted text-xs mt-1 font-mono truncate" title={volume.hostPath}>
+                                {volume.hostPath}
+                              </div>
+                              <div className="text-muted/70 text-[10px] mt-1">
+                                Created {new Date(volume.createdAt).toLocaleDateString()}
+                              </div>
                             </div>
+                            <button
+                              onClick={() => handleRemoveVolume(volume.id)}
+                              className="p-1.5 text-muted hover:text-error hover:bg-error/10 rounded transition-colors flex-shrink-0"
+                              title="Remove volume"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  </div>
+
+                  {/* Unmounted Volumes Section */}
+                  {unmountedVolumes.length > 0 && (
+                    <div className="space-y-2 pt-4 border-t border-border">
+                      <div className="mb-3">
+                        <h4 className="text-xs font-semibold text-text uppercase tracking-wider mb-1">
+                          Unmounted Volumes ({unmountedVolumes.length})
+                        </h4>
+                        <p className="text-[10px] text-muted/70 italic">
+                          These volumes exist on the host but are not mounted to the container. Read-only view.
+                        </p>
+                      </div>
+
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {unmountedVolumes.map((volume) => (
+                          <div
+                            key={volume.name}
+                            className="p-2 rounded bg-background/50 border border-border/30 flex items-center gap-2"
+                          >
+                            <div className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-500/20 text-gray-400">
+                              UNMOUNTED
+                            </div>
+                            <div className="font-medium text-text text-xs truncate">{volume.name}</div>
                           </div>
                         ))}
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
+              )}
 
-                {/* Clean Session Volumes Button - DEPRECATED
+              {/* Clean Session Volumes Button - DEPRECATED
                     Game saves are now stored in dillinger_root at /data/saves/<gameId>
                     No separate save volumes are created anymore.
                 */}
-                {/* <div className="mt-3 pt-3 border-t border-border">
+              {/* <div className="mt-3 pt-3 border-t border-border">
                   <button
                     onClick={handleCleanSessionVolumes}
                     className="w-full text-xs px-3 py-2 rounded bg-warning/20 text-warning hover:bg-warning hover:text-white transition-all flex items-center justify-center gap-2"
@@ -386,25 +365,25 @@ export default function LeftSidebar() {
                     Clean Session Volumes
                   </button>
                 </div> */}
-              </div>
             </div>
+          </div>
 
-            {/* Filters Section */}
-            <div className="pt-2">
-              <div className="p-4 rounded-lg bg-surface/50 border border-border">
-                <h3 className="text-sm font-semibold text-text mb-2">Filters</h3>
-                <p className="text-xs text-muted italic">This space for rent</p>
-              </div>
-            </div>
-            
-            {/* Collections Section */}
+          {/* Filters Section */}
+          <div className="pt-2">
             <div className="p-4 rounded-lg bg-surface/50 border border-border">
-              <h3 className="text-sm font-semibold text-text mb-2">Collections</h3>
+              <h3 className="text-sm font-semibold text-text mb-2">Filters</h3>
               <p className="text-xs text-muted italic">This space for rent</p>
             </div>
           </div>
+
+          {/* Collections Section */}
+          <div className="p-4 rounded-lg bg-surface/50 border border-border">
+            <h3 className="text-sm font-semibold text-text mb-2">Collections</h3>
+            <p className="text-xs text-muted italic">This space for rent</p>
+          </div>
         </div>
       </div>
+
 
       {/* File Explorer Dialog */}
       <FileExplorer
@@ -421,7 +400,7 @@ export default function LeftSidebar() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-surface border border-border rounded-lg shadow-xl p-6 w-[480px]">
             <h3 className="text-lg font-bold text-text mb-4">Create New Bind Mount</h3>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-text mb-2">
@@ -437,7 +416,7 @@ export default function LeftSidebar() {
                 />
                 <p className="text-xs text-muted/70 mt-1">Give this volume a descriptive name</p>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-text mb-2">
                   Mount Path
@@ -460,7 +439,7 @@ export default function LeftSidebar() {
                   <div className="text-xs text-text">
                     <p className="font-medium mb-1">About Bind Mounts</p>
                     <p className="text-muted/80">
-                      The volume will create a bind mount to a directory on your host system. 
+                      The volume will create a bind mount to a directory on your host system.
                       This allows Dillinger containers to access your files directly without copying them.
                     </p>
                   </div>
@@ -496,7 +475,7 @@ export default function LeftSidebar() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-surface border border-border rounded-lg shadow-xl p-6 w-[480px]">
             <h3 className="text-lg font-bold text-text mb-4">Link Existing Docker Volume</h3>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-text mb-2">
@@ -526,7 +505,7 @@ export default function LeftSidebar() {
                   <div className="text-xs text-text">
                     <p className="font-medium mb-1">About Docker Volumes</p>
                     <p className="text-muted/80">
-                      Docker volumes are managed by Docker and persist independently of containers. 
+                      Docker volumes are managed by Docker and persist independently of containers.
                       Linking one here allows you to use it with Dillinger runners.
                     </p>
                   </div>

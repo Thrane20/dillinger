@@ -8,8 +8,10 @@ export default async function EditGamePage({ params }: PageProps) {
   const { id } = await params;
   
   return (
-    <div className="container mx-auto p-8">
-      <GameForm mode="edit" gameId={id} />
+    <div className="h-full overflow-y-auto">
+      <div className="p-4">
+        <GameForm mode="edit" gameId={id} />
+      </div>
     </div>
   );
 }
