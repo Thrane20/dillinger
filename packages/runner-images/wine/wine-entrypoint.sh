@@ -50,9 +50,9 @@ detect_current_mode_for_output() {
     # Prints the currently active mode (the one with a '*') for the given output.
     local out="$1"
     xrandr --query 2>/dev/null | awk -v out="$out" '
-        $1 == out { in=1; next }
-        in && $1 ~ /^[0-9]+x[0-9]+$/ && $0 ~ /\*/ { print $1; exit }
-        in && NF==0 { exit }
+        $1 == out { found=1; next }
+        found && $1 ~ /^[0-9]+x[0-9]+$/ && $0 ~ /\*/ { print $1; exit }
+        found && NF==0 { exit }
     '
 }
 
@@ -69,10 +69,23 @@ apply_xrandr_mode() {
         return 0
     fi
 
+    echo -e "${BLUE}Attempting to set display resolution via xrandr...${NC}"
+    echo "  DISPLAY=$DISPLAY"
+    
+    # List available modes for debugging
+    echo "  Available outputs and modes:"
+    xrandr --query 2>&1 | head -30 | while read line; do
+        echo "    $line"
+    done
+    
     local out
     out="$(detect_xrandr_output)"
     if [ -z "$out" ]; then
         echo -e "${YELLOW}⚠ XRANDR_MODE requested but no connected outputs were detected${NC}"
+        echo "  This may happen if:"
+        echo "    - The container doesn't have access to the host X11 display"
+        echo "    - The display output name doesn't match expected patterns"
+        echo "    - xrandr can't query the display (permission issue)"
         return 0
     fi
 
@@ -82,7 +95,6 @@ apply_xrandr_mode() {
     ORIG_XRANDR_OUTPUT="$out"
     ORIG_XRANDR_MODE="$current"
 
-    echo -e "${BLUE}Setting display resolution via xrandr...${NC}"
     echo "  Output: $out"
     if [ -n "$current" ]; then
         echo "  Current: $current"
@@ -90,11 +102,19 @@ apply_xrandr_mode() {
         echo "  Current: <unknown>"
     fi
     echo "  Target:  $XRANDR_MODE"
+    
+    # Check if the requested mode is available
+    if ! xrandr --query 2>/dev/null | grep -q "$XRANDR_MODE"; then
+        echo -e "${YELLOW}⚠ Mode $XRANDR_MODE may not be available. Available modes:${NC}"
+        xrandr --query 2>/dev/null | grep -E "^\s+[0-9]+x[0-9]+" | head -10
+    fi
 
-    if xrandr --output "$out" --mode "$XRANDR_MODE" >/dev/null 2>&1; then
+    local xrandr_output
+    if xrandr_output=$(xrandr --output "$out" --mode "$XRANDR_MODE" 2>&1); then
         echo -e "${GREEN}✓ Display resolution set to $XRANDR_MODE${NC}"
     else
-        echo -e "${YELLOW}⚠ Failed to set resolution to $XRANDR_MODE (continuing)${NC}"
+        echo -e "${YELLOW}⚠ Failed to set resolution to $XRANDR_MODE${NC}"
+        echo "  xrandr error: $xrandr_output"
         # If we couldn't set it, don't attempt restore (we didn't change it).
         ORIG_XRANDR_OUTPUT=""
         ORIG_XRANDR_MODE=""
@@ -419,16 +439,42 @@ echo ""
 
 # Set Wine defaults if not already set
 WINEPREFIX="${WINEPREFIX:-/wineprefix}"
-WINEARCH="${WINEARCH:-win64}"
 WINEDEBUG="${WINEDEBUG:--all}"
 
 export WINEPREFIX
-export WINEARCH
 export WINEDEBUG
 export WINE_LARGE_ADDRESS_AWARE="${WINE_LARGE_ADDRESS_AWARE:-1}"
 
+# Check if Wine is running in WoW64 mode (Wine 9.x+ default)
+# In WoW64 mode, WINEARCH is ignored and Wine can run both 32-bit and 64-bit apps
+WINE_WOW64_MODE="false"
+if command -v wine64 >/dev/null 2>&1; then
+    # Wine 9.x+ with WoW64: wine64 exists and is the default
+    WINE_VERSION_OUTPUT=$($WINE_BINARY --version 2>/dev/null || echo "")
+    if echo "$WINE_VERSION_OUTPUT" | grep -qE "wine-[89]\.|wine-[1-9][0-9]"; then
+        WINE_WOW64_MODE="true"
+    fi
+fi
+
+# Handle WINEARCH for prefix creation
+# In WoW64 mode (Wine 9.x+), WINEARCH is not supported - Wine handles both 32-bit and 64-bit natively
+if [ "$WINE_WOW64_MODE" = "true" ]; then
+    if [ -n "$WINEARCH" ] && [ "$WINEARCH" = "win32" ]; then
+        echo -e "${YELLOW}⚠ WINEARCH=win32 requested but Wine is running in WoW64 mode${NC}"
+        echo -e "${YELLOW}  WoW64 mode (Wine 9.x+) handles 32-bit apps natively - no separate prefix needed${NC}"
+        echo -e "${YELLOW}  Ignoring WINEARCH setting...${NC}"
+    fi
+    # Don't export WINEARCH in WoW64 mode - it will cause errors
+    unset WINEARCH
+    echo "  Wine Mode: WoW64 (handles both 32-bit and 64-bit apps)"
+else
+    # Legacy Wine without WoW64 - use WINEARCH as specified
+    WINEARCH="${WINEARCH:-win64}"
+    export WINEARCH
+    echo "  Wine Architecture: $WINEARCH"
+fi
+
 echo "  Wine Prefix: $WINEPREFIX"
-echo "  Wine Architecture: $WINEARCH"
 echo "  Wine Debug: $WINEDEBUG"
 
 # Ensure prefix directory exists and is owned by the runtime user.
@@ -577,6 +623,100 @@ if [ -n "$WINE_COMPAT_MODE" ] && [ "$WINE_COMPAT_MODE" != "none" ]; then
     esac
 fi
 
+# Apply WINEDLLOVERRIDES environment variable if specified
+# This sets the environment variable for Wine to use DLL overrides without touching registry
+# Format: "dll1=mode1;dll2=mode2" (e.g., "quartz=disabled;wmvcore=disabled")
+# This is different from WINE_DLL_OVERRIDES which sets registry values
+# WINEDLLOVERRIDES is the official Wine environment variable for runtime DLL configuration
+if [ -n "$WINEDLLOVERRIDES" ]; then
+    echo -e "${BLUE}Using WINEDLLOVERRIDES: ${WINEDLLOVERRIDES}${NC}"
+    export WINEDLLOVERRIDES
+fi
+
+# Run winetricks verbs if specified via WINE_WINETRICKS environment variable
+# Format: "verb1;verb2;verb3" (e.g., "vcrun2019;dxvk;d3dcompiler_47")
+if [ -n "$WINE_WINETRICKS" ]; then
+    echo -e "${BLUE}Running winetricks verbs: ${WINE_WINETRICKS}${NC}"
+    IFS=';' read -ra VERBS <<< "$WINE_WINETRICKS"
+    for verb in "${VERBS[@]}"; do
+        if [ -n "$verb" ]; then
+            verb=$(echo "$verb" | xargs) # Trim whitespace
+            echo -e "  Installing winetricks verb: ${verb}"
+            gosu ${UNAME:-gameuser} winetricks -q "$verb" 2>&1 | tail -10 || echo "  Warning: winetricks '$verb' may have failed"
+        fi
+    done
+    echo -e "${GREEN}✓ Winetricks verbs processed${NC}"
+fi
+
+# Apply custom registry settings if specified via WINE_REGISTRY_SETTINGS
+# Format: JSON array string: '[{"path":"HKCU\\Software\\MyGame","name":"NoVideos","type":"REG_DWORD","value":"0x0"}]'
+if [ -n "$WINE_REGISTRY_SETTINGS" ]; then
+    echo -e "${BLUE}Applying custom registry settings...${NC}"
+    
+    # Parse JSON array and apply each setting
+    # Use python for reliable JSON parsing if available, otherwise try jq
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "
+import json
+import sys
+import subprocess
+import os
+
+settings = json.loads('''$WINE_REGISTRY_SETTINGS''')
+user = os.environ.get('UNAME', 'gameuser')
+
+for setting in settings:
+    path = setting.get('path', '')
+    name = setting.get('name', '')
+    reg_type = setting.get('type', 'REG_SZ')
+    value = setting.get('value', '')
+    
+    if path and name:
+        # Convert path for Wine reg command (double backslashes)
+        wine_path = path.replace('\\\\\\\\', '\\\\')
+        
+        # Map type to Wine reg type
+        type_map = {
+            'REG_SZ': 'REG_SZ',
+            'REG_DWORD': 'REG_DWORD', 
+            'REG_BINARY': 'REG_BINARY',
+            'REG_MULTI_SZ': 'REG_MULTI_SZ',
+            'REG_EXPAND_SZ': 'REG_EXPAND_SZ'
+        }
+        wine_type = type_map.get(reg_type, 'REG_SZ')
+        
+        # For DWORD values, Wine expects decimal, so convert hex if needed
+        if wine_type == 'REG_DWORD' and value.startswith('0x'):
+            value = str(int(value, 16))
+        
+        print(f'  Setting {wine_path}\\\\{name} = {value} ({wine_type})')
+        
+        cmd = ['gosu', user, 'wine', 'reg', 'add', wine_path, '/v', name, '/t', wine_type, '/d', value, '/f']
+        subprocess.run(cmd, capture_output=True)
+" 2>/dev/null || echo -e "${YELLOW}  Warning: Failed to parse registry settings${NC}"
+    elif command -v jq >/dev/null 2>&1; then
+        # Fallback to jq if python not available
+        echo "$WINE_REGISTRY_SETTINGS" | jq -c '.[]' 2>/dev/null | while read -r setting; do
+            path=$(echo "$setting" | jq -r '.path // ""')
+            name=$(echo "$setting" | jq -r '.name // ""')
+            reg_type=$(echo "$setting" | jq -r '.type // "REG_SZ"')
+            value=$(echo "$setting" | jq -r '.value // ""')
+            
+            if [ -n "$path" ] && [ -n "$name" ]; then
+                # Convert hex DWORD to decimal
+                if [ "$reg_type" = "REG_DWORD" ] && [[ "$value" == 0x* ]]; then
+                    value=$((value))
+                fi
+                echo -e "  Setting ${path}\\${name} = ${value} (${reg_type})"
+                gosu ${UNAME:-gameuser} wine reg add "$path" /v "$name" /t "$reg_type" /d "$value" /f 2>/dev/null || true
+            fi
+        done
+    else
+        echo -e "${YELLOW}  Warning: Neither python3 nor jq available for registry parsing${NC}"
+    fi
+    echo -e "${GREEN}✓ Custom registry settings applied${NC}"
+fi
+
 # Check if DXVK should be installed
 if [ "$INSTALL_DXVK" = "true" ]; then
     # Check if DXVK DLL overrides are configured in the registry
@@ -695,6 +835,47 @@ apply_xrandr_mode
 if [ "$#" -gt 0 ]; then
     # Check if MangoHUD is enabled
     ENABLE_MANGOHUD="${ENABLE_MANGOHUD:-false}"
+    
+    # Check if this is a wine command and virtual desktop is requested
+    # NOTE: Wine virtual desktop does NOT work with Proton/GE-Proton (UMU launcher)
+    # For Proton, use Gamescope instead for fullscreen support
+    if [ -n "$WINE_VIRTUAL_DESKTOP" ]; then
+        # Check if we're using Proton (UMU launcher or GE-Proton)
+        if [ -n "$WINE_VERSION_ID" ] && echo "$WINE_VERSION_ID" | grep -qi "proton\|umu\|ge-"; then
+            echo -e "${YELLOW}⚠ Wine virtual desktop is not supported with Proton/GE-Proton${NC}"
+            echo -e "${YELLOW}  Skipping virtual desktop. Use Gamescope for fullscreen support.${NC}"
+            echo ""
+        else
+            # Extract resolution for virtual desktop (only for regular Wine)
+            VD_RES="${WINE_VIRTUAL_DESKTOP}"
+            
+            # Check if the command starts with 'wine ' or 'bash' - we need to wrap it with explorer
+            case "$1" in
+                wine)
+                    # Remove 'wine' from the start and wrap with explorer /desktop=
+                    shift
+                    echo -e "${BLUE}Using Wine virtual desktop: ${VD_RES}${NC}"
+                    set -- wine explorer /desktop=Default,${VD_RES} "$@"
+                    ;;
+                bash)
+                    # If it's a bash command containing wine, we need to modify the inner command
+                    # This is typically: bash -lc 'wine "..."'
+                    # $1=bash, $2=-lc, $3='wine "${GAME_EXECUTABLE}"'
+                    if [ "$2" = "-lc" ] || [ "$2" = "-c" ]; then
+                        BASH_FLAG="$2"
+                        WINE_CMD="$3"
+                        shift 3  # Remove bash, -lc, and the wine command
+                        
+                        # Modify the wine command to include explorer /desktop=
+                        MODIFIED_CMD=$(echo "$WINE_CMD" | sed "s/^wine /wine explorer \\/desktop=Default,${VD_RES} /")
+                        
+                        echo -e "${BLUE}Using Wine virtual desktop: ${VD_RES}${NC}"
+                        set -- bash "$BASH_FLAG" "$MODIFIED_CMD" "$@"
+                    fi
+                    ;;
+            esac
+        fi
+    fi
     
     if [ "$USE_GAMESCOPE" = "true" ]; then
         if [ "$ENABLE_MANGOHUD" = "true" ]; then

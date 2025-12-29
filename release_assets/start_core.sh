@@ -81,8 +81,6 @@ info "Host Port: $CORE_PORT -> Container 3010"
 info "Ensuring core volumes exist"
 docker volume create dillinger_root >/dev/null
 ok "dillinger_root"
-docker volume create dillinger_installed >/dev/null
-ok "dillinger_installed"
 docker volume create dillinger_installers >/dev/null
 ok "dillinger_installers"
 
@@ -91,10 +89,9 @@ ok "dillinger_installers"
 info "Ensuring core volumes are owned by PUID:PGID ($PUID:$PGID)"
 docker run --rm \
   -v dillinger_root:/data \
-  -v dillinger_installed:/mnt/linuxfast/dillinger_installed \
   -v dillinger_installers:/installers \
   alpine:3.20 \
-  sh -lc "chown -R $PUID:$PGID /data /mnt/linuxfast/dillinger_installed /installers" >/dev/null
+  sh -lc "chown -R $PUID:$PGID /data /installers" >/dev/null
 ok "volume ownership updated"
 
 if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
@@ -104,7 +101,6 @@ fi
 
 DOCKER_ARGS=(-e PUID="$PUID" -e PGID="$PGID" -p "$CORE_PORT:3010" \
   -v dillinger_root:/data \
-  -v dillinger_installed:/mnt/linuxfast/dillinger_installed \
   -v dillinger_installers:/installers \
   -v /var/run/docker.sock:/var/run/docker.sock)
 
@@ -126,13 +122,25 @@ if [[ -n "${WAYLAND_DISPLAY:-}" && -d "${HOST_XDG_RUNTIME_DIR}" ]]; then
   DOCKER_ARGS+=( -e WAYLAND_DISPLAY="$WAYLAND_DISPLAY" -e XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" -v "$HOST_XDG_RUNTIME_DIR":"$HOST_XDG_RUNTIME_DIR":rw )
 fi
 
-# PulseAudio
+# PulseAudio - check for socket in XDG_RUNTIME_DIR/pulse
+# Also check for pipewire-pulse which exposes the same socket
+PULSE_SOCKET=""
 if [[ -S "$HOST_XDG_RUNTIME_DIR/pulse/native" ]]; then
-  info "Mounting PulseAudio socket"
+  PULSE_SOCKET="$HOST_XDG_RUNTIME_DIR/pulse"
+elif [[ -d "$HOST_XDG_RUNTIME_DIR/pulse" ]]; then
+  # Directory exists even if socket check failed (might be permissions)
+  PULSE_SOCKET="$HOST_XDG_RUNTIME_DIR/pulse"
+fi
+
+if [[ -n "$PULSE_SOCKET" ]]; then
+  info "Mounting PulseAudio socket from $PULSE_SOCKET"
   DOCKER_ARGS+=( \
     -e XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" \
     -e PULSE_SERVER="unix:$HOST_XDG_RUNTIME_DIR/pulse/native" \
-    -v "$HOST_XDG_RUNTIME_DIR/pulse":"$HOST_XDG_RUNTIME_DIR/pulse":rw )
+    -v "$PULSE_SOCKET":"$HOST_XDG_RUNTIME_DIR/pulse":rw )
+else
+  warn "No PulseAudio socket found at $HOST_XDG_RUNTIME_DIR/pulse"
+  warn "  Audio in games may not work. Ensure PulseAudio or PipeWire-Pulse is running."
 fi
 
 mkdir -p "$HOME/.config/pulse"

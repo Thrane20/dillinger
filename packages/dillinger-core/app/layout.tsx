@@ -106,7 +106,7 @@ export default function RootLayout({
             </div>
 
             {/* Center Content - 3/5 width, fixed height, children handle their own overflow */}
-            <main className="w-3/5 h-full overflow-hidden py-6">
+            <main className="w-3/5 h-full overflow-y-auto py-6">
               {children}
             </main>
 

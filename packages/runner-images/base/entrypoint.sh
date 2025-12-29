@@ -217,6 +217,11 @@ setup_gpu() {
         if [ -f "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json" ]; then
             export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
         fi
+        # Disable NVIDIA/CUDA entirely when using AMD
+        # This prevents GStreamer nvcodec plugin from trying to initialize CUDA
+        export CUDA_VISIBLE_DEVICES=""
+        # Disable NVIDIA GStreamer plugins by setting their rank to 0
+        export GST_PLUGIN_FEATURE_RANK="nvh264dec:0,nvh265dec:0,nvh264enc:0,nvh265enc:0,nvcodecvideosink:0,cudaupload:0,cudadownload:0,cudaconvert:0,cudascale:0"
     fi
 
     # Check for Intel GPU

@@ -12,8 +12,14 @@ if [ -f "../../versioning.env" ]; then
     source "../../versioning.env"
 fi
 
+# Resolve to project root versioning.env if relative path failed
+if [ -z "$DILLINGER_RUNNER_BASE_VERSION" ] && [ -f "../../../versioning.env" ]; then
+    source "../../../versioning.env"
+fi
+
 IMAGE_NAME="${IMAGE_NAME:-ghcr.io/thrane20/dillinger/runner-wine}"
 VERSION="${DILLINGER_RUNNER_WINE_VERSION:-0.1.0}"
+BASE_VERSION="${DILLINGER_RUNNER_BASE_VERSION:-0.2.1}"
 IMAGE_TAG="${IMAGE_TAG:-${1:-$VERSION}}"
 NO_CACHE=""
 
@@ -25,12 +31,14 @@ fi
 PROGRESS_MODE="${DOCKER_PROGRESS:-plain}"
 
 echo -e "${BLUE}Building Wine runner Docker image: ${IMAGE_NAME}:${IMAGE_TAG}${NC}"
+echo -e "${BLUE}Base image version: ${BASE_VERSION}${NC}"
 echo -e "${BLUE}Progress mode: ${PROGRESS_MODE}${NC}"
 echo ""
 
 BUILD_START=$(date +%s)
 
 DOCKER_BUILDKIT=1 docker buildx build --network=host --progress="${PROGRESS_MODE}" --load $NO_CACHE \
+    --build-arg BASE_VERSION="${BASE_VERSION}" \
     -t "${IMAGE_NAME}:${IMAGE_TAG}" \
     -t "${IMAGE_NAME}:latest" \
     .

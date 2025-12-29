@@ -39,6 +39,14 @@ interface GameFormData {
       renderer?: 'vulkan' | 'opengl';
       compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10';
       dlls?: Record<string, string>;
+      dllOverrides?: string; // WINEDLLOVERRIDES format (e.g., "quartz=disabled;wmvcore=disabled")
+      winetricks?: string[]; // Winetricks verbs to run before game launch
+      registrySettings?: Array<{
+        path: string;
+        name: string;
+        type: 'REG_SZ' | 'REG_DWORD' | 'REG_BINARY' | 'REG_MULTI_SZ' | 'REG_EXPAND_SZ';
+        value: string;
+      }>;
       debug?: {
         relay?: boolean;
         seh?: boolean;
@@ -118,7 +126,11 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [installedVolumeMountpoint, setInstalledVolumeMountpoint] = useState<string | null>(null);
+  const [volumeDefaults, setVolumeDefaults] = useState<{
+    defaults: { installers: string | null; downloads: string | null; installed: string | null; roms: string | null };
+    volumeMetadata: Record<string, { storageType?: string }>;
+  } | null>(null);
+  const [configuredVolumes, setConfiguredVolumes] = useState<Array<{ id: string; name: string; hostPath: string }>>([]);
   const stripNullTerminators = (value: string): string => value.replace(/\u0000/g, '').trim();
   const sanitizeStringArray = (values: unknown): string[] => {
     if (!Array.isArray(values)) return [];
@@ -178,35 +190,34 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const activePlatformConfig = formData.platforms.find(p => p.platformId === formData.platformId);
   const activeInstallation = activePlatformConfig?.installation || formData._originalGame?.installation;
 
-  const formatInstalledPathForDisplay = (p: string) => {
-    if (p === '/installed') return '${dillinger_installed}';
-    if (p.startsWith('/installed/')) return '${dillinger_installed}' + p.substring('/installed'.length);
-    return p;
-  };
+  // Display paths as-is since they are now direct host paths on configured volumes
+  const formatInstalledPathForDisplay = (p: string) => p;
 
-  const toInstalledHostPath = (p: string): string | null => {
-    if (!installedVolumeMountpoint) return null;
-    if (p === '/installed') return installedVolumeMountpoint;
-    if (p.startsWith('/installed/')) return installedVolumeMountpoint + p.substring('/installed'.length);
-    return null;
-  };
-
+  // Load volume defaults for ROM browsing
   useEffect(() => {
-    // Best-effort: show the real host mountpoint for the dillinger_installed volume when available.
-    const loadInstalledVolumeMountpoint = async () => {
+    const loadVolumeDefaults = async () => {
       try {
-        const response = await fetch('/api/volumes/docker/list');
-        const data = await response.json();
-        if (!data?.success || !Array.isArray(data.data)) return;
-        const installed = data.data.find((v: any) => v?.name === 'dillinger_installed');
-        if (installed?.mountpoint && typeof installed.mountpoint === 'string') {
-          setInstalledVolumeMountpoint(installed.mountpoint);
+        // Load volume defaults
+        const defaultsResponse = await fetch('/api/volumes/defaults');
+        if (defaultsResponse.ok) {
+          const defaultsData = await defaultsResponse.json();
+          if (defaultsData.success) {
+            setVolumeDefaults(defaultsData.data);
+          }
+        }
+        // Load configured volumes
+        const volumesResponse = await fetch('/api/volumes');
+        if (volumesResponse.ok) {
+          const volumesData = await volumesResponse.json();
+          if (volumesData.data) {
+            setConfiguredVolumes(volumesData.data);
+          }
         }
       } catch {
         // non-fatal
       }
     };
-    loadInstalledVolumeMountpoint();
+    loadVolumeDefaults();
   }, []);
 
   // Load game data if in edit mode
@@ -395,6 +406,40 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     } catch (err) {
       console.error('Failed to reset installation:', err);
       setError('Failed to reset installation status');
+    }
+  };
+
+  // Handle cancel installation - stop container and reset status
+  const handleCancelInstallation = async () => {
+    if (!gameId) return;
+    
+    try {
+      const response = await fetch(`/api/games/${gameId}/install`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to cancel installation');
+      }
+
+      // Update local form state to reflect the change
+      setFormData(prev => ({
+        ...prev,
+        platforms: prev.platforms.map(p => 
+          p.platformId === prev.platformId 
+            ? { ...p, installation: { status: 'not_installed' } }
+            : p
+        ),
+        _originalGame: prev._originalGame ? {
+          ...prev._originalGame,
+          installation: { status: 'not_installed' }
+        } : undefined,
+      }));
+
+      setSuccessMessage('Installation cancelled');
+    } catch (err) {
+      console.error('Failed to cancel installation:', err);
+      setError('Failed to cancel installation');
     }
   };
 
@@ -754,6 +799,18 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const handleBrowseInstallDirectory = () => {
     setShowShortcutDialog(false);
     setShowFileExplorer(true);
+  };
+
+  // Get the initial path for ROM file browser (uses 'roms' default volume)
+  const getRomsBrowsePath = (): string | undefined => {
+    const romsVolumeId = volumeDefaults?.defaults.roms;
+    if (romsVolumeId) {
+      const volume = configuredVolumes.find(v => v.id === romsVolumeId);
+      if (volume) {
+        return volume.hostPath;
+      }
+    }
+    return undefined; // Let FileExplorer use its default
   };
 
   const handleFileExplorerSelect = (path: string) => {
@@ -1231,11 +1288,20 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   </div>
 
                   {activeInstallation?.status === 'installing' && (
-                    <div className="text-sm text-yellow-700 dark:text-yellow-300">
-                      Installation is running. When you finish the installer, come back here — we’ll auto-detect executables and shortcuts.
+                    <div className="space-y-2">
+                      <div className="text-sm text-yellow-700 dark:text-yellow-300">
+                        Installation is running. When you finish the installer, come back here — we'll auto-detect executables and shortcuts.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCancelInstallation}
+                        className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        title="Stop the installation container and reset to not installed"
+                      >
+                        Cancel Installation
+                      </button>
                     </div>
                   )}
-
                   {activeInstallation?.status === 'failed' && (
                     <div className="text-sm text-red-700 dark:text-red-300">
                       Installation failed{activeInstallation?.error ? `: ${activeInstallation.error}` : '.'}
@@ -1282,11 +1348,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                       </div>
                       <div className="text-xs text-gray-500 font-mono break-all">
                         <div>{formatInstalledPathForDisplay(activeInstallation.installPath)}</div>
-                        {toInstalledHostPath(activeInstallation.installPath) && (
-                          <div className="text-gray-400">
-                            {toInstalledHostPath(activeInstallation.installPath)}
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
@@ -1332,29 +1393,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="settings.launch.workingDirectory" className="block text-sm font-medium text-muted mb-2">
-                  Working Directory
-                </label>
-                <input
-                  type="text"
-                  id="settings.launch.workingDirectory"
-                  name="settings.launch.workingDirectory"
-                  value={formData.settings?.launch?.workingDirectory || ''}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                  placeholder="Relative path from game directory"
-                />
-                {!!formData.settings?.launch?.workingDirectory && formData.settings.launch.workingDirectory.startsWith('/installed') && (
-                  <div className="text-xs text-gray-500 mt-2 font-mono break-all">
-                    <div>{formatInstalledPathForDisplay(formData.settings.launch.workingDirectory)}</div>
-                    {toInstalledHostPath(formData.settings.launch.workingDirectory) && (
-                      <div className="text-gray-400">{toInstalledHostPath(formData.settings.launch.workingDirectory)}</div>
-                    )}
-                  </div>
-                )}
-              </div>
-
               {/* Display Options - only show for Wine platform */}
               {formData.platformId === 'windows-wine' && (
                 <>
@@ -1378,31 +1416,46 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   </div>
 
                   <div className="col-span-2">
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.settings?.launch?.fullscreen || false}
-                        onChange={(e) => {
-                          setFormData((prev) => ({
-                            ...prev,
-                            settings: {
-                              ...prev.settings,
-                              launch: {
-                                ...prev.settings?.launch,
-                                fullscreen: e.target.checked,
-                              },
-                            },
-                          }));
-                        }}
-                        className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm font-medium text-muted">
-                        Launch in fullscreen (Wine virtual desktop)
-                      </span>
-                    </label>
-                    <p className="text-xs text-gray-500 mt-1 ml-6">
-                      Creates a virtual desktop for better window management and fullscreen support
-                    </p>
+                    {(() => {
+                      const wineVersion = formData.settings?.wine?.version || '';
+                      const isProton = /^ge-|proton|umu/i.test(wineVersion);
+                      return (
+                        <>
+                          <label className={`flex items-center space-x-2 ${isProton ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                            <input
+                              type="checkbox"
+                              checked={formData.settings?.launch?.fullscreen || false}
+                              disabled={isProton}
+                              onChange={(e) => {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  settings: {
+                                    ...prev.settings,
+                                    launch: {
+                                      ...prev.settings?.launch,
+                                      fullscreen: e.target.checked,
+                                    },
+                                  },
+                                }));
+                              }}
+                              className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                            />
+                            <span className="text-sm font-medium text-muted">
+                              Launch in fullscreen (Wine virtual desktop)
+                            </span>
+                          </label>
+                          {isProton ? (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 ml-6">
+                              ⚠️ Not compatible with GE-Proton — use Gamescope for fullscreen instead
+                            </p>
+                          ) : (
+                            <p className="text-xs text-gray-500 mt-1 ml-6">
+                              Creates a virtual desktop for better window management and fullscreen support
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {formData.settings?.launch?.fullscreen && (
@@ -1481,6 +1534,260 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     </div>
                   )}
                 </>
+              )}
+
+              {/* Wine Advanced Settings - DLL Overrides, Winetricks, Registry */}
+              {formData.platformId === 'windows-wine' && (
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                  <h4 className="text-sm font-medium text-text mb-3">Wine Advanced Configuration</h4>
+                  
+                  {/* DLL Overrides */}
+                  <div className="mb-4">
+                    <label htmlFor="settings.wine.dllOverrides" className="block text-sm font-medium text-muted mb-2">
+                      DLL Overrides (WINEDLLOVERRIDES)
+                    </label>
+                    <input
+                      type="text"
+                      id="settings.wine.dllOverrides"
+                      name="settings.wine.dllOverrides"
+                      value={formData.settings?.wine?.dllOverrides || ''}
+                      onChange={(e) => {
+                        setFormData({
+                          ...formData,
+                          settings: {
+                            ...formData.settings,
+                            wine: {
+                              ...formData.settings?.wine,
+                              dllOverrides: e.target.value,
+                            },
+                          },
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                      placeholder="e.g., quartz=disabled;wmvcore=disabled"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Semicolon-separated DLL overrides. Common modes: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">disabled</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">native</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">builtin</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">native,builtin</code>
+                    </p>
+                  </div>
+
+                  {/* Winetricks */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-muted mb-2">
+                      Winetricks Components
+                    </label>
+                    <div className="space-y-2">
+                      {(formData.settings?.wine?.winetricks || []).map((verb, index) => (
+                        <div key={index} className="flex gap-2">
+                          <input
+                            type="text"
+                            value={verb}
+                            onChange={(e) => {
+                              const newWinetricks = [...(formData.settings?.wine?.winetricks || [])];
+                              newWinetricks[index] = e.target.value;
+                              setFormData({
+                                ...formData,
+                                settings: {
+                                  ...formData.settings,
+                                  wine: {
+                                    ...formData.settings?.wine,
+                                    winetricks: newWinetricks,
+                                  },
+                                },
+                              });
+                            }}
+                            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                            placeholder="e.g., vcrun2019, dxvk, d3dx9"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newWinetricks = (formData.settings?.wine?.winetricks || []).filter((_, i) => i !== index);
+                              setFormData({
+                                ...formData,
+                                settings: {
+                                  ...formData.settings,
+                                  wine: {
+                                    ...formData.settings?.wine,
+                                    winetricks: newWinetricks,
+                                  },
+                                },
+                              });
+                            }}
+                            className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            settings: {
+                              ...formData.settings,
+                              wine: {
+                                ...formData.settings?.wine,
+                                winetricks: [...(formData.settings?.wine?.winetricks || []), ''],
+                              },
+                            },
+                          });
+                        }}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                      >
+                        + Add Winetricks Verb
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Install Windows components before launching. Common: vcrun2019, dxvk, d3dx9, physx, dotnet48
+                    </p>
+                  </div>
+
+                  {/* Registry Settings */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-muted mb-2">
+                      Windows Registry Settings
+                    </label>
+                    <div className="space-y-2">
+                      {(formData.settings?.wine?.registrySettings || []).map((reg, index) => (
+                        <div key={index} className="p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-800">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+                            <input
+                              type="text"
+                              value={reg.path}
+                              onChange={(e) => {
+                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
+                                newSettings[index] = { ...newSettings[index], path: e.target.value };
+                                setFormData({
+                                  ...formData,
+                                  settings: {
+                                    ...formData.settings,
+                                    wine: {
+                                      ...formData.settings?.wine,
+                                      registrySettings: newSettings,
+                                    },
+                                  },
+                                });
+                              }}
+                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
+                              placeholder="HKCU\Software\MyGame"
+                            />
+                            <input
+                              type="text"
+                              value={reg.name}
+                              onChange={(e) => {
+                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
+                                newSettings[index] = { ...newSettings[index], name: e.target.value };
+                                setFormData({
+                                  ...formData,
+                                  settings: {
+                                    ...formData.settings,
+                                    wine: {
+                                      ...formData.settings?.wine,
+                                      registrySettings: newSettings,
+                                    },
+                                  },
+                                });
+                              }}
+                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
+                              placeholder="ValueName"
+                            />
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <select
+                              value={reg.type}
+                              onChange={(e) => {
+                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
+                                newSettings[index] = { ...newSettings[index], type: e.target.value as 'REG_SZ' | 'REG_DWORD' | 'REG_BINARY' | 'REG_MULTI_SZ' | 'REG_EXPAND_SZ' };
+                                setFormData({
+                                  ...formData,
+                                  settings: {
+                                    ...formData.settings,
+                                    wine: {
+                                      ...formData.settings?.wine,
+                                      registrySettings: newSettings,
+                                    },
+                                  },
+                                });
+                              }}
+                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
+                            >
+                              <option value="REG_SZ">REG_SZ (String)</option>
+                              <option value="REG_DWORD">REG_DWORD (Integer)</option>
+                              <option value="REG_BINARY">REG_BINARY</option>
+                              <option value="REG_MULTI_SZ">REG_MULTI_SZ</option>
+                              <option value="REG_EXPAND_SZ">REG_EXPAND_SZ</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={reg.value}
+                              onChange={(e) => {
+                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
+                                newSettings[index] = { ...newSettings[index], value: e.target.value };
+                                setFormData({
+                                  ...formData,
+                                  settings: {
+                                    ...formData.settings,
+                                    wine: {
+                                      ...formData.settings?.wine,
+                                      registrySettings: newSettings,
+                                    },
+                                  },
+                                });
+                              }}
+                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
+                              placeholder="Value (e.g., 0x1 for DWORD)"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newSettings = (formData.settings?.wine?.registrySettings || []).filter((_, i) => i !== index);
+                                setFormData({
+                                  ...formData,
+                                  settings: {
+                                    ...formData.settings,
+                                    wine: {
+                                      ...formData.settings?.wine,
+                                      registrySettings: newSettings,
+                                    },
+                                  },
+                                });
+                              }}
+                              className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            settings: {
+                              ...formData.settings,
+                              wine: {
+                                ...formData.settings?.wine,
+                                registrySettings: [
+                                  ...(formData.settings?.wine?.registrySettings || []),
+                                  { path: '', name: '', type: 'REG_DWORD' as const, value: '' },
+                                ],
+                              },
+                            },
+                          });
+                        }}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                      >
+                        + Add Registry Setting
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Set Windows registry values before launching. Useful for game-specific settings like disabling intro videos.
+                    </p>
+                  </div>
+                </div>
               )}
 
               {/* Gamescope Compositor */}
@@ -2199,6 +2506,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
             onSelect={handleRomFileSelect}
             selectMode="file"
             title="Select ROM File (.d64, .d81, .t64, .prg, .crt, .tap, .g64, .zip)"
+            initialPath={getRomsBrowsePath()}
           />
         )}
 

@@ -84,6 +84,14 @@ export interface GamePlatformConfig {
       useDxvk?: boolean; // Install DXVK (DirectX to Vulkan translation layer) for better performance and MangoHUD compatibility
       renderer?: 'vulkan' | 'opengl'; // Direct3D renderer selection
       compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10'; // Windows compatibility mode preset
+      dllOverrides?: string; // WINEDLLOVERRIDES format (e.g., "quartz=disabled;wmvcore=disabled")
+      winetricks?: string[]; // Winetricks verbs to run before game launch (e.g., ["vcrun2019", "dxvk"])
+      registrySettings?: Array<{ // Custom Windows registry settings
+        path: string;    // Registry path (e.g., "HKCU\\Software\\MyGame")
+        name: string;    // Value name (e.g., "NoVideos")
+        type: 'REG_SZ' | 'REG_DWORD' | 'REG_BINARY' | 'REG_MULTI_SZ' | 'REG_EXPAND_SZ'; // Registry value type
+        value: string;   // Value data (DWORD as hex "0x0", strings as-is, binary as hex)
+      }>;
       debug?: {
         // Wine debug channels - controls WINEDEBUG environment variable
         // Each channel can be enabled individually for debugging
@@ -152,6 +160,8 @@ export interface GamePlatformConfig {
     installMethod?: 'manual' | 'automated'; // How the game was installed
     containerId?: string; // Active installation container ID
     error?: string; // Error message if installation failed
+    wineVersionId?: string; // Wine version used for installation (e.g., 'system', 'ge-proton-10-27')
+    wineArch?: 'win32' | 'win64'; // Wine architecture used for installation (win32 for 32-bit games)
   };
 }
 

@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dillinger.dev/schemas/v1.0/volume-defaults.json",
+  "title": "Volume Defaults",
+  "description": "Schema for volume default assignments and metadata in Dillinger",
+  "type": "object",
+  "properties": {
+    "defaults": {
+      "type": "object",
+      "description": "Default volume assignments for different purposes",
+      "properties": {
+        "installers": {
+          "type": ["string", "null"],
+          "description": "Volume ID for storing game installers"
+        },
+        "downloads": {
+          "type": ["string", "null"],
+          "description": "Volume ID for in-progress downloads"
+        },
+        "installed": {
+          "type": ["string", "null"],
+          "description": "Volume ID for installed games"
+        },
+        "roms": {
+          "type": ["string", "null"],
+          "description": "Volume ID for ROM files"
+        }
+      }
+    },
+    "volumeMetadata": {
+      "type": "object",
+      "description": "Metadata for each volume, keyed by volume ID",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "storageType": {
+            "type": "string",
+            "enum": ["ssd", "platter", "archive"],
+            "description": "Physical storage type for performance tiering"
+          }
+        }
+      }
+    }
+  }
+}

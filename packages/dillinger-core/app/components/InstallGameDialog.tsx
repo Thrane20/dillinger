@@ -1,8 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import FileExplorer from './FileExplorer';
 import type { InstallGameRequest, InstallGameResponse } from '@dillinger/shared';
+
+interface Volume {
+  id: string;
+  name: string;
+  dockerVolumeName: string;
+  hostPath: string;
+}
+
+interface VolumeDefaults {
+  defaults: {
+    installers: string | null;
+    downloads: string | null;
+    installed: string | null;
+    roms: string | null;
+  };
+  volumeMetadata: Record<string, {
+    storageType?: 'ssd' | 'platter' | 'archive';
+  }>;
+}
+
+interface WineVersion {
+  id: string;
+  name: string;
+  type: 'system' | 'wine-staging' | 'ge-proton';
+  version?: string;
+}
 
 interface InstallGameDialogProps {
   gameId: string;
@@ -16,24 +42,105 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
   const [installPath, setInstallPath] = useState('');
   const [installerArgs, setInstallerArgs] = useState('');
   const [debugMode, setDebugMode] = useState(false);
+  const [wineVersionId, setWineVersionId] = useState('system');
+  const [wineArch, setWineArch] = useState<'win32' | 'win64'>('win64');
+  const [wineVersions, setWineVersions] = useState<WineVersion[]>();
   const [showFileExplorer, setShowFileExplorer] = useState<'installer' | 'location' | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [availableVolumes, setAvailableVolumes] = useState<Volume[]>([]);
+  const [selectedVolume, setSelectedVolume] = useState<string | null>(null);
+  const [volumeDefaults, setVolumeDefaults] = useState<VolumeDefaults | null>(null);
+  const isWinePlatform = platformId === 'windows-wine' || platformId.includes('wine');
 
-  // Suggest a default installation directory inside the Dillinger installed volume.
-  // This is a container path mounted from the `dillinger_installed` Docker volume.
-  // Users can override via the directory picker.
-  const defaultInstallPath = `/installed/${gameId}`;
+  // Fetch available volumes and defaults on mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // Load configured volumes (bind mounts)
+        const volumesResponse = await fetch('/api/volumes');
+        if (volumesResponse.ok) {
+          const volumesData = await volumesResponse.json();
+          setAvailableVolumes(volumesData.data || []);
+        }
+
+        // Load volume defaults
+        const defaultsResponse = await fetch('/api/volumes/defaults');
+        if (defaultsResponse.ok) {
+          const defaultsData = await defaultsResponse.json();
+          if (defaultsData.success) {
+            setVolumeDefaults(defaultsData.data);
+            // Pre-select the default "installed" volume if set
+            if (defaultsData.data.defaults.installed) {
+              setSelectedVolume(defaultsData.data.defaults.installed);
+            }
+          }
+        }
+
+        // Load available Wine versions (for Wine platform)
+        if (isWinePlatform) {
+          const wineResponse = await fetch('/api/wine-versions');
+          if (wineResponse.ok) {
+            const wineData = await wineResponse.json();
+            if (wineData.success) {
+              setWineVersions(wineData.data.installedVersions || []);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load volumes/settings:', err);
+      }
+    };
+    loadData();
+  }, [isWinePlatform]);
+
+  // Get the volume object by ID
+  const getVolumeById = (id: string) => availableVolumes.find(v => v.id === id);
+
+  // Check if a volume is the default for a purpose
+  const isDefaultFor = (volumeId: string, purpose: keyof VolumeDefaults['defaults']) => {
+    return volumeDefaults?.defaults[purpose] === volumeId;
+  };
+
+  // Get the initial path for installer browser (uses 'installers' default volume)
+  const getInstallersBrowsePath = (): string | undefined => {
+    const installersVolumeId = volumeDefaults?.defaults.installers;
+    if (installersVolumeId) {
+      const volume = getVolumeById(installersVolumeId);
+      if (volume) {
+        return volume.hostPath;
+      }
+    }
+    return undefined; // Let FileExplorer use its default
+  };
+
+  // Get the initial path for install location browser (uses 'installed' default volume)
+  const getInstallLocationBrowsePath = (): string | undefined => {
+    const installedVolumeId = volumeDefaults?.defaults.installed;
+    if (installedVolumeId) {
+      const volume = getVolumeById(installedVolumeId);
+      if (volume) {
+        return volume.hostPath;
+      }
+    }
+    return undefined; // Let FileExplorer use its default
+  };
+
+  const handleVolumeSelect = (volumeId: string) => {
+    setSelectedVolume(volumeId);
+    const volume = getVolumeById(volumeId);
+    if (volume) {
+      // Use the volume's host path as base
+      setInstallPath(`${volume.hostPath}/${gameId}`);
+    }
+  };
 
   const handleInstallerSelect = (path: string) => {
     setInstallerPath(path);
 
-    // Auto-populate a sensible default install location if empty
-    if (!installPath) {
-      setInstallPath(defaultInstallPath);
-    }
-
-    setShowFileExplorer('location');
+    // Don't auto-populate install path - let the user choose from volume buttons first
+    // This ensures step 2 (volume selection) is shown
+    setShowFileExplorer(null);
   };
 
   const handleLocationSelect = (path: string) => {
@@ -60,6 +167,10 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
       // Backwards-compatible: only include optional fields if provided
       (payload as any).installerArgs = installerArgs || undefined;
       (payload as any).debugMode = debugMode || undefined;
+      if (isWinePlatform) {
+        (payload as any).wineVersionId = wineVersionId || 'system';
+        (payload as any).wineArch = wineArch || 'win64';
+      }
 
       const response = await fetch(`/api/games/${gameId}/install`, {
         method: 'POST',
@@ -132,8 +243,43 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                     ✓ Installer: <span className="font-mono text-xs">{installerPath}</span>
                   </p>
                 </div>
+
+                {/* Volume Quick Select */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-muted mb-2">
+                    📦 Quick Select Volume
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {availableVolumes.length > 0 ? (
+                      availableVolumes.map((vol) => (
+                        <button
+                          key={vol.id}
+                          type="button"
+                          onClick={() => handleVolumeSelect(vol.id)}
+                          className={`px-3 py-2 rounded-md text-sm transition-colors ${
+                            selectedVolume === vol.id
+                              ? 'bg-green-600 text-white'
+                              : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200'
+                          }`}
+                        >
+                          {isDefaultFor(vol.id, 'installed') && '🎮 '}
+                          {vol.name}
+                          {isDefaultFor(vol.id, 'installed') && ' ⭐'}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted">
+                        No volumes configured. Add volumes in the Volume Manager on the left sidebar.
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    Click a volume to set the install location. ⭐ indicates your default from Volume Manager.
+                  </p>
+                </div>
+
                 <p className="text-sm text-muted mb-4">
-                  Select the directory where the game should be installed.
+                  Or browse to select a custom installation directory:
                 </p>
                 <button
                   type="button"
@@ -158,6 +304,49 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                     Some installers support silent switches. Leave empty for normal GUI install.
                   </p>
                 </div>
+
+                {/* Wine Version Selector */}
+                {isWinePlatform && wineVersions && wineVersions.length > 0 && (
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-muted mb-2">
+                      🍷 Wine Version
+                    </label>
+                    <select
+                      value={wineVersionId}
+                      onChange={(e) => setWineVersionId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                    >
+                      {wineVersions.map((wv) => (
+                        <option key={wv.id} value={wv.id}>
+                          {wv.name} {wv.type === 'ge-proton' ? '(GE-Proton)' : wv.type === 'wine-staging' ? '(Staging)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Select the Wine version to use for this installation. GE-Proton is recommended for modern games.
+                    </p>
+                  </div>
+                )}
+
+                {/* Wine Architecture Selector */}
+                {isWinePlatform && (
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-muted mb-2">
+                      🖥️ Wine Architecture (Legacy)
+                    </label>
+                    <select
+                      value={wineArch}
+                      onChange={(e) => setWineArch(e.target.value as 'win32' | 'win64')}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                    >
+                      <option value="win64">64-bit (default)</option>
+                      <option value="win32">32-bit (legacy Wine only)</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      <strong>Note:</strong> Modern Wine (9.x+, GE-Proton) uses WoW64 mode which runs both 32-bit and 64-bit games automatically. This setting is ignored for modern Wine.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -176,6 +365,22 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                     <label className="text-sm font-medium text-muted">Platform:</label>
                     <p className="font-mono text-sm mt-1">{platformId}</p>
                   </div>
+                  {isWinePlatform && (
+                    <div>
+                      <label className="text-sm font-medium text-muted">Wine Version:</label>
+                      <p className="font-mono text-sm mt-1">
+                        {wineVersions?.find(wv => wv.id === wineVersionId)?.name || wineVersionId}
+                      </p>
+                    </div>
+                  )}
+                  {isWinePlatform && (
+                    <div>
+                      <label className="text-sm font-medium text-muted">Wine Architecture:</label>
+                      <p className="font-mono text-sm mt-1">
+                        {wineArch === 'win32' ? '32-bit (win32)' : '64-bit (win64)'}
+                      </p>
+                    </div>
+                  )}
                   {installerArgs && (
                     <div>
                       <label className="text-sm font-medium text-muted">Installer Args:</label>
@@ -265,6 +470,7 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
           title="Select Installer File"
           selectMode="file"
           showVolumes={true}
+          initialPath={getInstallersBrowsePath()}
         />
       )}
 
@@ -276,6 +482,7 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
           title="Select Installation Directory"
           selectMode="directory"
           showVolumes={true}
+          initialPath={getInstallLocationBrowsePath()}
         />
       )}
     </>

@@ -4,8 +4,11 @@ import * as path from 'path';
 import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { JSONStorageService } from '@/lib/services/storage';
+import type { Volume } from '@dillinger/shared';
 
 const execAsync = promisify(exec);
+const storage = JSONStorageService.getInstance();
 
 interface FileItem {
   name: string;
@@ -16,12 +19,37 @@ interface FileItem {
   permissions?: string;
 }
 
-// Browse a path inside the dillinger_installed Docker volume (mounted at /installed)
-async function browseInstalledVolume(containerPath: string): Promise<{ items: FileItem[]; parentPath: string | null }> {
-  const clean = containerPath.startsWith('/installed') ? containerPath : `/installed${containerPath}`;
-  const parentPath = clean !== '/installed' ? path.posix.dirname(clean) : null;
+// Find a configured volume that contains the given path
+async function findVolumeForPath(hostPath: string): Promise<{ volume: Volume; relativePath: string } | null> {
+  try {
+    const volumes = await storage.listEntities<Volume>('volumes');
+    
+    // Sort by hostPath length descending to match the most specific volume first
+    const sortedVolumes = [...volumes].sort((a, b) => b.hostPath.length - a.hostPath.length);
+    
+    for (const volume of sortedVolumes) {
+      if (hostPath === volume.hostPath || hostPath.startsWith(volume.hostPath + '/')) {
+        const relativePath = hostPath === volume.hostPath ? '' : hostPath.substring(volume.hostPath.length);
+        return { volume, relativePath };
+      }
+    }
+    
+    return null;
+  } catch {
+    return null;
+  }
+}
 
-  const cmd = `docker run --rm -v dillinger_installed:/installed:ro alpine:latest sh -c 'ls -la "${clean}" 2>/dev/null | tail -n +2'`;
+// Browse a path inside a Docker volume
+async function browseVolume(
+  dockerVolumeName: string, 
+  relativePath: string,
+  originalHostPath: string
+): Promise<{ items: FileItem[]; parentPath: string | null }> {
+  const containerPath = `/mnt/vol${relativePath || ''}`;
+  const parentPath = originalHostPath !== '/' ? path.dirname(originalHostPath) : null;
+
+  const cmd = `docker run --rm -v "${dockerVolumeName}:/mnt/vol:ro" alpine:latest sh -c 'ls -la "${containerPath}" 2>/dev/null | tail -n +2'`;
 
   try {
     const { stdout } = await execAsync(cmd, { timeout: 15000 });
@@ -39,7 +67,8 @@ async function browseInstalledVolume(containerPath: string): Promise<{ items: Fi
       if (name === '.' || name === '..') continue;
 
       const isDirectory = permissions.startsWith('d');
-      const itemPath = path.posix.join(clean, name);
+      // Return the host path, not container path
+      const itemPath = path.posix.join(originalHostPath, name);
 
       items.push({
         name,
@@ -57,8 +86,8 @@ async function browseInstalledVolume(containerPath: string): Promise<{ items: Fi
 
     return { items, parentPath };
   } catch (err) {
-    console.error('Installed volume browse failed:', err);
-    throw new Error(`Cannot access installed volume path: ${clean}`);
+    console.error('Volume browse failed:', err);
+    throw new Error(`Cannot access path: ${originalHostPath}`);
   }
 }
 
@@ -72,7 +101,7 @@ async function browseViaDocker(hostPath: string): Promise<{ items: FileItem[]; p
   const cmd = `docker run --rm -v "${absolutePath}":"${absolutePath}":ro alpine:latest sh -c 'ls -la "${absolutePath}" 2>/dev/null | tail -n +2'`;
   
   try {
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 15000 });
     
     // Check if mount failed
     if (stderr && stderr.includes('no such file or directory')) {
@@ -127,19 +156,26 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const requestedPath = searchParams.get('path') || os.homedir();
-
-    // Canonical installed volume paths
-    if (requestedPath === '/installed' || requestedPath.startsWith('/installed/')) {
+    
+    const absolutePath = path.resolve(requestedPath);
+    
+    // First, check if this path is on a configured volume
+    const volumeMatch = await findVolumeForPath(absolutePath);
+    if (volumeMatch) {
       try {
-        const { items, parentPath } = await browseInstalledVolume(requestedPath);
+        const { items, parentPath } = await browseVolume(
+          volumeMatch.volume.dockerVolumeName,
+          volumeMatch.relativePath,
+          absolutePath
+        );
         return NextResponse.json({
           success: true,
           data: {
-            currentPath: requestedPath,
+            currentPath: absolutePath,
             parentPath,
             items,
             viaDocker: true,
-            volume: 'dillinger_installed',
+            volume: volumeMatch.volume.name,
           },
         });
       } catch (err) {
@@ -150,9 +186,7 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    const absolutePath = path.resolve(requestedPath);
-    
-    // First, try to access the path locally (inside container)
+    // Try to access the path locally (inside container)
     let useDocker = false;
     try {
       const stats = await fs.stat(absolutePath);
@@ -168,7 +202,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (useDocker) {
-      // Browse host path via Docker
+      // Browse host path via Docker (direct bind mount)
       try {
         const { items, parentPath } = await browseViaDocker(absolutePath);
         return NextResponse.json({
@@ -177,7 +211,7 @@ export async function GET(request: NextRequest) {
             currentPath: absolutePath,
             parentPath,
             items,
-            viaDocker: true, // Flag to indicate this was browsed via Docker
+            viaDocker: true,
           },
         });
       } catch (dockerErr) {

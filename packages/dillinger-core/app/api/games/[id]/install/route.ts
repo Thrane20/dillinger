@@ -58,7 +58,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { installerPath, installPath, platformId, installerArgs, debugMode } = body;
+    const { installerPath, installPath, platformId, installerArgs, debugMode, wineVersionId, wineArch } = body;
 
     if (!id || !installerPath || !installPath || !platformId) {
       return NextResponse.json(
@@ -91,17 +91,15 @@ export async function POST(
     console.log(`🎮 Starting game installation for: ${game.title}`);
     console.log(`  Installer: ${installerPath}`);
     console.log(`  Install target: ${installPath}`);
-
-    // Normalize install paths
-    const legacyPublicRoot = process.env.DILLINGER_INSTALLED_PUBLIC_PATH || '/mnt/linuxfast/dillinger_installed';
-    let canonicalInstallPath = installPath;
-    if (installPath && (installPath === legacyPublicRoot || installPath.startsWith(legacyPublicRoot + '/'))) {
-      canonicalInstallPath = '/installed' + installPath.substring(legacyPublicRoot.length);
-      console.log(`  Normalized installPath to canonical: ${canonicalInstallPath}`);
-    }
     console.log(`  Platform: ${platform.name}`);
     if (installerArgs) {
       console.log(`  Installer args: ${installerArgs}`);
+    }
+    if (wineVersionId) {
+      console.log(`  Wine version: ${wineVersionId}`);
+    }
+    if (wineArch) {
+      console.log(`  Wine architecture: ${wineArch}`);
     }
     if (debugMode) {
       console.log(`  🔧 DEBUG MODE: Container will be kept for inspection`);
@@ -110,24 +108,28 @@ export async function POST(
     // Start installation container
     const containerInfo = await dockerService.installGame({
       installerPath,
-      installPath: canonicalInstallPath,
+      installPath,
       platform,
       sessionId,
       game,
       installerArgs,
       debugMode,
+      wineVersionId,
+      wineArch,
     });
 
     // Update game with installation information
     const updatedAt = new Date().toISOString();
     const updatedGame = updateGameInstallationFields(game, platformId, {
       status: 'installing' as const,
-      installPath: canonicalInstallPath,
+      installPath,
       installerPath,
       installerArgs,
       containerId: containerInfo.containerId,
       platformId,
       installMethod: 'automated' as const,
+      wineVersionId: wineVersionId || 'system', // Store the Wine version used for installation
+      wineArch: wineArch || 'win64', // Store the Wine architecture used for installation
     } as any);
 
     (updatedGame as any).updated = updatedAt;
@@ -141,7 +143,7 @@ export async function POST(
     void (async () => {
       try {
         const containerResult = await dockerService.waitForInstallationComplete(containerInfo.containerId);
-        const executables = await dockerService.scanForGameExecutables(canonicalInstallPath);
+        const executables = await dockerService.scanForGameExecutables(installPath);
         const hasExecutables = executables.length > 0;
 
         const nextStatus = hasExecutables
@@ -163,13 +165,13 @@ export async function POST(
 
         // Auto-select an executable when we can find one.
         if (hasExecutables) {
-          (completedGame as any).filePath = `${canonicalInstallPath}/${executables[0]}`;
+          (completedGame as any).filePath = `${installPath}/${executables[0]}`;
           (completedGame as any).settings = {
             ...(completedGame as any).settings,
             launch: {
               ...((completedGame as any).settings?.launch || {}),
               workingDirectory:
-                (completedGame as any).settings?.launch?.workingDirectory || canonicalInstallPath || '',
+                (completedGame as any).settings?.launch?.workingDirectory || installPath || '',
             },
           };
         }
@@ -309,6 +311,81 @@ export async function GET(
       {
         success: false,
         error: 'Failed to check installation status',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/games/[id]/install - Cancel an in-progress installation
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Game ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const { game, fileKey } = await findGameAndFileKey(id);
+    if (!game || !fileKey) {
+      return NextResponse.json(
+        { success: false, error: 'Game not found' },
+        { status: 404 }
+      );
+    }
+
+    const installation = game.installation;
+    const platformId = (installation as any)?.platformId || game.defaultPlatformId || 'windows-wine';
+
+    // Try to stop and remove the container if it exists
+    if (installation?.containerId) {
+      try {
+        console.log(`🛑 Stopping installation container: ${installation.containerId}`);
+        await dockerService.stopContainer(installation.containerId);
+        await dockerService.removeContainer(installation.containerId, true);
+        console.log(`✓ Container removed: ${installation.containerId}`);
+      } catch (containerError) {
+        // Container might already be stopped/removed, that's OK
+        console.warn(`Container cleanup warning: ${containerError}`);
+      }
+    }
+
+    // Reset installation status to not_installed
+    const updatedAt = new Date().toISOString();
+    const updatedGame = updateGameInstallationFields(game, platformId, {
+      status: 'not_installed' as const,
+      installPath: undefined,
+      installerPath: undefined,
+      installerArgs: undefined,
+      containerId: undefined,
+      installedAt: undefined,
+      error: undefined,
+      wineVersionId: undefined,
+      wineArch: undefined,
+    } as any);
+
+    (updatedGame as any).updated = updatedAt;
+
+    await storage.writeEntity('games', fileKey, updatedGame);
+
+    console.log(`✓ Installation cancelled for ${game.title}`);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Installation cancelled',
+    });
+  } catch (error) {
+    console.error('Error cancelling installation:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Failed to cancel installation',
         message: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }

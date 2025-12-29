@@ -26,6 +26,7 @@
     "dockerode": "^4.0.0",
     "fs-extra": "^11.1.0",
     "next": "16.0.10",
+    "openai": "^6.15.0",
     "postcss": "^8",
     "react": "^18",
     "react-dom": "^18",
@@ -39,8 +40,6 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
     "@tailwindcss/forms": "^0.5.10",
     "@tailwindcss/typography": "^0.5.19",
     "@types/dockerode": "^3.3.45",
@@ -49,6 +48,8 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/uuid": "^9.0.8",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "16.0.10",
     "eslint-plugin-react": "^7.37.0",

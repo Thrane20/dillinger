@@ -492,16 +492,21 @@ start_container() {
     # Audio passthrough (PulseAudio)
     local XDG_RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
     if [ -d "$XDG_RUNTIME/pulse" ]; then
-        DOCKER_ARGS="$DOCKER_ARGS -v $XDG_RUNTIME/pulse:/run/user/1000/pulse:rw"
-        DOCKER_ARGS="$DOCKER_ARGS -e PULSE_SERVER=unix:/run/user/1000/pulse/native"
+        # Mount the pulse socket directory and pass the XDG_RUNTIME_DIR to the container
+        # so the TypeScript code can find and pass it to game containers
+        DOCKER_ARGS="$DOCKER_ARGS -e XDG_RUNTIME_DIR=$XDG_RUNTIME"
+        DOCKER_ARGS="$DOCKER_ARGS -v $XDG_RUNTIME/pulse:$XDG_RUNTIME/pulse:rw"
+        DOCKER_ARGS="$DOCKER_ARGS -e PULSE_SERVER=unix:$XDG_RUNTIME/pulse/native"
         
-        # PulseAudio cookie
+        # PulseAudio cookie - mount to both possible locations
         if [ -f "$HOME/.config/pulse/cookie" ]; then
             DOCKER_ARGS="$DOCKER_ARGS -v $HOME/.config/pulse/cookie:/home/gameuser/.config/pulse/cookie:ro"
+            DOCKER_ARGS="$DOCKER_ARGS -v $HOME/.config/pulse:/home/dillinger/.config/pulse:rw"
         fi
-        print_success "PulseAudio passthrough enabled"
+        print_success "PulseAudio passthrough enabled ($XDG_RUNTIME/pulse)"
     else
-        print_warning "No PulseAudio socket found"
+        print_warning "No PulseAudio socket found at $XDG_RUNTIME/pulse"
+        echo "  Audio in games may not work. Ensure PulseAudio or PipeWire-Pulse is running."
     fi
     
     # Sound device

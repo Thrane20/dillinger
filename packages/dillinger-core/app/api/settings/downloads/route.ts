@@ -25,14 +25,27 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { maxConcurrent } = body;
+    const { maxConcurrent, defaultInstallVolume, defaultInstallPath } = body;
+    
+    const updates: Record<string, any> = {};
     
     if (maxConcurrent !== undefined) {
-      const validated = Math.max(1, Math.min(maxConcurrent, 10));
-      await settingsService.updateDownloadSettings({ maxConcurrent: validated });
+      updates.maxConcurrent = Math.max(1, Math.min(maxConcurrent, 10));
       
       const downloadManager = await DownloadManager.getInitializedInstance();
-      downloadManager.setMaxConcurrentDownloads(validated);
+      downloadManager.setMaxConcurrentDownloads(updates.maxConcurrent);
+    }
+    
+    if (defaultInstallVolume !== undefined) {
+      updates.defaultInstallVolume = defaultInstallVolume;
+    }
+    
+    if (defaultInstallPath !== undefined) {
+      updates.defaultInstallPath = defaultInstallPath;
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      await settingsService.updateDownloadSettings(updates);
     }
     
     return NextResponse.json({

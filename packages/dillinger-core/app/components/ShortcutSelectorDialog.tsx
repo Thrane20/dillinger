@@ -33,11 +33,8 @@ export default function ShortcutSelectorDialog({
   const [isScanning, setIsScanning] = useState(false);
   const [isParsing, setParsing] = useState<Set<string>>(new Set());
 
-  const formatInstalledPathForDisplay = (p: string) => {
-    if (p === '/installed') return '${dillinger_installed}';
-    if (p.startsWith('/installed/')) return '${dillinger_installed}' + p.substring('/installed'.length);
-    return p;
-  };
+  // Display paths as-is since they are now direct host paths
+  const formatInstalledPathForDisplay = (p: string) => p;
 
   useEffect(() => {
     if (isOpen && gameId) {

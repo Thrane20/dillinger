@@ -118,6 +118,17 @@ export default function GamesPage() {
     fileCount: number;
   } | null>(null);
 
+  // Wine version mismatch warning
+  const [wineVersionMismatchModal, setWineVersionMismatchModal] = useState<{
+    gameId: string;
+    gameTitle: string;
+    installVersion: string;
+    currentVersion: string;
+    launchMode: 'local' | 'streaming';
+    platformId?: string;
+    launchOptions?: { keepContainer?: boolean; keepAlive?: boolean };
+  } | null>(null);
+
   useEffect(() => {
     if (!debugDialogOpenForGameId) return;
 
@@ -792,6 +803,43 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
   }
 
   async function launchGame(
+    gameId: string,
+    mode: 'local' | 'streaming' = 'local',
+    platformId?: string,
+    options?: { keepContainer?: boolean; keepAlive?: boolean },
+    skipVersionCheck?: boolean
+  ) {
+    // Check for Wine version mismatch before launching
+    const game = games.find(g => g.id === gameId);
+    if (game && !skipVersionCheck) {
+      const platform = platformId || game.defaultPlatformId;
+      const isWinePlatform = platform === 'windows-wine' || platform?.includes('wine');
+      
+      if (isWinePlatform) {
+        const installVersion = (game.installation as any)?.wineVersionId || 'unknown';
+        const currentVersion = (game as any).settings?.wine?.version || 'system';
+        
+        // Show warning if versions differ (and we know the install version)
+        if (installVersion !== 'unknown' && installVersion !== currentVersion) {
+          setWineVersionMismatchModal({
+            gameId,
+            gameTitle: game.title,
+            installVersion,
+            currentVersion,
+            launchMode: mode,
+            platformId,
+            launchOptions: options,
+          });
+          return; // Don't launch yet - wait for user confirmation
+        }
+      }
+    }
+
+    // Proceed with launch
+    await performLaunchGame(gameId, mode, platformId, options);
+  }
+
+  async function performLaunchGame(
     gameId: string,
     mode: 'local' | 'streaming' = 'local',
     platformId?: string,
@@ -1976,6 +2024,28 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
             setCacheConfirmModal(null);
           }}
           onCancel={() => setCacheConfirmModal(null)}
+        />
+      )}
+
+      {/* Wine Version Mismatch Warning Modal */}
+      {wineVersionMismatchModal && (
+        <ConfirmationModal
+          title="⚠️ Wine Version Mismatch"
+          message={`"${wineVersionMismatchModal.gameTitle}" was installed with Wine version "${wineVersionMismatchModal.installVersion}" but you're trying to run it with "${wineVersionMismatchModal.currentVersion}".\n\nRunning with a different Wine version than the one used during installation may cause issues (black screen, crashes, graphical glitches).\n\nFor best results, use the same Wine version for installation and running.`}
+          confirmText="Run Anyway"
+          cancelText="Cancel"
+          destructive={false}
+          onConfirm={() => {
+            // Launch with skipped version check
+            performLaunchGame(
+              wineVersionMismatchModal.gameId,
+              wineVersionMismatchModal.launchMode,
+              wineVersionMismatchModal.platformId,
+              wineVersionMismatchModal.launchOptions
+            );
+            setWineVersionMismatchModal(null);
+          }}
+          onCancel={() => setWineVersionMismatchModal(null)}
         />
       )}
     </div>

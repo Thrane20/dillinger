@@ -25,6 +25,8 @@ export interface GameInstallOptions {
   game: Game; // Game object for slug and other metadata
   installerArgs?: string; // Optional installer arguments
   debugMode?: boolean; // If true, keep container after exit for debugging
+  wineVersionId?: string; // Wine version to use for installation (e.g., 'system', 'ge-proton-10-27')
+  wineArch?: 'win32' | 'win64'; // Wine architecture (default: win64)
 }
 
 export interface ContainerInfo {
@@ -48,8 +50,12 @@ export class DockerService {
   // When running in a devcontainer, /workspaces/dillinger maps to a host path
   // We need to detect this and use the host path for Docker volumes
   private workspaceHostPath: string | null = null;
-  private installVolumeHostPath: string | null = null;
   private mounts: any[] = []; // Store all mounts for path translation
+  
+  // Cache for configured volumes
+  private volumeCache: Array<{ id: string; name: string; dockerVolumeName: string; hostPath: string }> | null = null;
+  private volumeCacheTime: number = 0;
+  private readonly VOLUME_CACHE_TTL = 30000; // 30 seconds
 
   private constructor() {
     this.storage = JSONStorageService.getInstance();
@@ -64,58 +70,87 @@ export class DockerService {
   }
 
   /**
-   * Get the host path for the dillinger_installed volume
-   * This is needed for mounting subdirectories (Wine prefixes)
+   * Get all configured volumes from storage with caching
    */
-  private async getInstallVolumeHostPath(): Promise<string> {
-    if (this.installVolumeHostPath) {
-      return this.installVolumeHostPath;
+  private async getConfiguredVolumes(): Promise<Array<{ id: string; name: string; dockerVolumeName: string; hostPath: string }>> {
+    const now = Date.now();
+    if (this.volumeCache && (now - this.volumeCacheTime) < this.VOLUME_CACHE_TTL) {
+      return this.volumeCache;
     }
-
-    // Try env var first
-    if (process.env.DILLINGER_INSTALLED_HOST_PATH) {
-      this.installVolumeHostPath = process.env.DILLINGER_INSTALLED_HOST_PATH;
-      logger.info(`Using configured install volume path: ${this.installVolumeHostPath}`);
-      return this.installVolumeHostPath;
-    }
-
-    // Try to inspect the volume
+    
     try {
-      const volume = docker.getVolume('dillinger_installed');
-      const info = await volume.inspect();
-      if (info.Mountpoint) {
-        this.installVolumeHostPath = info.Mountpoint;
-        logger.info(`Detected dillinger_installed volume at: ${this.installVolumeHostPath}`);
-        return this.installVolumeHostPath;
-      }
-    } catch (err) {
-      // Volume might not exist or other error
-      logger.warn('Could not inspect dillinger_installed volume, falling back to default path');
+      const volumes = await this.storage.listEntities<any>('volumes');
+      this.volumeCache = volumes.map((v: any) => ({
+        id: v.id,
+        name: v.name,
+        dockerVolumeName: v.dockerVolumeName,
+        hostPath: v.hostPath,
+      }));
+      this.volumeCacheTime = now;
+      return this.volumeCache;
+    } catch (error) {
+      logger.warn('Failed to load configured volumes:', error);
+      return [];
     }
-
-    // Fallback to default
-    this.installVolumeHostPath = '/mnt/linuxfast/dillinger_installed';
-    logger.info(`Using default install volume path: ${this.installVolumeHostPath}`);
-    return this.installVolumeHostPath;
   }
 
   /**
-   * Check if a path exists inside the `dillinger_installed` Docker volume.
-   * This avoids relying on host access to `/var/lib/docker/volumes/...`.
+   * Find a configured volume that contains the given host path.
+   * Returns the volume info and the relative path within the volume.
    */
-  private async installedVolumePathExists(containerPathUnderInstalled: string): Promise<boolean> {
-    const clean = containerPathUnderInstalled.replace(/^\/+/, '');
-    const full = path.posix.join('/installed', clean);
+  private async findVolumeForPath(hostPath: string): Promise<{ volume: { name: string; dockerVolumeName: string; hostPath: string }; relativePath: string } | null> {
+    const volumes = await this.getConfiguredVolumes();
+    
+    // Sort by hostPath length descending to match the most specific volume first
+    const sortedVolumes = [...volumes].sort((a, b) => b.hostPath.length - a.hostPath.length);
+    
+    for (const volume of sortedVolumes) {
+      // Check if the path is under this volume's host path
+      if (hostPath === volume.hostPath || hostPath.startsWith(volume.hostPath + '/')) {
+        const relativePath = hostPath === volume.hostPath ? '' : hostPath.substring(volume.hostPath.length);
+        return { volume, relativePath };
+      }
+    }
+    
+    return null;
+  }
 
-    // Use a tiny container to test for existence.
-    // We keep it minimal and non-interactive.
+  /**
+   * Check if a path exists on the host using a Docker container.
+   * This is needed when the Dillinger container doesn't have direct access to host paths.
+   * 
+   * @param hostPath The absolute path on the host to check
+   * @param dockerVolumeName Optional Docker volume name to use for mounting (if path is in a volume)
+   */
+  private async hostPathExists(hostPath: string, dockerVolumeName?: string): Promise<boolean> {
     try {
+      // If we have a Docker volume, mount it and check inside
+      if (dockerVolumeName) {
+        const volumeInfo = await this.findVolumeForPath(hostPath);
+        if (volumeInfo) {
+          const containerPath = `/mnt/vol${volumeInfo.relativePath}`;
+          const container = await docker.createContainer({
+            Image: 'alpine:3.20',
+            Cmd: ['sh', '-lc', `[ -e "${containerPath}" ]`],
+            HostConfig: {
+              AutoRemove: true,
+              Binds: [`${volumeInfo.volume.dockerVolumeName}:/mnt/vol:ro`],
+            },
+          } as any);
+
+          await container.start();
+          const wait = await container.wait();
+          return wait.StatusCode === 0;
+        }
+      }
+      
+      // Try direct bind mount
       const container = await docker.createContainer({
         Image: 'alpine:3.20',
-        Cmd: ['sh', '-lc', `[ -e "${full}" ]`],
+        Cmd: ['sh', '-lc', `[ -e "/check" ]`],
         HostConfig: {
           AutoRemove: true,
-          Binds: ['dillinger_installed:/installed:ro'],
+          Binds: [`${hostPath}:/check:ro`],
         },
       } as any);
 
@@ -123,23 +158,23 @@ export class DockerService {
       const wait = await container.wait();
       return wait.StatusCode === 0;
     } catch (error) {
-      logger.warn(`installedVolumePathExists check failed for ${full}:`, error);
+      logger.debug(`hostPathExists check failed for ${hostPath}:`, error);
       return false;
     }
   }
 
   /**
-   * Run a command inside a tiny container with `dillinger_installed` mounted at /installed.
+   * Run a command inside a container with a volume mounted.
    * Returns combined stdout/stderr output.
    */
-  private async runInInstalledVolume(command: string): Promise<{ exitCode: number; output: string }> {
+  private async runInVolume(dockerVolumeName: string, mountPoint: string, command: string): Promise<{ exitCode: number; output: string }> {
     const container = await docker.createContainer({
       Image: 'alpine:3.20',
       Cmd: ['sh', '-lc', command],
       Tty: true,
       HostConfig: {
         AutoRemove: false,
-        Binds: ['dillinger_installed:/installed:ro'],
+        Binds: [`${dockerVolumeName}:${mountPoint}:ro`],
       },
     } as any);
 
@@ -163,6 +198,90 @@ export class DockerService {
     }
 
     return { exitCode: wait.StatusCode ?? 1, output };
+  }
+
+  /**
+   * Find a file path with case-insensitive matching within a volume.
+   * Returns the actual path if found (with correct case), or null if not found.
+   * 
+   * This is needed because Windows game executables often have mixed case in their
+   * paths (e.g., "CC3.exe"), but configs might reference them with different case
+   * (e.g., "cc3.exe"). Linux file systems are case-sensitive, so we need to find
+   * the actual file regardless of case.
+   * 
+   * @param dockerVolumeName Docker volume name to search in
+   * @param relativePath Path relative to the volume root (e.g., "game-id/drive_c/Game/game.exe")
+   * @returns Actual path with correct case (relative to volume), or null if not found
+   */
+  private async findPathCaseInsensitiveInVolume(dockerVolumeName: string, relativePath: string): Promise<string | null> {
+    const clean = relativePath.replace(/^\/+/, '');
+    const parts = clean.split('/');
+    
+    // We'll build up the path piece by piece, doing case-insensitive lookup at each level
+    let currentPath = '/mnt/vol';
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (!part) continue;
+      
+      // Use find with -maxdepth 1 to do case-insensitive match at this level
+      const { exitCode, output } = await this.runInVolume(
+        dockerVolumeName,
+        '/mnt/vol',
+        `find "${currentPath}" -maxdepth 1 -iname "${part}" -print -quit 2>/dev/null | head -1`
+      );
+      
+      const foundPath = output.trim().split('\n')[0]?.trim();
+      
+      if (exitCode !== 0 || !foundPath) {
+        logger.debug(`Case-insensitive search: No match for "${part}" in "${currentPath}"`);
+        return null;
+      }
+      
+      currentPath = foundPath;
+    }
+    
+    // Return the path relative to /mnt/vol
+    return currentPath.startsWith('/mnt/vol/') 
+      ? currentPath.substring('/mnt/vol/'.length)
+      : currentPath.startsWith('/mnt/vol')
+        ? currentPath.substring('/mnt/vol'.length)
+        : currentPath;
+  }
+
+  /**
+   * Check if a path exists (case-insensitively) in a volume and return the actual path if found.
+   */
+  private async checkPathCaseInsensitiveInVolume(
+    dockerVolumeName: string, 
+    relativePath: string
+  ): Promise<{ exists: boolean; actualPath: string | null }> {
+    try {
+      // First try exact match (faster)
+      const { exitCode } = await this.runInVolume(
+        dockerVolumeName,
+        '/mnt/vol',
+        `[ -e "/mnt/vol/${relativePath.replace(/^\/+/, '')}" ]`
+      );
+      
+      if (exitCode === 0) {
+        return { exists: true, actualPath: relativePath };
+      }
+      
+      // Try case-insensitive match
+      logger.debug(`Exact path not found, trying case-insensitive match for: ${relativePath}`);
+      const actualPath = await this.findPathCaseInsensitiveInVolume(dockerVolumeName, relativePath);
+      
+      if (actualPath) {
+        logger.info(`Found case-insensitive match: "${relativePath}" -> "${actualPath}"`);
+        return { exists: true, actualPath };
+      }
+      
+      return { exists: false, actualPath: null };
+    } catch (error) {
+      logger.warn(`Case-insensitive path check failed for ${relativePath}:`, error);
+      return { exists: false, actualPath: null };
+    }
   }
 
   /**
@@ -233,10 +352,24 @@ export class DockerService {
   /**
    * Build WINEDEBUG environment variable from game settings
    * @param game Game object with optional wine debug configuration
+   * @param debugMode If true (keepAlive/debug launch), enable useful debug channels
    * @returns WINEDEBUG string (e.g., "-all", "+relay,+seh", "+all")
    */
-  private buildWineDebug(game: Game): string {
+  private buildWineDebug(game: Game, debugMode: boolean = false): string {
     const debug = game.settings?.wine?.debug;
+    
+    // If debug mode (keepAlive) is enabled, use a useful set of debug channels
+    // unless the user has explicitly configured their own debug settings
+    if (debugMode && (!debug || Object.keys(debug).length === 0)) {
+      // Enable useful channels for debugging game launch issues:
+      // - warn: Wine warnings (important)
+      // - err: Wine errors (critical)
+      // - fixme: Unimplemented features (helpful for compatibility issues)
+      // - loaddll: DLL loading (helps identify missing DLLs)
+      // - module: Module loading issues
+      // - seh: Structured exception handling (crashes)
+      return '+warn,+err,+fixme,+loaddll,+module,+seh,-other';
+    }
     
     // If no debug settings or all false, disable all debug output
     if (!debug || Object.keys(debug).length === 0) {
@@ -357,45 +490,6 @@ export class DockerService {
     }
 
     return containerPath;
-  }
-
-  /**
-   * Normalize a user-configured install path (often under the public install root)
-   * to the actual host path of the `dillinger_installed` Docker volume.
-   *
-   * In some environments the UI stores install paths like:
-   *   /mnt/linuxfast/dillinger_installed/<game>
-   * while Docker bind mounts must use the volume host root:
-   *   /var/lib/docker/volumes/dillinger_installed/_data/<game>
-   */
-  private async normalizeInstalledPath(maybePublicPath: string): Promise<string> {
-    await this.detectHostPath();
-
-    const installVolumeHostRoot = this.getHostPath(await this.getInstallVolumeHostPath());
-    const containerInstalledRoot = '/installed';
-    const defaultPublicRoot = '/mnt/linuxfast/dillinger_installed';
-    const publicRoot = process.env.DILLINGER_INSTALLED_PUBLIC_PATH || defaultPublicRoot;
-
-    // If the path is already inside the volume host root, keep it.
-    if (maybePublicPath === installVolumeHostRoot || maybePublicPath.startsWith(installVolumeHostRoot + '/')) {
-      return maybePublicPath;
-    }
-
-    // Canonical (Option A): user stores container paths under /installed
-    if (maybePublicPath === containerInstalledRoot || maybePublicPath.startsWith(containerInstalledRoot + '/')) {
-      const rel = maybePublicPath.substring(containerInstalledRoot.length);
-      return installVolumeHostRoot + rel;
-    }
-
-    // If the path is under the public root, map it to the volume host root.
-    if (maybePublicPath === publicRoot || maybePublicPath.startsWith(publicRoot + '/')) {
-      const rel = maybePublicPath.substring(publicRoot.length);
-      // rel includes leading '/', which is what we want.
-      return installVolumeHostRoot + rel;
-    }
-
-    // Otherwise, attempt generic container->host translation (devcontainer mounts etc.)
-    return this.getHostPath(maybePublicPath);
   }
 
   /**
@@ -602,11 +696,26 @@ export class DockerService {
         .map(arg => arg.replace(/\0/g, ''))
         .filter(arg => arg !== ''); // Remove empty strings
 
-      // Resolve Windows-style command into a path under the mounted prefix.
-      // This will later be rewritten from `/wineprefix/...` to `/installed/...`.
-      let linuxPath = launchCommand.replace(/^[A-Za-z]:/, '');
-      linuxPath = linuxPath.replace(/\\/g, '/');
-      gameExecutable = path.posix.join('/wineprefix/drive_c', linuxPath);
+      // Resolve the launch command into a path under the mounted prefix.
+      // Support both Windows-style paths (C:\GOG Games\...) and Linux absolute paths
+      // that already point to a Wine prefix on the host filesystem.
+      
+      // Check if this is already a Linux absolute path containing drive_c
+      // (e.g., /mnt/m2fast/game-slug/drive_c/GOG Games/CC3.exe)
+      const driveCIndex = launchCommand.indexOf('/drive_c/');
+      if (launchCommand.startsWith('/') && driveCIndex !== -1) {
+        // Linux absolute path - extract the relative path after drive_c
+        const relativeWindowsPath = launchCommand.substring(driveCIndex + '/drive_c'.length);
+        gameExecutable = path.posix.join('/wineprefix/drive_c', relativeWindowsPath);
+        logger.info(`  Detected Linux absolute path with Wine prefix`);
+        logger.info(`    Full path: ${launchCommand}`);
+        logger.info(`    Relative Windows path: ${relativeWindowsPath}`);
+      } else {
+        // Traditional Windows-style path (C:\GOG Games\...) - convert to Linux
+        let linuxPath = launchCommand.replace(/^[A-Za-z]:/, '');
+        linuxPath = linuxPath.replace(/\\/g, '/');
+        gameExecutable = path.posix.join('/wineprefix/drive_c', linuxPath);
+      }
 
       // Note: Docker's `Cmd` does not perform shell expansion, so passing
       // `$GAME_EXECUTABLE` would be treated as a literal filename. Use a shell
@@ -866,13 +975,39 @@ export class DockerService {
       }
     }
 
-    // Add Wine DLL overrides if configured
+    // Add Wine DLL overrides if configured (via registry)
     if (wineConfig?.dlls && Object.keys(wineConfig.dlls).length > 0) {
       const dllOverrides = Object.entries(wineConfig.dlls)
         .map(([dll, mode]) => `${dll}=${mode}`)
         .join(';');
       env.push(`WINE_DLL_OVERRIDES=${dllOverrides}`);
-      logger.info(`  Wine DLL overrides: ${dllOverrides}`);
+      logger.info(`  Wine DLL overrides (registry): ${dllOverrides}`);
+    }
+
+    // Add WINEDLLOVERRIDES environment variable if configured
+    // This is the official Wine env var for runtime DLL configuration
+    // Format: "dll1=mode1;dll2=mode2" (e.g., "quartz=disabled;wmvcore=disabled")
+    if (wineConfig?.dllOverrides) {
+      env.push(`WINEDLLOVERRIDES=${wineConfig.dllOverrides}`);
+      logger.info(`  WINEDLLOVERRIDES: ${wineConfig.dllOverrides}`);
+    }
+
+    // Add winetricks verbs to run before game launch
+    if (wineConfig?.winetricks && wineConfig.winetricks.length > 0) {
+      const winetricksStr = wineConfig.winetricks.join(';');
+      env.push(`WINE_WINETRICKS=${winetricksStr}`);
+      logger.info(`  Winetricks verbs: ${winetricksStr}`);
+    }
+
+    // Add custom registry settings
+    if (wineConfig?.registrySettings && wineConfig.registrySettings.length > 0) {
+      // Pass as JSON string for the entrypoint to parse
+      const registryJson = JSON.stringify(wineConfig.registrySettings);
+      env.push(`WINE_REGISTRY_SETTINGS=${registryJson}`);
+      logger.info(`  Custom registry settings: ${wineConfig.registrySettings.length} entries`);
+      for (const setting of wineConfig.registrySettings) {
+        logger.info(`    ${setting.path}\\${setting.name} = ${setting.value} (${setting.type})`);
+      }
     }
 
     // Add Wine compatibility mode if configured
@@ -961,7 +1096,8 @@ export class DockerService {
         .join(' ');
       
       // Build WINEDEBUG environment variable from game settings
-      const wineDebug = this.buildWineDebug(game);
+      // Pass keepAlive flag to enable verbose logging in debug mode
+      const wineDebug = this.buildWineDebug(game, options.keepAlive === true);
       
       // Check if fullscreen/virtual desktop is requested
       const fullscreen = game.settings?.launch?.fullscreen || false;
@@ -1013,6 +1149,15 @@ export class DockerService {
       logger.info(`  WINEDEBUG=${wineDebug}`);
       logger.info(`  GAME_EXECUTABLE=${gameExecutable}`);
       logger.info(`  GAME_ARGS=${cleanArgs || '(none)'}`);
+      
+      // Log Wine version info
+      const wineVersion = game.settings?.wine?.version || 'system';
+      const installWineVersion = game.installation?.wineVersionId || 'unknown';
+      logger.info(`  Wine version (current): ${wineVersion}`);
+      logger.info(`  Wine version (installed with): ${installWineVersion}`);
+      if (installWineVersion !== 'unknown' && installWineVersion !== wineVersion) {
+        logger.warn(`  ⚠ Wine version mismatch! Game was installed with '${installWineVersion}' but launching with '${wineVersion}'`);
+      }
     }
 
     // Get display forwarding configuration
@@ -1020,68 +1165,44 @@ export class DockerService {
     env.push(...displayConfig.env);
     
     logger.info(`  Display mode: ${displayConfig.mode}`);
-    logger.info(`  WINEPREFIX will be set to: /wineprefix`);
     
     // Determine Wine prefix path if this is a Wine game
-    // Wine prefix layout:
-    // - Preferred (current flow): <installation.installPath> (prefix == install directory)
-    // - Legacy fallback: <installation.installPath>/wineprefix-<slug>
+    // Wine prefix == installation directory (contains drive_c/)
     const gameIdentifier = game.slug || game.id;
     let winePrefixPath: string | null = null;
+    let winePrefixVolume: { name: string; dockerVolumeName: string; hostPath: string } | null = null;
     let emulatorHomePath: string | null = null;
     
     if (platform.type === 'wine') {
-      // fs-extra is imported dynamically but not used directly here
-      // The volume existence checking happens via Docker
-
-      // IMPORTANT: the backend process may not have permission to read
-      // `/var/lib/docker/volumes/...` on the host, even though Docker itself can.
-      // So we probe for existence *inside the dillinger_installed volume*.
-
+      // The install path is stored as an absolute host path on a configured volume
+      // e.g., /mnt/m2fast/game-slug (directly where installed)
       const configuredInstallPath = game.installation?.installPath;
-
-      const candidates: string[] = [];
-      // Preferred: prefix == install directory (Option A): /installed/<rel>
-      if (configuredInstallPath && configuredInstallPath.startsWith('/installed/')) {
-        const rel = configuredInstallPath.replace(/^\/installed\//, '');
-        if (rel) {
-          candidates.push(rel);
-          // Legacy under install dir
-          candidates.push(path.posix.join(rel, `wineprefix-${gameIdentifier}`));
+      
+      if (configuredInstallPath) {
+        // Find which volume this path is on
+        const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
+        
+        if (volumeMatch) {
+          winePrefixVolume = volumeMatch.volume;
+          winePrefixPath = configuredInstallPath;
+          logger.info(`  Wine prefix path: ${winePrefixPath}`);
+          logger.info(`  Wine prefix volume: ${winePrefixVolume.name} (${winePrefixVolume.dockerVolumeName})`);
+          
+          // Verify the prefix contains drive_c (it's a valid Wine prefix)
+          const exists = await this.hostPathExists(path.posix.join(winePrefixPath, 'drive_c'), winePrefixVolume.dockerVolumeName);
+          
+          if (!exists) {
+            logger.warn(`  ⚠ Wine prefix does not contain drive_c: ${winePrefixPath}`);
+            logger.warn(`    This may indicate an incomplete installation`);
+          }
+        } else {
+          // Path not on a configured volume - try to use it directly as a bind mount
+          logger.warn(`  ⚠ Install path not on a configured volume: ${configuredInstallPath}`);
+          logger.warn(`    Will attempt direct bind mount`);
+          winePrefixPath = configuredInstallPath;
         }
-      }
-
-      // If installPath isn't set as expected, fall back to game id/slug
-      candidates.push(gameIdentifier);
-      // Legacy per-game directory: /installed/<gameId>/wineprefix-<gameId>
-      candidates.push(path.posix.join(gameIdentifier, `wineprefix-${gameIdentifier}`));
-      // Legacy root prefix: /installed/wineprefix-<gameId>
-      candidates.push(`wineprefix-${gameIdentifier}`);
-
-      // Deduplicate
-      const seen = new Set<string>();
-      const uniqueCandidates = candidates.filter((p) => {
-        if (seen.has(p)) return false;
-        seen.add(p);
-        return true;
-      });
-
-      for (const relCandidate of uniqueCandidates) {
-        // A valid Wine prefix must contain drive_c.
-        if (await this.installedVolumePathExists(path.posix.join(relCandidate, 'drive_c'))) {
-          winePrefixPath = path.posix.join('/installed', relCandidate);
-          logger.info(`  Wine prefix (installed volume): ${winePrefixPath}`);
-          break;
-        }
-      }
-
-      if (!winePrefixPath) {
-        logger.warn(`  ⚠ No Wine prefix found in installed volume for game: ${gameIdentifier}`);
-        logger.warn(`    installPath: ${configuredInstallPath || '(none)'}`);
-        logger.warn(`    Probed container paths:`);
-        for (const p of uniqueCandidates) {
-          logger.warn(`      - /installed/${p} (expecting drive_c/)`);
-        }
+      } else {
+        logger.warn(`  ⚠ No install path configured for Wine game: ${gameIdentifier}`);
       }
     } else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
       // For emulator games (VICE Commodore, FS-UAE Amiga, MAME, or RetroArch), create a per-game home directory
@@ -1156,39 +1277,83 @@ export class DockerService {
     const binds = [
       `dillinger_root:/data:rw`, // Mount dillinger_root volume for saves/state
       `dillinger_installers:/installers:rw`, // Helper volume for finding installers
-      `dillinger_installed:/installed:rw`, // Points to where games are installed
     ];
     
-    // For Wine games, mount the Wine prefix
+    // For Wine games, mount the Wine prefix from the appropriate volume
     if (platform.type === 'wine' && winePrefixPath) {
-      // Rewrite WINEPREFIX and GAME_EXECUTABLE to point at the prefix path inside /installed.
-      for (let i = 0; i < env.length; i++) {
-        const entry = env[i];
-        if (!entry) continue;
+      // Mount the Wine prefix at /wineprefix in the container
+      if (winePrefixVolume) {
+        // Use the Docker volume with the relative path to the prefix
+        const volumeMatch = await this.findVolumeForPath(winePrefixPath);
+        if (volumeMatch) {
+          // Mount the entire volume and use a subpath for WINEPREFIX
+          binds.push(`${winePrefixVolume.dockerVolumeName}:/mnt/game_volume:rw`);
+          const containerPrefixPath = `/mnt/game_volume${volumeMatch.relativePath}`;
+          
+          // Update WINEPREFIX to point to the container path
+          for (let i = 0; i < env.length; i++) {
+            const entry = env[i];
+            if (!entry) continue;
 
-        if (entry.startsWith('WINEPREFIX=')) {
-          env[i] = `WINEPREFIX=${winePrefixPath}`;
-          continue;
+            if (entry.startsWith('WINEPREFIX=')) {
+              env[i] = `WINEPREFIX=${containerPrefixPath}`;
+              continue;
+            }
+            if (entry.startsWith('GAME_EXECUTABLE=/wineprefix/')) {
+              // Transform /wineprefix/drive_c/... to /mnt/game_volume/<rel>/drive_c/...
+              const rel = entry.substring('GAME_EXECUTABLE=/wineprefix'.length);
+              env[i] = `GAME_EXECUTABLE=${containerPrefixPath}${rel}`;
+            }
+          }
+          
+          logger.info(`  Mounted volume ${winePrefixVolume.dockerVolumeName} at /mnt/game_volume`);
+          logger.info(`  WINEPREFIX set to: ${containerPrefixPath}`);
         }
-        if (entry.startsWith('GAME_EXECUTABLE=/wineprefix/')) {
-          const rel = entry.substring('GAME_EXECUTABLE=/wineprefix'.length);
-          env[i] = `GAME_EXECUTABLE=${winePrefixPath}${rel}`;
+      } else {
+        // Direct bind mount (path not on a configured volume)
+        binds.push(`${winePrefixPath}:/wineprefix:rw`);
+        
+        // Update WINEPREFIX env var
+        for (let i = 0; i < env.length; i++) {
+          const entry = env[i];
+          if (!entry) continue;
+
+          if (entry.startsWith('WINEPREFIX=')) {
+            env[i] = `WINEPREFIX=/wineprefix`;
+          }
         }
+        
+        logger.info(`  Direct bind mount: ${winePrefixPath} -> /wineprefix`);
       }
 
       // Preflight: ensure the target executable exists within the selected prefix.
       // This avoids launching with the wrong prefix and getting a vague Wine error.
       try {
-        const maybeGameExecutable = env.find((e) => e.startsWith('GAME_EXECUTABLE='));
-        if (maybeGameExecutable) {
+        const execEnvIndex = env.findIndex((e) => e.startsWith('GAME_EXECUTABLE='));
+        if (execEnvIndex !== -1 && winePrefixVolume) {
+          const maybeGameExecutable = env[execEnvIndex];
           const gameExecutable = maybeGameExecutable.substring('GAME_EXECUTABLE='.length);
-          // Existence check inside installed volume using helper.
-          if (gameExecutable.startsWith('/installed/')) {
-            const relUnderInstalled = gameExecutable.substring('/installed/'.length);
-            if (!(await this.installedVolumePathExists(relUnderInstalled))) {
-              logger.error(`  ✗ Executable not found inside installed volume prefix:`);
+          
+          // Check if the executable path is under our mounted volume
+          if (gameExecutable.startsWith('/mnt/game_volume/')) {
+            const relPath = gameExecutable.substring('/mnt/game_volume/'.length);
+            const { exists, actualPath } = await this.checkPathCaseInsensitiveInVolume(
+              winePrefixVolume.dockerVolumeName,
+              relPath
+            );
+            
+            if (!exists) {
+              logger.error(`  ✗ Executable not found in Wine prefix:`);
               logger.error(`    GAME_EXECUTABLE: ${gameExecutable}`);
+              logger.error(`    Host path: ${winePrefixPath}`);
               throw new Error('Executable not found in Wine prefix (prefix is likely wrong or install is incomplete)');
+            }
+            
+            // If the actual path differs from requested (case mismatch), update the env
+            if (actualPath && actualPath !== relPath) {
+              const correctedPath = `/mnt/game_volume/${actualPath}`;
+              logger.info(`  ℹ️ Corrected executable path case: "${gameExecutable}" -> "${correctedPath}"`);
+              env[execEnvIndex] = `GAME_EXECUTABLE=${correctedPath}`;
             }
           }
         }
@@ -1197,28 +1362,26 @@ export class DockerService {
         throw err;
       }
 
-      // Do NOT bind-mount /wineprefix from host. We already have the installed volume mounted at /installed,
-      // and we pointed WINEPREFIX+GAME_EXECUTABLE into it.
-      logger.info(`  Using Wine prefix inside installed volume: ${winePrefixPath}`);
-
-      // Log the effective (rewritten) Wine env for debugging.
+      // Log the effective Wine env for debugging.
       const effectiveWinePrefix = env.find((e) => e.startsWith('WINEPREFIX='));
       const effectiveGameExecutable = env.find((e) => e.startsWith('GAME_EXECUTABLE='));
       if (effectiveWinePrefix) logger.info(`  Effective ${effectiveWinePrefix}`);
       if (effectiveGameExecutable) logger.info(`  Effective ${effectiveGameExecutable}`);
 
-      // Ensure the container working directory matches the rewritten executable path.
+      // Ensure the container working directory matches the executable path.
       if (effectiveGameExecutable) {
         const rewrittenExec = effectiveGameExecutable.substring('GAME_EXECUTABLE='.length);
         containerWorkingDir = path.posix.dirname(rewrittenExec);
+      } else if (winePrefixVolume) {
+        const volumeMatch = await this.findVolumeForPath(winePrefixPath!);
+        containerWorkingDir = volumeMatch ? `/mnt/game_volume${volumeMatch.relativePath}` : '/mnt/game_volume';
       } else {
-        containerWorkingDir = winePrefixPath;
+        containerWorkingDir = '/wineprefix';
       }
     } 
     else if (platform.type === 'wine' && !winePrefixPath) {
-      // Without a prefix mount, the container will get an empty anonymous volume at /wineprefix
-      // and Wine will fail to find the installed game files.
-      throw new Error('Wine prefix not found; refusing to launch without /wineprefix bind mount');
+      // Without an install path, we can't mount the Wine prefix
+      throw new Error('Wine game has no installation path configured; please install the game first');
     }
     // For Commodore, Amiga, MAME, and RetroArch emulator games, mount the ROM file directory and per-game home
     else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
@@ -1402,28 +1565,24 @@ export class DockerService {
     };
     
     if (platform.type === 'wine') {
-      const fs = await import('fs-extra');
-
+      // The install path is stored as an absolute host path on a configured volume
       const configuredInstallPath = game.installation?.installPath;
+      
       if (configuredInstallPath) {
-        const normalizedInstallPath = await this.normalizeInstalledPath(configuredInstallPath);
-        if (await fs.pathExists(path.posix.join(normalizedInstallPath, 'drive_c'))) {
-          winePrefixPath = normalizedInstallPath;
-          logger.info(`  Debug Wine prefix (installPath): ${winePrefixPath}`);
+        // Find which volume this path is on
+        const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
+        
+        if (volumeMatch) {
+          winePrefixPath = configuredInstallPath;
+          logger.info(`  Debug Wine prefix path: ${winePrefixPath}`);
+          logger.info(`  Debug Wine prefix volume: ${volumeMatch.volume.name} (${volumeMatch.volume.dockerVolumeName})`);
         } else {
-          const legacyPreferredPrefixPath = path.posix.join(normalizedInstallPath, `wineprefix-${gameIdentifier}`);
-          if (await fs.pathExists(path.posix.join(legacyPreferredPrefixPath, 'drive_c'))) {
-            winePrefixPath = legacyPreferredPrefixPath;
-            logger.info(`  Debug Wine prefix (legacy installPath subdir): ${winePrefixPath}`);
-          }
+          // Path not on a configured volume - try to use it directly
+          logger.warn(`  ⚠ Install path not on a configured volume: ${configuredInstallPath}`);
+          winePrefixPath = configuredInstallPath;
         }
-      }
-
-      if (!winePrefixPath) {
-        const hostInstallPath = await this.getInstallVolumeHostPath();
-        const legacyPrefixPath = path.posix.join(this.getHostPath(hostInstallPath), `wineprefix-${gameIdentifier}`);
-        winePrefixPath = legacyPrefixPath;
-        logger.info(`  Debug Wine prefix (legacy volume root): ${winePrefixPath}`);
+      } else {
+        logger.warn(`  ⚠ No install path configured for Wine game: ${gameIdentifier}`);
       }
     } else if (game.platformId && (viceEmulators[game.platformId] || mameEmulators[game.platformId])) {
       // For emulator games, prepare the per-game home directory
@@ -1474,7 +1633,8 @@ export class DockerService {
     // Add Wine-specific environment
     if (platform.type === 'wine') {
       // Build WINEDEBUG environment variable from game settings
-      const wineDebug = this.buildWineDebug(game);
+      // Always enable verbose logging for debug containers
+      const wineDebug = this.buildWineDebug(game, true);
       
       // Note: WINEARCH should NOT be set for debug containers with existing prefixes
       // Wine will auto-detect the architecture from the existing prefix
@@ -1559,13 +1719,13 @@ export class DockerService {
       return { success: false, message: 'Registry setup is only for Wine games' };
     }
 
-    const gameIdentifier = game.slug || game.id;
-    const hostInstallPath = await this.getInstallVolumeHostPath();
     const configuredInstallPath = game.installation?.installPath;
-    let winePrefixPath = path.posix.join(this.getHostPath(hostInstallPath), gameIdentifier);
-    if (configuredInstallPath) {
-      winePrefixPath = await this.normalizeInstalledPath(configuredInstallPath);
+    if (!configuredInstallPath) {
+      return { success: false, message: 'No install path configured for this game' };
     }
+
+    // Use the install path directly (it's the Wine prefix)
+    const winePrefixPath = configuredInstallPath;
     
     // The game files are inside the Wine prefix at drive_c/GOG Games/<game>/
     // We need to extract the game directory from the launch command
@@ -1846,8 +2006,8 @@ export class DockerService {
 
     // Convert paths to host paths for Docker bind mounts (only needed when installer is a host/bind path)
     const hostInstallerPath = installerIsInInstallersVolume ? null : this.getHostPath(installerPath);
-    // Option A canonical: installPath should be a container path under /installed
-    const hostInstallPath = await this.normalizeInstalledPath(installPath);
+    // installPath is now passed in as a direct host path (e.g., /mnt/m2fast/game-slug)
+    const hostInstallPath = installPath;
 
     // Get display forwarding configuration
     const displayConfig = await this.getDisplayConfiguration();
@@ -1896,19 +2056,36 @@ export class DockerService {
 
     // Add Wine-specific configuration for Windows installers
     if (platform.type === 'wine') {
-      // Get Wine architecture from game settings (default to win64)
-      const wineArch = game.settings?.wine?.arch || 'win64';
+      // Get Wine architecture from install options, game settings, or default to win64
+      const wineArch = options.wineArch || game.settings?.wine?.arch || 'win64';
       
-      // Build WINEDEBUG from game settings (but default to -all for installation)
-      // Installation usually works better with minimal logging
-      const wineDebug = this.buildWineDebug(game);
+      // Build WINEDEBUG from game settings
+      // Enable verbose logging in debug mode for installation troubleshooting
+      const wineDebug = this.buildWineDebug(game, options.debugMode === true);
       
       env.push(
-        `WINEDEBUG=${wineDebug}`, // Use game's debug settings
+        `WINEDEBUG=${wineDebug}`, // Use game's debug settings (or verbose if debugMode)
         `WINEPREFIX=/wineprefix`, // Wine prefix mounted separately
         `WINEARCH=${wineArch}`, // Wine architecture (win32 or win64)
         'DISPLAY_WINEPREFIX=1' // Signal to show Wine configuration if needed
       );
+      
+      // Add Wine version for installation (GE-Proton support)
+      const wineVersionId = options.wineVersionId || game.settings?.wine?.version || 'system';
+      if (wineVersionId && wineVersionId !== 'system') {
+        env.push(`WINE_VERSION_ID=${wineVersionId}`);
+        logger.info(`  Wine version: ${wineVersionId}`);
+        
+        // If using GE-Proton, also set UMU game ID for protonfixes
+        if (wineVersionId.startsWith('ge-proton')) {
+          const umuGameId = `umu-${game.slug || game.id}`;
+          env.push(`UMU_GAME_ID=${umuGameId}`);
+          env.push(`GAME_SLUG=${game.slug || game.id}`);
+          logger.info(`  UMU Game ID: ${umuGameId}`);
+        }
+      } else {
+        logger.info(`  Wine version: system (default)`);
+      }
       
       logger.info(`  Wine architecture: ${wineArch}`);
       logger.info(`  WINEDEBUG=${wineDebug}`);
@@ -1945,7 +2122,6 @@ export class DockerService {
             `${hostInstallPath}:/install:rw`, // Mount installation target as read-write
             `${winePrefixPath}:/wineprefix:rw`, // Game-specific Wine prefix (prevents interference between games)
             `dillinger_installers:/installers:rw`, // Helper volume for finding installers
-            `dillinger_installed:/installed:rw`, // Points to where games are installed
             ...displayConfig.volumes
           ],
           Devices: displayConfig.devices,
@@ -2028,17 +2204,23 @@ export class DockerService {
    */
   async scanForGameExecutables(installPath: string): Promise<string[]> {
     try {
-      if (!installPath.startsWith('/installed')) {
-        logger.warn(`scanForGameExecutables expects an installPath under /installed, got: ${installPath}`);
+      // Find which volume this install path is on
+      const volumeMatch = await this.findVolumeForPath(installPath);
+      if (!volumeMatch) {
+        logger.warn(`scanForGameExecutables: install path not on a configured volume: ${installPath}`);
         return [];
       }
 
       logger.info(`🔍 Scanning for game executables in: ${installPath}`);
+      logger.info(`  Volume: ${volumeMatch.volume.name}`);
 
       const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+      // The path inside the container when volume is mounted at /mnt/volume
+      const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
+      
       // Limit output size to keep scanning responsive.
       const findCmd = [
-        `find ${shQuote(installPath)}`,
+        `find ${shQuote(containerPath)}`,
         '-maxdepth 12',
         '-type f',
         `\\( -iname '*.exe' -o -iname '*.bat' -o -iname '*.cmd' \\)`,
@@ -2054,7 +2236,7 @@ export class DockerService {
         "| head -n 500",
       ].join(' ');
 
-      const { exitCode, output } = await this.runInInstalledVolume(findCmd);
+      const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd);
       if (exitCode !== 0) {
         logger.warn(`  Executable scan returned exit code ${exitCode}`);
       }
@@ -2063,10 +2245,10 @@ export class DockerService {
         .split('\n')
         .map((l) => l.trim())
         .filter(Boolean)
-        .filter((p) => p.startsWith(installPath + '/') || p === installPath);
+        .filter((p) => p.startsWith(containerPath + '/') || p === containerPath);
 
       const candidates = absPaths
-        .map((p) => path.posix.relative(installPath, p))
+        .map((p) => path.posix.relative(containerPath, p))
         .filter((rel) => rel && rel !== '.' && !rel.startsWith('..'));
 
       const executables = candidates.filter((rel) => {
@@ -2131,20 +2313,22 @@ export class DockerService {
    */
   async scanForShortcuts(installPath: string): Promise<string[]> {
     try {
-      // Prefer scanning inside the docker volume to avoid host permission issues.
-      if (!installPath.startsWith('/installed')) {
-        logger.warn(`scanForShortcuts expects an installPath under /installed, got: ${installPath}`);
+      // Find which volume this install path is on
+      const volumeMatch = await this.findVolumeForPath(installPath);
+      if (!volumeMatch) {
+        logger.warn(`scanForShortcuts: install path not on a configured volume: ${installPath}`);
         return [];
       }
 
-      const containerInstallPath = installPath;
-
       logger.info(`🔍 Scanning for shortcuts in: ${installPath}`);
+      logger.info(`  Volume: ${volumeMatch.volume.name}`);
 
       const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
-      const findCmd = `find ${shQuote(containerInstallPath)} -maxdepth 15 -type f -iname '*.lnk' -print`;
+      // The path inside the container when volume is mounted at /mnt/volume
+      const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
+      const findCmd = `find ${shQuote(containerPath)} -maxdepth 15 -type f -iname '*.lnk' -print`;
 
-      const { exitCode, output } = await this.runInInstalledVolume(findCmd);
+      const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd);
       if (exitCode !== 0) {
         logger.warn(`  Shortcut scan returned exit code ${exitCode}`);
       }
@@ -2153,11 +2337,11 @@ export class DockerService {
         .split('\n')
         .map((l) => l.trim())
         .filter(Boolean)
-        .filter((p) => p.startsWith(containerInstallPath + '/') || p === containerInstallPath);
+        .filter((p) => p.startsWith(containerPath + '/') || p === containerPath);
 
       const shortcuts = found
         .filter((p) => p.toLowerCase().endsWith('.lnk'))
-        .map((p) => path.posix.relative(containerInstallPath, p))
+        .map((p) => path.posix.relative(containerPath, p))
         .filter((rel) => rel && rel !== '.' && !rel.startsWith('..'));
 
       for (const rel of shortcuts) {
@@ -2189,13 +2373,18 @@ export class DockerService {
 
       // Read the entire .lnk file
       let buffer: Buffer;
-      if (shortcutPath.startsWith('/installed/')) {
+      
+      // Check if this path is on a configured volume
+      const volumeMatch = await this.findVolumeForPath(shortcutPath);
+      if (volumeMatch) {
         const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+        // The path inside the container when volume is mounted at /mnt/volume
+        const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
         // base64 output may wrap; strip newlines.
-        const cmd = `cat ${shQuote(shortcutPath)} | base64 | tr -d '\\n'`;
-        const { exitCode, output } = await this.runInInstalledVolume(cmd);
+        const cmd = `cat ${shQuote(containerPath)} | base64 | tr -d '\\n'`;
+        const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', cmd);
         if (exitCode !== 0) {
-          logger.warn(`Failed to read shortcut from installed volume (exit ${exitCode})`);
+          logger.warn(`Failed to read shortcut from volume (exit ${exitCode})`);
           return null;
         }
         const b64 = output.trim();
@@ -2600,7 +2789,7 @@ export class DockerService {
   }> {
     const display = process.env.DISPLAY;
     const waylandDisplay = process.env.WAYLAND_DISPLAY;
-    const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+    const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() || 1000}`;
     
     // Prefer X11 first (more compatible with legacy games and tools like xterm)
     if (display) {
@@ -2626,19 +2815,42 @@ export class DockerService {
       }
       
       // Add PulseAudio socket for audio support
+      // Check multiple possible locations for the PulseAudio socket
       const userHome = process.env.HOME;
-      if (xdgRuntimeDir && existsSync(`${xdgRuntimeDir}/pulse`)) {
-        volumes.push(`${xdgRuntimeDir}/pulse:/run/user/1000/pulse:rw`);
-        logger.info(`  ✓ PulseAudio socket available`);
+      const possiblePulsePaths = [
+        `${xdgRuntimeDir}/pulse`,
+        `/run/user/1000/pulse`,
+        `/tmp/pulse-socket`,
+      ];
+      
+      let pulseSocketPath: string | null = null;
+      for (const pulsePath of possiblePulsePaths) {
+        if (existsSync(pulsePath)) {
+          pulseSocketPath = pulsePath;
+          break;
+        }
+      }
+      
+      if (pulseSocketPath) {
+        volumes.push(`${pulseSocketPath}:/run/user/1000/pulse:rw`);
+        logger.info(`  ✓ PulseAudio socket available at ${pulseSocketPath}`);
         
         // Mount PulseAudio cookie if it exists
-        const pulseCookie = `${userHome}/.config/pulse/cookie`;
-        if (existsSync(pulseCookie)) {
-          volumes.push(`${pulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
-          logger.info(`  ✓ PulseAudio cookie available`);
+        const pulseCookiePaths = [
+          `${userHome}/.config/pulse/cookie`,
+          '/home/dillinger/.config/pulse/cookie',
+        ];
+        for (const pulseCookie of pulseCookiePaths) {
+          if (existsSync(pulseCookie)) {
+            volumes.push(`${pulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
+            logger.info(`  ✓ PulseAudio cookie available at ${pulseCookie}`);
+            break;
+          }
         }
       } else {
-        logger.warn(`  ⚠ No PulseAudio socket found at ${xdgRuntimeDir}/pulse`);
+        logger.warn(`  ⚠ No PulseAudio socket found (checked: ${possiblePulsePaths.join(', ')})`);
+        logger.warn(`    XDG_RUNTIME_DIR=${process.env.XDG_RUNTIME_DIR || '(not set)'}`);
+        logger.warn(`    Game audio may not work. Ensure PulseAudio socket is mounted into dillinger-core container.`);
       }
       
       // Check if GPU device exists
@@ -2938,7 +3150,7 @@ export class DockerService {
 
       // Remove orphaned volumes (except system volumes)
       const removed: string[] = [];
-      const protectedVolumes = ['dillinger_root', 'dillinger_installed', 'dillinger_installers'];
+      const protectedVolumes = ['dillinger_root', 'dillinger_installers'];
 
       for (const vol of allVolumes) {
         const volumeName = vol.Name;

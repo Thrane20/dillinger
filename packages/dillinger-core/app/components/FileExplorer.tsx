@@ -259,40 +259,6 @@ export default function FileExplorer({
 
           {/* File Browser */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Manual Path Entry */}
-            <div className="p-4 border-b border-border bg-surface/30">
-              <form onSubmit={handleManualPathSubmit} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={manualPath}
-                  onChange={(e) => setManualPath(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-background border border-border rounded text-sm font-mono text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="Enter path manually (e.g., /mnt/games)"
-                />
-                <button
-                  type="submit"
-                  disabled={loading || !manualPath.trim()}
-                  className="px-3 py-2 rounded bg-primary text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  title="Go to path"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRefresh}
-                  disabled={loading || !currentPath}
-                  className="p-2 rounded hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  title="Refresh current directory"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
-              </form>
-            </div>
-            
             {/* Path Bar */}
             <div className="p-4 border-b border-border bg-surface/30">
               <div className="flex items-center gap-2">
@@ -307,9 +273,30 @@ export default function FileExplorer({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                   </svg>
                 </button>
-                <div className="flex-1 px-3 py-2 bg-background border border-border rounded text-sm font-mono text-text">
-                  {currentPath || '/'}
-                </div>
+                <input
+                  type="text"
+                  value={manualPath}
+                  onChange={(e) => setManualPath(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && manualPath.trim()) {
+                      e.preventDefault();
+                      handleManualPathSubmit(e as unknown as React.FormEvent);
+                    }
+                  }}
+                  className="flex-1 px-3 py-2 bg-background border border-border rounded text-sm font-mono text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="Enter path (e.g., /mnt/games)"
+                />
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={loading || !currentPath}
+                  className="p-2 rounded hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  title="Refresh current directory"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
               </div>
             </div>
 

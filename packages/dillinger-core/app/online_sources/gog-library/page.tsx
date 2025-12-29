@@ -188,7 +188,8 @@ export default function GOGLibraryPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="h-full overflow-y-auto">
+      <div className="space-y-6 p-4">
       {/* Header */}
       <div className="card">
         <div className="card-body">
@@ -540,6 +541,7 @@ export default function GOGLibraryPage() {
         </div>
         );
       })()}
+      </div>
     </div>
   );
 }

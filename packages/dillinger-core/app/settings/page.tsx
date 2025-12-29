@@ -13,6 +13,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 const SETTINGS_SECTIONS = [
   { id: 'igdb', label: 'IGDB', icon: '🎮' },
   { id: 'scrapers', label: 'Other Scrapers', icon: '🔍' },
+  { id: 'ai', label: 'AI Assistant', icon: '🤖' },
   { id: 'audio', label: 'Audio', icon: '🔊' },
   { id: 'platforms', label: 'Platforms', icon: '🎯' },
   { id: 'docker', label: 'Docker', icon: '🐳' },
@@ -96,6 +97,11 @@ export default function SettingsPage() {
     return 0.5;
   });
 
+  // AI Settings
+  const [aiOpenaiApiKey, setAiOpenaiApiKey] = useState('');
+  const [aiOpenaiModel, setAiOpenaiModel] = useState('gpt-4o');
+  const [aiConfigured, setAiConfigured] = useState(false);
+
   // Helper to show save indicator for a section
   const showSaveIndicator = (sectionId: string, message: string = 'Saved!') => {
     setSavedSections(prev => ({ ...prev, [sectionId]: message }));
@@ -144,6 +150,7 @@ export default function SettingsPage() {
     loadGpuSettings();
     loadDownloadSettings();
     loadJoystickSettings();
+    loadAiSettings();
     loadPlatformConfig('arcade');
   }, []);
 
@@ -274,6 +281,54 @@ export default function SettingsPage() {
     }
   };
 
+  const loadAiSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/ai`);
+      if (!response.ok) {
+        throw new Error('Failed to load AI settings');
+      }
+      const data = await response.json();
+      setAiConfigured(data.configured || false);
+      if (data.settings?.openai) {
+        setAiOpenaiApiKey(data.settings.openai.apiKey || '');
+        setAiOpenaiModel(data.settings.openai.model || 'gpt-4o');
+      }
+    } catch (error) {
+      console.error('Failed to load AI settings:', error);
+    }
+  };
+
+  const saveAiSettings = async () => {
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/ai`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          provider: 'openai',
+          openaiApiKey: aiOpenaiApiKey,
+          openaiModel: aiOpenaiModel,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save AI settings');
+      }
+
+      showSaveIndicator('ai', 'AI settings saved!');
+      await loadAiSettings();
+    } catch (error) {
+      console.error('Failed to save AI settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save AI settings' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveDockerSettings = async () => {
     try {
       setSaving(true);
@@ -336,7 +391,9 @@ export default function SettingsPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ maxConcurrent: maxConcurrentDownloads }),
+        body: JSON.stringify({ 
+          maxConcurrent: maxConcurrentDownloads,
+        }),
       });
 
       if (!response.ok) {
@@ -727,6 +784,83 @@ export default function SettingsPage() {
             </p>
           </div>
 
+          {/* AI Assistant Settings */}
+          <div 
+            id="ai" 
+            ref={(el) => { sectionRefs.current['ai'] = el; }}
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+          >
+            <SaveIndicator show={!!savedSections['ai']} message={savedSections['ai'] || ''} />
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">🤖 AI Assistant</h2>
+              <span
+                className={`px-3 py-1 rounded-full text-sm ${
+                  aiConfigured
+                    ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
+                }`}
+              >
+                {aiConfigured ? 'Configured' : 'Not Configured'}
+              </span>
+            </div>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              Configure AI assistance for debugging Wine games. Dillinger AI can analyze container logs
+              and provide recommendations for DLL overrides, winetricks, and registry settings.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="aiOpenaiApiKey" className="block text-sm font-medium mb-1">
+                  OpenAI API Key
+                </label>
+                <input
+                  type="password"
+                  id="aiOpenaiApiKey"
+                  value={aiOpenaiApiKey}
+                  onChange={(e) => setAiOpenaiApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Get your API key from{' '}
+                  <a
+                    href="https://platform.openai.com/api-keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    platform.openai.com
+                  </a>
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="aiOpenaiModel" className="block text-sm font-medium mb-1">
+                  Model
+                </label>
+                <select
+                  id="aiOpenaiModel"
+                  value={aiOpenaiModel}
+                  onChange={(e) => setAiOpenaiModel(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="gpt-4o">GPT-4o (Recommended)</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini (Faster/Cheaper)</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Cheapest)</option>
+                </select>
+              </div>
+
+              <button
+                onClick={saveAiSettings}
+                disabled={saving}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {saving ? 'Saving...' : 'Save AI Settings'}
+              </button>
+            </div>
+          </div>
+
           {/* Audio Settings */}
           <div 
             id="audio" 
@@ -1044,6 +1178,13 @@ export default function SettingsPage() {
                 </p>
               </div>
 
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  💡 <strong>Tip:</strong> Default install locations, download directories, and ROM paths are now configured per-volume.
+                  Use the Volume Manager in the left sidebar and click the pencil icon to configure a volume as the default for each purpose.
+                </p>
+              </div>
+
               <button
                 onClick={saveDownloadSettings}
                 disabled={saving}
@@ -1089,7 +1230,7 @@ export default function SettingsPage() {
               </button>
 
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                ⚠️ System volumes (dillinger_root, dillinger_installed, dillinger_installers) are protected and will not be removed.
+                ⚠️ System volumes (dillinger_root, dillinger_installers) are protected and will not be removed.
               </p>
             </div>
           </div>

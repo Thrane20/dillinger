@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import FileExplorer from './FileExplorer';
+import VolumeSettingsModal from './VolumeSettingsModal';
 
 interface Volume {
   id: string;
@@ -21,6 +22,18 @@ interface DockerVolume {
   mountpoint: string;
   createdAt?: string;
   size?: string;
+}
+
+interface VolumeDefaults {
+  defaults: {
+    installers: string | null;
+    downloads: string | null;
+    installed: string | null;
+    roms: string | null;
+  };
+  volumeMetadata: Record<string, {
+    storageType?: 'ssd' | 'platter' | 'archive';
+  }>;
 }
 
 // NOTE: SessionVolumeInfo interface commented out - no longer needed with dillinger_root architecture
@@ -43,6 +56,8 @@ export default function LeftSidebar() {
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [unmountedVolumes, setUnmountedVolumes] = useState<DockerVolume[]>([]);
   const [loading, setLoading] = useState(true);
+  const [volumeDefaults, setVolumeDefaults] = useState<VolumeDefaults | null>(null);
+  const [editingVolume, setEditingVolume] = useState<Volume | null>(null);
 
   // Load volumes on mount
   useEffect(() => {
@@ -81,11 +96,34 @@ export default function LeftSidebar() {
           setVolumes(configuredVolumes);
         }
       }
+      
+      // Load volume defaults
+      const defaultsResponse = await fetch('/api/volumes/defaults');
+      const defaultsData = await defaultsResponse.json();
+      if (defaultsData.success) {
+        setVolumeDefaults(defaultsData.data);
+      }
     } catch (error) {
       console.error('Failed to load volumes:', error);
     } finally {
       setLoading(false);
     }
+  }
+
+  // Get badges for a volume based on its default assignments and storage type
+  function getVolumeBadges(volumeId: string): { defaults: string[]; storageType?: string } {
+    if (!volumeDefaults) return { defaults: [] };
+    
+    const defaults: string[] = [];
+    if (volumeDefaults.defaults.installers === volumeId) defaults.push('📦');
+    if (volumeDefaults.defaults.downloads === volumeId) defaults.push('⬇️');
+    if (volumeDefaults.defaults.installed === volumeId) defaults.push('🎮');
+    if (volumeDefaults.defaults.roms === volumeId) defaults.push('💾');
+    
+    const meta = volumeDefaults.volumeMetadata[volumeId];
+    const storageType = meta?.storageType;
+    
+    return { defaults, storageType };
   }
 
   function handleAddVolume() {
@@ -280,21 +318,41 @@ export default function LeftSidebar() {
                     </div>
                   ) : (
                     <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                      {volumes.map((volume) => (
+                      {volumes.map((volume) => {
+                        const badges = getVolumeBadges(volume.id);
+                        return (
                         <div
                           key={volume.id}
                           className="p-3 rounded bg-background border border-border/50 hover:border-border transition-colors"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <div className={`px-2 py-0.5 rounded text-[10px] font-medium ${volume.type === 'docker'
                                     ? 'bg-blue-500/20 text-blue-400'
                                     : 'bg-green-500/20 text-green-400'
                                   }`}>
                                   {volume.type === 'docker' ? 'DOCKER' : 'BIND'}
                                 </div>
+                                {badges.storageType && (
+                                  <div className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                                    badges.storageType === 'ssd' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    badges.storageType === 'platter' ? 'bg-purple-500/20 text-purple-400' :
+                                    'bg-gray-500/20 text-gray-400'
+                                  }`}>
+                                    {badges.storageType === 'ssd' ? '⚡ SSD' :
+                                     badges.storageType === 'platter' ? '💿 HDD' :
+                                     '📚 Archive'}
+                                  </div>
+                                )}
                                 <div className="font-semibold text-text text-sm truncate">{volume.name}</div>
+                                {badges.defaults.length > 0 && (
+                                  <div className="flex gap-0.5" title="Default for: installers, downloads, installed, roms">
+                                    {badges.defaults.map((emoji, i) => (
+                                      <span key={i} className="text-xs">{emoji}</span>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                               <div className="text-muted text-xs mt-1 font-mono truncate" title={volume.hostPath}>
                                 {volume.hostPath}
@@ -303,18 +361,30 @@ export default function LeftSidebar() {
                                 Created {new Date(volume.createdAt).toLocaleDateString()}
                               </div>
                             </div>
-                            <button
-                              onClick={() => handleRemoveVolume(volume.id)}
-                              className="p-1.5 text-muted hover:text-error hover:bg-error/10 rounded transition-colors flex-shrink-0"
-                              title="Remove volume"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
+                            <div className="flex flex-col gap-1 flex-shrink-0">
+                              <button
+                                onClick={() => setEditingVolume(volume)}
+                                className="p-1.5 text-muted hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                                title="Edit volume settings"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => handleRemoveVolume(volume.id)}
+                                className="p-1.5 text-muted hover:text-error hover:bg-error/10 rounded transition-colors"
+                                title="Remove volume"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   </div>
@@ -604,6 +674,16 @@ export default function LeftSidebar() {
         </div>
       )}
       */}
+
+      {/* Volume Settings Modal */}
+      {editingVolume && (
+        <VolumeSettingsModal
+          isOpen={true}
+          onClose={() => setEditingVolume(null)}
+          volume={editingVolume}
+          onSave={() => loadVolumes()}
+        />
+      )}
     </div>
   );
 }

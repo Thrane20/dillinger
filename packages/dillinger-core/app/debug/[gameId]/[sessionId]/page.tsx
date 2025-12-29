@@ -45,6 +45,11 @@ export default function DebugSessionPage() {
   const [containerName, setContainerName] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
+  // AI Analysis state
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [aiError, setAiError] = useState<string | null>(null);
+
   const containerIdShort = useMemo(() => {
     if (!session?.containerId) return 'N/A';
     return session.containerId.slice(0, 12);
@@ -184,6 +189,39 @@ export default function DebugSessionPage() {
     }
   }
 
+  async function askDillingerAI() {
+    if (!logsText.trim()) {
+      setAiError('Please load logs first before asking for AI analysis.');
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError(null);
+    setAiAnalysis('');
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/ai/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ logs: logsText }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'AI analysis failed');
+      }
+
+      setAiAnalysis(data.analysis || 'No analysis returned.');
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI analysis failed');
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="container mx-auto p-8">
@@ -195,7 +233,8 @@ export default function DebugSessionPage() {
   }
 
   return (
-    <div className="container mx-auto p-8 max-w-6xl">
+    <div className="min-h-screen overflow-auto">
+      <div className="container mx-auto p-8 max-w-6xl">
       <div className="mb-6">
         <button
           onClick={() => router.back()}
@@ -394,6 +433,69 @@ export default function DebugSessionPage() {
             />
           </div>
         </div>
+      </div>
+
+      {/* AI Analysis Section */}
+      <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🤖</span>
+            <h2 className="text-xl font-semibold">Dillinger AI Assistant</h2>
+          </div>
+          <button
+            onClick={() => void askDillingerAI()}
+            disabled={aiLoading || !logsText.trim()}
+            className="px-4 py-2 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+            title={!logsText.trim() ? 'Load logs first to enable AI analysis' : 'Analyze logs with AI'}
+          >
+            {aiLoading ? (
+              <>
+                <Spinner />
+                Analyzing…
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Ask Dillinger AI
+              </>
+            )}
+          </button>
+        </div>
+        <div className="p-4">
+          {aiError && (
+            <div className="mb-4 bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-red-800 dark:text-red-100 text-sm">
+              {aiError}
+            </div>
+          )}
+          {!logsText.trim() && !aiAnalysis && (
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              <div className="text-4xl mb-3">📋</div>
+              <p>Load container logs first, then click &quot;Ask Dillinger AI&quot; to get troubleshooting recommendations.</p>
+              <p className="text-sm mt-2 text-gray-400 dark:text-gray-500">
+                AI will analyze DLL issues, GPU errors, video playback problems, and suggest fixes.
+              </p>
+            </div>
+          )}
+          {logsText.trim() && !aiAnalysis && !aiLoading && (
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              <div className="text-4xl mb-3">🔍</div>
+              <p>Logs loaded! Click &quot;Ask Dillinger AI&quot; to analyze them.</p>
+              <p className="text-sm mt-2 text-gray-400 dark:text-gray-500">
+                The AI will look for Wine/Proton issues and provide recommendations for WINEDLLOVERRIDES, winetricks, and registry settings.
+              </p>
+            </div>
+          )}
+          {aiAnalysis && (
+            <div className="prose dark:prose-invert max-w-none">
+              <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre-wrap overflow-auto max-h-[600px]">
+                {aiAnalysis}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
       </div>
     </div>
   );

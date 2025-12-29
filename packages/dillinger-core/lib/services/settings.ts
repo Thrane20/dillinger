@@ -29,6 +29,7 @@ export interface GOGSettings {
 
 export interface DownloadSettings {
   maxConcurrent?: number; // Maximum number of concurrent download worker threads (default: 2)
+  defaultInstallVolumeId?: string; // ID of the configured volume for game installations
 }
 
 export interface JoystickConfig {
@@ -165,7 +166,9 @@ export class SettingsService {
 
   async getDownloadSettings(): Promise<DownloadSettings> {
     await this.ensureInitialized();
-    return this.settings.downloads || { maxConcurrent: 2 };
+    return this.settings.downloads || { 
+      maxConcurrent: 2,
+    };
   }
 
   async updateDownloadSettings(settings: Partial<DownloadSettings>): Promise<void> {

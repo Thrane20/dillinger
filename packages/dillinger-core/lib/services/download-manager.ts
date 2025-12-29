@@ -7,6 +7,7 @@ import { Worker } from 'worker_threads';
 import { fileURLToPath } from 'url';
 import { JSONStorageService } from './storage';
 import { WebSocketService } from './websocket-service';
+import { resolveDefaultPath } from './volume-defaults';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,9 +66,47 @@ export class DownloadManager extends EventEmitter {
   private saveStateDebounceMs = 1000;
   private saveStateTimer: NodeJS.Timeout | null = null;
 
-  private getInstallersRootPath(): string {
+  // Cache for resolved paths to avoid repeated async lookups
+  private resolvedInstallersPath: string | null = null;
+  private resolvedDownloadsPath: string | null = null;
+
+  private getDefaultInstallersPath(): string {
     // In the core container, the named docker volume `dillinger_installers` is mounted at /installers
     return process.env.DILLINGER_INSTALLERS_ROOT || '/installers';
+  }
+
+  private getDefaultDownloadsPath(): string {
+    // Default downloads cache location
+    const dillingerRoot = this.storage.getDillingerRoot();
+    return path.join(dillingerRoot, 'storage', 'installer_cache');
+  }
+
+  /**
+   * Get the installers root path, checking volume defaults first
+   */
+  private async getInstallersRootPath(): Promise<string> {
+    if (this.resolvedInstallersPath) {
+      return this.resolvedInstallersPath;
+    }
+    
+    const defaultPath = this.getDefaultInstallersPath();
+    this.resolvedInstallersPath = await resolveDefaultPath('installers', defaultPath);
+    console.log(`[DownloadManager] Using installers path: ${this.resolvedInstallersPath}`);
+    return this.resolvedInstallersPath;
+  }
+
+  /**
+   * Get the downloads cache path, checking volume defaults first
+   */
+  private async getDownloadsCachePath(): Promise<string> {
+    if (this.resolvedDownloadsPath) {
+      return this.resolvedDownloadsPath;
+    }
+    
+    const defaultPath = this.getDefaultDownloadsPath();
+    this.resolvedDownloadsPath = await resolveDefaultPath('downloads', defaultPath);
+    console.log(`[DownloadManager] Using downloads cache path: ${this.resolvedDownloadsPath}`);
+    return this.resolvedDownloadsPath;
   }
 
   private async findGameFileKey(gameId: string): Promise<string | null> {
@@ -140,7 +179,7 @@ export class DownloadManager extends EventEmitter {
   }
 
   private async moveDownloadedFilesToInstallers(job: DownloadJob): Promise<{ installerPath?: string }> {
-    const installersRoot = this.getInstallersRootPath();
+    const installersRoot = await this.getInstallersRootPath();
 
     // Prefer a human-friendly slug folder under /installers.
     // job.gogId is the cache dir name (e.g. "1207658883-age-of-wonders").
@@ -400,8 +439,9 @@ export class DownloadManager extends EventEmitter {
     // Clear any cancelled state for this game when starting fresh
     this.cancelledDownloads.delete(gameId);
     
-    const dillingerRoot = this.storage.getDillingerRoot();
-    const downloadPath = path.join(dillingerRoot, 'storage', 'installer_cache', gogId);
+    // Use the configured downloads volume path, or fall back to default cache
+    const downloadsCachePath = await this.getDownloadsCachePath();
+    const downloadPath = path.join(downloadsCachePath, gogId);
 
     // Ensure download directory exists
     await fs.ensureDir(downloadPath);
