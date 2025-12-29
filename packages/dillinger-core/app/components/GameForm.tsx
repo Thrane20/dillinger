@@ -980,6 +980,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       'proton': 'Proton',
       'dosbox': 'DOSBox',
       'scummvm': 'ScummVM',
+      'nes': 'Nintendo (NES)',
+      'snes': 'Super Nintendo (SNES)',
       'c64': 'Commodore 64',
       'c128': 'Commodore 128',
       'vic20': 'VIC-20',
@@ -1163,6 +1165,22 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                           Arcade (MAME)
                         </button>
                         <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Nintendo</p>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPlatform('nes')}
+                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Nintendo (NES)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPlatform('snes')}
+                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Super Nintendo (SNES)
+                        </button>
+                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
                         <p className="px-3 py-1 text-xs font-semibold text-gray-500">Commodore</p>
                         {['c64', 'c128', 'vic20', 'plus4', 'pet'].map(id => (
                           <button
@@ -1201,7 +1219,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
 
           {/* Rom File Selection - Show for emulator platforms */}
-          {['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
+          {['nes', 'snes', 'c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
             <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
               <h3 className="text-lg font-semibold text-text border-b pb-2">
                 Rom File ({getPlatformName(formData.platformId)})
@@ -1239,7 +1257,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           )}
 
           {/* Launch Settings - Hide for emulator platforms that use ROMs */}
-          {!['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
+          {!['nes', 'snes', 'c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
             <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
               <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
 

@@ -15,7 +15,9 @@ LABEL version="2.0.0"
 
 # Install RetroArch and cores
 # retroarch: The frontend
-# libretro-mame: MAME core
+# libretro-mame: MAME core for arcade games
+# libretro-nestopia: NES emulator core
+# libretro-snes9x: SNES emulator core
 # libretro-core-info: Core information files
 # retroarch-assets-*: UI assets
 # icu: Required for internationalization support (fixes libicui18n.so error)
@@ -27,6 +29,8 @@ RUN echo "Refreshing package database..." && \
     icu \
     retroarch \
     libretro-mame \
+    libretro-nestopia \
+    libretro-snes9x \
     libretro-core-info \
     retroarch-assets-xmb \
     retroarch-assets-ozone \

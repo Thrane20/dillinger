@@ -679,6 +679,13 @@ export class DockerService {
       'cd32': 'fs-uae'          // Amiga CD32
     };
 
+    // Map platform IDs to RetroArch cores
+    const retroarchCores: Record<string, string> = {
+      'nes': 'nestopia',        // NES/Famicom
+      'snes': 'snes9x',         // SNES/Super Famicom
+      'mame': 'mame',           // Arcade (MAME)
+    };
+
     // Map platform IDs to MAME emulator commands
     const mameEmulators: Record<string, string> = {
       'mame': 'mame',
@@ -745,7 +752,18 @@ export class DockerService {
       logger.info(`  Working directory: ${containerWorkingDir}`);
     } else if (platform.configuration.containerImage?.includes('runner-retroarch')) {
       // For RetroArch games
-      const core = game.settings?.emulator?.core || platform.configuration.defaultSettings?.emulator?.core || 'mame';
+      // Priority: game-specific core > platform config core > platform ID default > 'mame' fallback
+      const platformCore = retroarchCores[game.platformId] || 'mame';
+      const core = game.settings?.emulator?.core || platform.configuration.defaultSettings?.emulator?.core || platformCore;
+      
+      logger.info('RetroArch core selection debug:', {
+        gamePlatformId: game.platformId,
+        retroarchCoresLookup: retroarchCores[game.platformId],
+        platformCore,
+        gameSettingsEmulatorCore: game.settings?.emulator?.core,
+        platformConfigCore: platform.configuration.defaultSettings?.emulator?.core,
+        finalCore: core,
+      });
       
       const romPath = game.filePath;
       
@@ -906,6 +924,12 @@ export class DockerService {
       `ENABLE_MOONLIGHT=${mode === 'streaming' ? 'true' : 'false'}`, // Enable Moonlight/Wolf streaming mode
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
+
+    // Debug: Log environment variables being passed
+    logger.info('Environment variables for container:', {
+      environmentObj: environment,
+      envArray: env.filter(e => e.startsWith('RETROARCH') || e.startsWith('GAME_ID')),
+    });
 
     // Inject Joystick Configuration
     try {
@@ -1495,6 +1519,11 @@ export class DockerService {
       // Pass the command array to the container
       // The entrypoint script will execute it with gosu
       containerConfig.Cmd = cmdArray;
+
+      // Debug: Log the RETROARCH_CORE env var before container creation
+      const retroarchEnv = env.find(e => e.startsWith('RETROARCH_CORE'));
+      logger.info(`DEBUG: RETROARCH_CORE in env array: ${retroarchEnv || 'NOT FOUND'}`);
+      logger.info(`DEBUG: Full env array length: ${env.length}`);
       
       const container = await docker.createContainer(containerConfig);
 

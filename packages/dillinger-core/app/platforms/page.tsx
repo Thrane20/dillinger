@@ -7,7 +7,6 @@ import {
   ExclamationTriangleIcon,
   TrashIcon,
   ArrowPathIcon,
-  CpuChipIcon,
   ServerIcon,
   InformationCircleIcon,
   StarIcon,
@@ -85,17 +84,79 @@ interface WineInstallProgress {
   error?: string;
 }
 
-// Platform tab configuration
-const PLATFORM_TABS = [
-  { id: 'runners', name: 'Runners', icon: ServerIcon },
-  { id: 'wine', name: 'Wine (Windows)', icon: CpuChipIcon },
-  { id: 'c64', name: 'C64 / Commodore', icon: CpuChipIcon },
-  { id: 'arcade', name: 'Arcade / MAME', icon: CpuChipIcon },
-  { id: 'amiga', name: 'Amiga', icon: CpuChipIcon },
+// Per-section save success indicator component
+function SaveIndicator({ show, message }: { show: boolean; message: string }) {
+  if (!show) return null;
+  return (
+    <div className="flex items-center gap-2 bg-green-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-lg animate-pulse">
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+      </svg>
+      {message}
+    </div>
+  );
+}
+
+// Platform sections for sidebar navigation
+const PLATFORM_SECTIONS = [
+  { id: 'runners', label: 'Runners', icon: '🖥️' },
+  { id: 'wine', label: 'Wine (Windows)', icon: '🍷' },
+  { id: 'nes', label: 'NES', icon: '🎮' },
+  { id: 'snes', label: 'Super Nintendo', icon: '🕹️' },
+  { id: 'arcade', label: 'Arcade / MAME', icon: '👾' },
+  { id: 'c64', label: 'C64 / Commodore', icon: '💾' },
+  { id: 'amiga', label: 'Amiga', icon: '🖱️' },
 ];
 
+// Platform settings types
+interface NesSettings {
+  core: 'nestopia' | 'fceumm' | 'mesen';
+  region: 'auto' | 'ntsc' | 'pal';
+}
+
+interface SnesSettings {
+  core: 'snes9x' | 'bsnes' | 'bsnes_hd';
+  region: 'auto' | 'ntsc' | 'pal';
+  superfxOverclock: boolean;
+}
+
+interface ArcadeSettings {
+  videoMode: 'opengl' | 'bgfx' | 'soft';
+}
+
+interface C64Settings {
+  trueDriveEmulation: boolean;
+  warpMode: boolean;
+}
+
+interface WineSettings {
+  architecture: 'win64' | 'win32';
+  renderer: 'vulkan' | 'opengl';
+}
+
+interface PlatformSettings {
+  nes: NesSettings;
+  snes: SnesSettings;
+  arcade: ArcadeSettings;
+  c64: C64Settings;
+  wine: WineSettings;
+}
+
+// Default settings
+const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
+  nes: { core: 'nestopia', region: 'auto' },
+  snes: { core: 'snes9x', region: 'auto', superfxOverclock: false },
+  arcade: { videoMode: 'opengl' },
+  c64: { trueDriveEmulation: true, warpMode: false },
+  wine: { architecture: 'win64', renderer: 'vulkan' },
+};
+
 export default function PlatformsPage() {
-  const [activeTab, setActiveTab] = useState('runners');
+  // Section refs for scrolling
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  
+  // Active section for sidebar highlight
+  const [activeSection, setActiveSection] = useState('runners');
   const [files, setFiles] = useState<BiosFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -112,26 +173,136 @@ export default function PlatformsPage() {
   const [wineInstallProgress, setWineInstallProgress] = useState<Record<string, WineInstallProgress>>({});
   const [refreshingWineCache, setRefreshingWineCache] = useState(false);
 
+  // Per-section save indicators
+  const [savedSections, setSavedSections] = useState<Record<string, string>>({});
+  
+  // Platform settings state
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+
+  // Load platform settings on mount
+  useEffect(() => {
+    loadPlatformSettings();
+  }, []);
+
+  const loadPlatformSettings = async () => {
+    try {
+      setLoadingSettings(true);
+      const response = await fetch(`${API_BASE_URL}/api/settings/platforms`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.settings) {
+          setPlatformSettings({
+            ...DEFAULT_PLATFORM_SETTINGS,
+            ...data.settings,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load platform settings:', error);
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
+  // Helper to show save indicator for a section
+  const showSaveIndicator = (sectionId: string, msg: string = 'Saved!') => {
+    setSavedSections(prev => ({ ...prev, [sectionId]: msg }));
+    setTimeout(() => {
+      setSavedSections(prev => {
+        const newState = { ...prev };
+        delete newState[sectionId];
+        return newState;
+      });
+    }, 2000);
+  };
+
+  // Save platform settings
+  const savePlatformSettings = async (platformId: keyof PlatformSettings) => {
+    try {
+      const settings = platformSettings[platformId];
+      const response = await fetch(`${API_BASE_URL}/api/settings/platforms`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platformId, settings }),
+      });
+
+      if (response.ok) {
+        showSaveIndicator(platformId, `${platformId.toUpperCase()} settings saved!`);
+        setMessage({ type: 'success', text: `${platformId.toUpperCase()} settings saved successfully` });
+      } else {
+        throw new Error('Failed to save settings');
+      }
+    } catch (error) {
+      console.error(`Failed to save ${platformId} settings:`, error);
+      setMessage({ type: 'error', text: `Failed to save ${platformId} settings` });
+    }
+  };
+
+  // Update a specific platform setting
+  const updatePlatformSetting = <K extends keyof PlatformSettings>(
+    platformId: K,
+    key: keyof PlatformSettings[K],
+    value: PlatformSettings[K][keyof PlatformSettings[K]]
+  ) => {
+    setPlatformSettings(prev => ({
+      ...prev,
+      [platformId]: {
+        ...prev[platformId],
+        [key]: value,
+      },
+    }));
+  };
+
+  // Scroll to section when clicking sidebar
+  const scrollToSection = (sectionId: string) => {
+    setActiveSection(sectionId);
+    const element = sectionRefs.current[sectionId];
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  // Intersection observer for active section tracking
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setActiveSection(entry.target.id);
+          }
+        });
+      },
+      { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
+    );
+
+    Object.values(sectionRefs.current).forEach((ref) => {
+      if (ref) observer.observe(ref);
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
   // Load runners on mount
   useEffect(() => {
     loadRunners();
   }, []);
 
-  // Load Wine versions when Wine tab is active
+  // Load Wine versions when Wine section is active
   useEffect(() => {
-    if (activeTab === 'wine') {
+    if (activeSection === 'wine') {
       loadWineVersions();
     }
-  }, [activeTab]);
+  }, [activeSection]);
 
-  // Load BIOS files when tab changes
+  // Load BIOS files when section changes
   useEffect(() => {
-    if (activeTab === 'amiga') {
+    if (activeSection === 'amiga') {
       loadBiosFiles('amiga');
-    } else if (activeTab === 'c64') {
+    } else if (activeSection === 'c64') {
       loadBiosFiles('c64');
     }
-  }, [activeTab]);
+  }, [activeSection]);
 
   const loadRunners = async () => {
     setLoadingRunners(true);
@@ -496,7 +667,7 @@ export default function PlatformsPage() {
     const progress = pullProgress[runner.id];
 
     return (
-      <div className={`border rounded-lg p-4 mb-6 ${
+      <div className={`border rounded-lg p-4 mb-6  ${
         runner.installed 
           ? runner.updateAvailable
             ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
@@ -614,8 +785,12 @@ export default function PlatformsPage() {
     );
   };
 
-  const renderRunnersTab = () => (
-    <div className="space-y-6">
+  const renderRunnersSection = () => (
+    <div 
+      id="runners"
+      ref={(el) => { sectionRefs.current['runners'] = el; }}
+      className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+    >
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Runner Images</h2>
@@ -786,7 +961,7 @@ export default function PlatformsPage() {
     </div>
   );
 
-  const renderWineTab = () => {
+  const renderWineSection = () => {
     const wineRunner = getRunnerForPlatform('windows-wine');
     
     const getVersionTypeBadge = (type: string) => {
@@ -815,7 +990,11 @@ export default function PlatformsPage() {
     };
     
     return (
-      <div className="space-y-6">
+      <div 
+        id="wine"
+        ref={(el) => { sectionRefs.current['wine'] = el; }}
+        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+      >
         <div>
           <h2 className="text-2xl font-semibold">Wine (Windows Games)</h2>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
@@ -1045,7 +1224,11 @@ export default function PlatformsPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Default Wine Architecture
                     </label>
-                    <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                    <select 
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                      value={platformSettings.wine.architecture}
+                      onChange={(e) => updatePlatformSetting('wine', 'architecture', e.target.value as WineSettings['architecture'])}
+                    >
                       <option value="win64">64-bit (win64)</option>
                       <option value="win32">32-bit (win32)</option>
                     </select>
@@ -1056,11 +1239,26 @@ export default function PlatformsPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Default Renderer
                     </label>
-                    <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                    <select 
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                      value={platformSettings.wine.renderer}
+                      onChange={(e) => updatePlatformSetting('wine', 'renderer', e.target.value as WineSettings['renderer'])}
+                    >
                       <option value="vulkan">Vulkan (recommended)</option>
                       <option value="opengl">OpenGL (legacy games)</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Save Button */}
+                <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <SaveIndicator show={!!savedSections['wine']} message={savedSections['wine'] || ''} />
+                  <button
+                    onClick={() => savePlatformSettings('wine')}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+                  >
+                    Save Wine Settings
+                  </button>
                 </div>
               </div>
             </div>
@@ -1085,11 +1283,15 @@ export default function PlatformsPage() {
     );
   };
 
-  const renderC64Tab = () => {
+  const renderC64Section = () => {
     const viceRunner = getRunnerForPlatform('c64');
     
     return (
-      <div className="space-y-6">
+      <div 
+        id="c64"
+        ref={(el) => { sectionRefs.current['c64'] = el; }}
+        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+      >
         <div>
           <h2 className="text-2xl font-semibold">Commodore Emulation</h2>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
@@ -1108,15 +1310,36 @@ export default function PlatformsPage() {
                   <label className="font-medium text-gray-700 dark:text-gray-300">True Drive Emulation</label>
                   <p className="text-sm text-gray-500">Accurate but slower disk emulation</p>
                 </div>
-                <input type="checkbox" className="w-5 h-5 rounded border-gray-300" defaultChecked />
+                <input 
+                  type="checkbox" 
+                  className="w-5 h-5 rounded border-gray-300"
+                  checked={platformSettings.c64.trueDriveEmulation}
+                  onChange={(e) => updatePlatformSetting('c64', 'trueDriveEmulation', e.target.checked)}
+                />
               </div>
               <div className="flex items-center justify-between">
                 <div>
                   <label className="font-medium text-gray-700 dark:text-gray-300">Warp Mode</label>
                   <p className="text-sm text-gray-500">Run emulation at maximum speed (no speed limit)</p>
                 </div>
-                <input type="checkbox" className="w-5 h-5 rounded border-gray-300" />
+                <input 
+                  type="checkbox" 
+                  className="w-5 h-5 rounded border-gray-300"
+                  checked={platformSettings.c64.warpMode}
+                  onChange={(e) => updatePlatformSetting('c64', 'warpMode', e.target.checked)}
+                />
               </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <SaveIndicator show={!!savedSections['c64']} message={savedSections['c64'] || ''} />
+              <button
+                onClick={() => savePlatformSettings('c64')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Save C64 Settings
+              </button>
             </div>
           </div>
         )}
@@ -1124,11 +1347,15 @@ export default function PlatformsPage() {
     );
   };
 
-  const renderArcadeTab = () => {
+  const renderArcadeSection = () => {
     const retroarchRunner = runners.find(r => r.id === 'retroarch');
     
     return (
-      <div className="space-y-6">
+      <div 
+        id="arcade"
+        ref={(el) => { sectionRefs.current['arcade'] = el; }}
+        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+      >
         <div>
           <h2 className="text-2xl font-semibold">Arcade / MAME</h2>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
@@ -1149,12 +1376,27 @@ export default function PlatformsPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Video Mode
                 </label>
-                <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.arcade.videoMode}
+                  onChange={(e) => updatePlatformSetting('arcade', 'videoMode', e.target.value as ArcadeSettings['videoMode'])}
+                >
                   <option value="opengl">OpenGL</option>
                   <option value="bgfx">BGFX</option>
                   <option value="soft">Software</option>
                 </select>
               </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <SaveIndicator show={!!savedSections['arcade']} message={savedSections['arcade'] || ''} />
+              <button
+                onClick={() => savePlatformSettings('arcade')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Save MAME Settings
+              </button>
             </div>
           </div>
         )}
@@ -1162,11 +1404,15 @@ export default function PlatformsPage() {
     );
   };
 
-  const renderAmigaTab = () => {
+  const renderAmigaSection = () => {
     const amigaRunner = getRunnerForPlatform('amiga');
     
     return (
-      <div className="space-y-6">
+      <div 
+        id="amiga"
+        ref={(el) => { sectionRefs.current['amiga'] = el; }}
+        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+      >
         <div>
           <h2 className="text-2xl font-semibold">Amiga Emulation</h2>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
@@ -1238,49 +1484,243 @@ export default function PlatformsPage() {
     );
   };
 
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="p-4 max-w-5xl mx-auto">
-      <h1 className="text-4xl font-bold mb-8">Platform Settings</h1>
-
-      {/* Tabs */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700 mb-8 overflow-x-auto">
-        {PLATFORM_TABS.map(tab => (
-          <button
-            key={tab.id}
-            className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === tab.id
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            }`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.name}
-          </button>
-        ))}
-      </div>
-
-      {message && (
-        <div
-          className={`mb-6 p-4 rounded-lg ${
-            message.type === 'success'
-              ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100'
-              : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100'
-          }`}
-        >
-          {message.text}
+  const renderNesSection = () => {
+    const retroarchRunner = runners.find(r => r.id === 'retroarch');
+    
+    return (
+      <div 
+        id="nes"
+        ref={(el) => { sectionRefs.current['nes'] = el; }}
+        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+      >
+        <div>
+          <h2 className="text-2xl font-semibold">Nintendo Entertainment System (NES)</h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
+            NES/Famicom emulation via Nestopia core in RetroArch.
+          </p>
         </div>
-      )}
 
-      {/* Tab Content */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-        {activeTab === 'runners' && renderRunnersTab()}
-        {activeTab === 'wine' && renderWineTab()}
-        {activeTab === 'c64' && renderC64Tab()}
-        {activeTab === 'arcade' && renderArcadeTab()}
-        {activeTab === 'amiga' && renderAmigaTab()}
+        {renderRunnerStatus(retroarchRunner, 'RetroArch Runner')}
+
+        {retroarchRunner?.installed && (
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+            <h3 className="text-lg font-medium mb-4">NES Settings</h3>
+            <div className="grid gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Core
+                </label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.nes.core}
+                  onChange={(e) => updatePlatformSetting('nes', 'core', e.target.value as NesSettings['core'])}
+                >
+                  <option value="nestopia">Nestopia UE (recommended)</option>
+                  <option value="fceumm">FCEUmm</option>
+                  <option value="mesen">Mesen (accuracy)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Nestopia offers excellent accuracy and performance balance</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Region
+                </label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.nes.region}
+                  onChange={(e) => updatePlatformSetting('nes', 'region', e.target.value as NesSettings['region'])}
+                >
+                  <option value="auto">Auto-detect</option>
+                  <option value="ntsc">NTSC (USA/Japan)</option>
+                  <option value="pal">PAL (Europe)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <SaveIndicator show={!!savedSections['nes']} message={savedSections['nes'] || ''} />
+              <button
+                onClick={() => savePlatformSettings('nes')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Save NES Settings
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <InformationCircleIcon className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <h4 className="font-medium text-blue-800 dark:text-blue-200">Supported Formats</h4>
+              <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                .nes, .unf, .unif, .fds (Famicom Disk System), .zip, .7z
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
+    );
+  };
+
+  const renderSnesSection = () => {
+    const retroarchRunner = runners.find(r => r.id === 'retroarch');
+    
+    return (
+      <div 
+        id="snes"
+        ref={(el) => { sectionRefs.current['snes'] = el; }}
+        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+      >
+        <div>
+          <h2 className="text-2xl font-semibold">Super Nintendo (SNES)</h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
+            SNES/Super Famicom emulation via Snes9x core in RetroArch.
+          </p>
+        </div>
+
+        {renderRunnerStatus(retroarchRunner, 'RetroArch Runner')}
+
+        {retroarchRunner?.installed && (
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+            <h3 className="text-lg font-medium mb-4">SNES Settings</h3>
+            <div className="grid gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Core
+                </label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.snes.core}
+                  onChange={(e) => updatePlatformSetting('snes', 'core', e.target.value as SnesSettings['core'])}
+                >
+                  <option value="snes9x">Snes9x (recommended)</option>
+                  <option value="bsnes">bsnes (accuracy)</option>
+                  <option value="bsnes_hd">bsnes HD (widescreen)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Snes9x provides great accuracy with excellent performance</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Region
+                </label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.snes.region}
+                  onChange={(e) => updatePlatformSetting('snes', 'region', e.target.value as SnesSettings['region'])}
+                >
+                  <option value="auto">Auto-detect</option>
+                  <option value="ntsc">NTSC (USA/Japan)</option>
+                  <option value="pal">PAL (Europe)</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="font-medium text-gray-700 dark:text-gray-300">SuperFX Overclock</label>
+                  <p className="text-sm text-gray-500">Improve performance in Star Fox, Yoshi&apos;s Island, etc.</p>
+                </div>
+                <input 
+                  type="checkbox" 
+                  className="w-5 h-5 rounded border-gray-300"
+                  checked={platformSettings.snes.superfxOverclock}
+                  onChange={(e) => updatePlatformSetting('snes', 'superfxOverclock', e.target.checked)}
+                />
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <SaveIndicator show={!!savedSections['snes']} message={savedSections['snes'] || ''} />
+              <button
+                onClick={() => savePlatformSettings('snes')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Save SNES Settings
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <InformationCircleIcon className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <h4 className="font-medium text-blue-800 dark:text-blue-200">Supported Formats</h4>
+              <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                .sfc, .smc, .swc, .fig, .bs (BS-X Satellaview), .st, .zip, .7z
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex h-full">
+      {/* Sidebar Navigation */}
+      <nav className="w-56 flex-shrink-0 pr-4 h-full overflow-y-auto">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Platforms</h2>
+          <ul className="space-y-1">
+            {PLATFORM_SECTIONS.map((section) => (
+              <li key={section.id}>
+                <button
+                  onClick={() => scrollToSection(section.id)}
+                  className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                    activeSection === section.id
+                      ? 'bg-blue-600 text-white'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  <span>{section.icon}</span>
+                  <span>{section.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </nav>
+
+      {/* Main Content Area */}
+      <div className="flex-1 h-full overflow-y-auto pl-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+          <h1 className="text-4xl font-bold mb-8">Platform Settings</h1>
+
+          {message && (
+            <div
+              className={`mb-6 p-4 rounded-lg ${
+                message.type === 'success'
+                  ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100'
+                  : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100'
+              }`}
+            >
+              {message.text}
+            </div>
+          )}
+
+          {/* All sections in a single scrollable view */}
+          <div className="space-y-8">
+            {loadingSettings ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-3 text-gray-600 dark:text-gray-400">Loading platform settings...</span>
+              </div>
+            ) : (
+              <>
+                {renderRunnersSection()}
+                {renderWineSection()}
+                {renderNesSection()}
+                {renderSnesSection()}
+                {renderArcadeSection()}
+                {renderC64Section()}
+                {renderAmigaSection()}
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
