@@ -107,8 +107,8 @@ export async function POST(
       targetPlatformId = platformConfig.platformId;
     }
 
-    // Get platform from storage
-    const platform = await storage.readEntity<Platform>('platforms', targetPlatformId);
+    // Get platform from storage (checks user overrides, then bundled defaults)
+    const platform = await storage.readPlatform<Platform>(targetPlatformId);
     if (!platform) {
       logger.warn('Target platform not found in storage', { platformId: targetPlatformId, gameId });
       return NextResponse.json(

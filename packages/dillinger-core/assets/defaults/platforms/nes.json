@@ -1,0 +1,29 @@
+{
+  "$schema": "../../../../data/schema/platform-v1.0.json",
+  "schemaVersion": "1.0",
+  "id": "nes",
+  "name": "Nintendo Entertainment System",
+  "type": "emulator",
+  "description": "Nintendo Entertainment System (NES/Famicom) games via RetroArch. Supports ROM files in various formats.",
+  "configuration": {
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-retroarch",
+    "supportedExtensions": [".nes", ".unf", ".unif", ".fds", ".zip", ".7z"],
+    "defaultSettings": {
+      "emulator": {
+        "core": "nestopia"
+      },
+      "environment": {
+        "DISPLAY": ":0"
+      }
+    }
+  },
+  "validation": {
+    "fileValidation": [".nes", ".unf", ".unif", ".fds", ".zip", ".7z"]
+  },
+  "displayStreaming": {
+    "method": "x11"
+  },
+  "isActive": true,
+  "created": "2025-12-29T12:00:00Z",
+  "updated": "2025-12-29T12:00:00Z"
+}

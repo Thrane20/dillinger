@@ -753,12 +753,12 @@ export class DockerService {
     } else if (platform.configuration.containerImage?.includes('runner-retroarch')) {
       // For RetroArch games
       // Priority: game-specific core > platform config core > platform ID default > 'mame' fallback
-      const platformCore = retroarchCores[game.platformId] || 'mame';
+      const platformCore = game.platformId ? retroarchCores[game.platformId] || 'mame' : 'mame';
       const core = game.settings?.emulator?.core || platform.configuration.defaultSettings?.emulator?.core || platformCore;
       
       logger.info('RetroArch core selection debug:', {
         gamePlatformId: game.platformId,
-        retroarchCoresLookup: retroarchCores[game.platformId],
+        retroarchCoresLookup: game.platformId ? retroarchCores[game.platformId] : undefined,
         platformCore,
         gameSettingsEmulatorCore: game.settings?.emulator?.core,
         platformConfigCore: platform.configuration.defaultSettings?.emulator?.core,

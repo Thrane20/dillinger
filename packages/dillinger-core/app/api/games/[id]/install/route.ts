@@ -76,8 +76,8 @@ export async function POST(
       );
     }
 
-    // Get platform information
-    const platform = await storage.readEntity<Platform>('platforms', platformId);
+    // Get platform information (checks user overrides, then bundled defaults)
+    const platform = await storage.readPlatform<Platform>(platformId);
     if (!platform) {
       return NextResponse.json(
         { success: false, error: 'Platform not found' },

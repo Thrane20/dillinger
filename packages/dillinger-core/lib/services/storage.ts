@@ -187,7 +187,7 @@ export class JSONStorageService {
   async getEntityCounts(): Promise<EntityCounts> {
     const [games, platforms, sessions, collections] = await Promise.all([
       this.listEntities('games'),
-      this.listEntities('platforms'),
+      this.listPlatforms(), // Use listPlatforms to include bundled defaults
       this.listEntities('sessions'),
       this.listEntities('collections'),
     ]);
@@ -516,5 +516,88 @@ export class JSONStorageService {
         counts: { games: 0, platforms: 0, sessions: 0, collections: 0 },
       };
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Platform-specific methods: merge bundled defaults with user overrides
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get the path to bundled default platform configs.
+   * In standalone mode (production), process.cwd() is /app/packages/dillinger-core
+   */
+  private getBundledPlatformsPath(): string {
+    return path.resolve(process.cwd(), 'assets', 'defaults', 'platforms');
+  }
+
+  /**
+   * Read a platform config, checking user overrides first, then falling back to bundled defaults.
+   * This allows upgrades to automatically include new/updated platform configs.
+   */
+  async readPlatform<T extends VersionedData>(id: string): Promise<T | null> {
+    // First check user storage (overrides)
+    const override = await this.readEntity<T>('platforms', id);
+    if (override) {
+      return override;
+    }
+
+    // Fall back to bundled defaults
+    const bundledPath = path.join(this.getBundledPlatformsPath(), `${id}.json`);
+    try {
+      const rawData = await fs.readJson(bundledPath);
+      const parseResult = parseVersionedData<T>(rawData, {
+        strict: false,
+        autoMigrate: false,
+      });
+      return parseResult.data;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * List all platforms: merge bundled defaults with user overrides.
+   * User overrides take precedence for platforms with the same ID.
+   */
+  async listPlatforms<T extends VersionedData>(): Promise<T[]> {
+    const platformsMap = new Map<string, T>();
+
+    // First, load all bundled defaults
+    const bundledPath = this.getBundledPlatformsPath();
+    try {
+      if (await fs.pathExists(bundledPath)) {
+        const files = await fs.readdir(bundledPath);
+        const jsonFiles = files.filter((f) => f.endsWith('.json'));
+
+        for (const file of jsonFiles) {
+          try {
+            const filePath = path.join(bundledPath, file);
+            const rawData = await fs.readJson(filePath);
+            const parseResult = parseVersionedData<T>(rawData, {
+              strict: false,
+              autoMigrate: false,
+            });
+            const platform = parseResult.data as T & { id: string };
+            platformsMap.set(platform.id, parseResult.data);
+          } catch (error) {
+            console.warn(`Skipping bundled platform ${file}:`, (error as Error).message);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Could not read bundled platforms:', (error as Error).message);
+    }
+
+    // Then, load user overrides (these take precedence)
+    const userPlatforms = await this.listEntities<T>('platforms');
+    for (const platform of userPlatforms) {
+      const p = platform as T & { id: string };
+      platformsMap.set(p.id, platform);
+    }
+
+    return Array.from(platformsMap.values());
   }
 }
