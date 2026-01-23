@@ -92,12 +92,14 @@ export async function GET(request: NextRequest) {
     // Fetch from GOG API
     const games = await getGOGLibrary();
     
-    // Cache the games - convert to cache format
+    // Cache the games - convert to cache format, preserving worksOn and slug
     const cacheGames = games.map(g => ({
       id: String(g.id),
       title: g.title,
       image: g.image || null,
       url: g.url || '',
+      slug: (g as any).slug || undefined,
+      worksOn: g.worksOn || undefined,
     }));
     await gogCache.cacheGames(cacheGames, 1);
 

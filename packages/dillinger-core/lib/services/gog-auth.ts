@@ -25,6 +25,7 @@ export interface GOGGame {
   title: string;
   image: string;
   url: string;
+  slug?: string;
   worksOn?: {
     Windows: boolean;
     Mac: boolean;
@@ -331,6 +332,7 @@ export async function getGOGLibrary(): Promise<GOGGame[]> {
     title: game.title,
     image: game.image ? `https:${game.image}_196.jpg` : '',
     url: `https://www.gog.com/game/${game.slug || game.id}`,
+    slug: game.slug,
     worksOn: game.worksOn,
   }));
 

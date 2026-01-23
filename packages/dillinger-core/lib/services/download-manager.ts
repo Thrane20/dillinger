@@ -8,6 +8,8 @@ import { fileURLToPath } from 'url';
 import { JSONStorageService } from './storage';
 import { WebSocketService } from './websocket-service';
 import { resolveDefaultPath } from './volume-defaults';
+import { SettingsService } from './settings';
+import type { VersionedData } from '@dillinger/shared';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,32 +69,12 @@ export class DownloadManager extends EventEmitter {
   private saveStateTimer: NodeJS.Timeout | null = null;
 
   // Cache for resolved paths to avoid repeated async lookups
-  private resolvedInstallersPath: string | null = null;
   private resolvedDownloadsPath: string | null = null;
-
-  private getDefaultInstallersPath(): string {
-    // In the core container, the named docker volume `dillinger_installers` is mounted at /installers
-    return process.env.DILLINGER_INSTALLERS_ROOT || '/installers';
-  }
 
   private getDefaultDownloadsPath(): string {
     // Default downloads cache location
     const dillingerRoot = this.storage.getDillingerRoot();
     return path.join(dillingerRoot, 'storage', 'installer_cache');
-  }
-
-  /**
-   * Get the installers root path, checking volume defaults first
-   */
-  private async getInstallersRootPath(): Promise<string> {
-    if (this.resolvedInstallersPath) {
-      return this.resolvedInstallersPath;
-    }
-    
-    const defaultPath = this.getDefaultInstallersPath();
-    this.resolvedInstallersPath = await resolveDefaultPath('installers', defaultPath);
-    console.log(`[DownloadManager] Using installers path: ${this.resolvedInstallersPath}`);
-    return this.resolvedInstallersPath;
   }
 
   /**
@@ -124,6 +106,7 @@ export class DownloadManager extends EventEmitter {
       status: string;
       downloadProgress?: number;
       installerPath?: string;
+      downloadCachePath?: string;
       error?: string;
     }
   ): Promise<void> {
@@ -141,6 +124,7 @@ export class DownloadManager extends EventEmitter {
         status: update.status,
         downloadProgress: update.downloadProgress,
         installerPath: update.installerPath ?? (game.installation?.installerPath || undefined),
+        downloadCachePath: update.downloadCachePath ?? (game.installation?.downloadCachePath || undefined),
         error: update.error,
         installMethod: game.installation?.installMethod || 'automated',
       };
@@ -158,6 +142,7 @@ export class DownloadManager extends EventEmitter {
                 ...(p.installation || {}),
                 status: update.status,
                 installerPath: update.installerPath ?? (p.installation?.installerPath || undefined),
+                downloadCachePath: update.downloadCachePath ?? (p.installation?.downloadCachePath || undefined),
                 error: update.error,
                 installMethod: p.installation?.installMethod || 'automated',
               },
@@ -178,13 +163,37 @@ export class DownloadManager extends EventEmitter {
     }
   }
 
-  private async moveDownloadedFilesToInstallers(job: DownloadJob): Promise<{ installerPath?: string }> {
-    const installersRoot = await this.getInstallersRootPath();
-
-    // Prefer a human-friendly slug folder under /installers.
-    // job.gogId is the cache dir name (e.g. "1207658883-age-of-wonders").
-    const gogSlug = job.gogId.replace(/^\d+-/, '') || job.gogId;
-    const destinationDir = path.join(installersRoot, gogSlug, 'gog');
+  private async moveDownloadedFilesToInstallers(job: DownloadJob): Promise<{ installerPath?: string; downloadCachePath?: string }> {
+    // Check settings for installer cache mode
+    const settingsService = SettingsService.getInstance();
+    const downloadSettings = await settingsService.getDownloadSettings();
+    const cacheMode = downloadSettings.installerCacheMode || 'with_game'; // Default to storing with game
+    
+    let destinationDir: string;
+    
+    if (cacheMode === 'with_game') {
+      // Store installers alongside game metadata in dillinger_root/storage/games/{game-id}/installers/
+      const dillingerRoot = this.storage.getDillingerRoot();
+      destinationDir = path.join(dillingerRoot, 'storage', 'games', job.gameId, 'installers');
+    } else if (cacheMode === 'custom_volume' && downloadSettings.installerCacheVolumeId) {
+      // Use custom volume - resolve the volume path
+      const volumePath = await this.resolveVolumeHostPath(downloadSettings.installerCacheVolumeId);
+      if (volumePath) {
+        // Prefer a human-friendly slug folder under the custom volume
+        const gogSlug = job.gogId.replace(/^\d+-/, '') || job.gogId;
+        destinationDir = path.join(volumePath, gogSlug, 'gog');
+      } else {
+        // Fallback to with_game if volume not found
+        console.warn(`[DownloadManager] Custom volume ${downloadSettings.installerCacheVolumeId} not found, falling back to with_game mode`);
+        const dillingerRoot = this.storage.getDillingerRoot();
+        destinationDir = path.join(dillingerRoot, 'storage', 'games', job.gameId, 'installers');
+      }
+    } else {
+      // Fallback: store with game
+      const dillingerRoot = this.storage.getDillingerRoot();
+      destinationDir = path.join(dillingerRoot, 'storage', 'games', job.gameId, 'installers');
+    }
+    
     await fs.ensureDir(destinationDir);
 
     let primaryInstallerPath: string | undefined;
@@ -212,7 +221,23 @@ export class DownloadManager extends EventEmitter {
       // ignore
     }
 
-    return { installerPath: primaryInstallerPath };
+    return { 
+      installerPath: primaryInstallerPath,
+      downloadCachePath: destinationDir,
+    };
+  }
+  
+  /**
+   * Resolve a volume ID to its host path
+   */
+  private async resolveVolumeHostPath(volumeId: string): Promise<string | null> {
+    try {
+      const volumes = await this.storage.readEntity<VersionedData & { data: Array<{ id: string; hostPath: string }> }>('config', 'volumes');
+      const volume = volumes?.data?.find(v => v.id === volumeId);
+      return volume?.hostPath || null;
+    } catch {
+      return null;
+    }
   }
 
   private resolveWorkerPath(): string {
@@ -576,11 +601,12 @@ export class DownloadManager extends EventEmitter {
 
           // Move installers into the installers volume and update game state
           this.moveDownloadedFilesToInstallers(job)
-            .then(({ installerPath }) =>
+            .then(({ installerPath, downloadCachePath }) =>
               this.setGameDownloadStatus(job.gameId, {
                 status: 'ready_to_install',
                 downloadProgress: 100,
                 installerPath,
+                downloadCachePath,
                 error: undefined,
               })
             )

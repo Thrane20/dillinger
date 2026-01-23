@@ -15,6 +15,7 @@ RUN apt-get update \
         ca-certificates \
         git \
         unzip \
+        pulseaudio-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Enable pnpm via Corepack at the requested version

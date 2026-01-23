@@ -7,6 +7,12 @@ interface GOGGameCache {
   title: string;
   image: string | null;
   url: string;
+  slug?: string;
+  worksOn?: {
+    Windows: boolean;
+    Mac: boolean;
+    Linux: boolean;
+  };
 }
 
 interface GOGCacheData {

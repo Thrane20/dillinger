@@ -2,7 +2,7 @@
 # Extends base runner for multi-system emulation via RetroArch
 
 # BASE_VERSION is passed from build.sh (sourced from versioning.env)
-ARG BASE_VERSION
+ARG BASE_VERSION=0.2.0
 FROM ghcr.io/thrane20/dillinger/runner-base:${BASE_VERSION}
 
 LABEL maintainer="Dillinger Project"
@@ -46,8 +46,22 @@ RUN mkdir -p /config/retroarch \
              /saves \
              /states \
              /system \
-             /run/user/1000 && \
+             /run/user/1000 \
+             /usr/share/libretro/autoconfig/udev \
+             /usr/share/libretro/autoconfig/sdl2 && \
     chown -R gameuser:gameuser /config/retroarch /roms /saves /states /system /run/user/1000
+
+# Download joypad autoconfig profiles from libretro
+# These provide automatic button mapping for common controllers
+# We install both udev and sdl2 profiles (sdl2 is used in containers where udev isn't running)
+RUN echo "Downloading joypad autoconfig profiles..." && \
+    cd /tmp && \
+    curl -sL "https://github.com/libretro/retroarch-joypad-autoconfig/archive/refs/heads/master.tar.gz" -o autoconfig.tar.gz && \
+    tar -xzf autoconfig.tar.gz && \
+    cp -r retroarch-joypad-autoconfig-master/udev/* /usr/share/libretro/autoconfig/udev/ && \
+    cp -r retroarch-joypad-autoconfig-master/sdl2/* /usr/share/libretro/autoconfig/sdl2/ && \
+    rm -rf autoconfig.tar.gz retroarch-joypad-autoconfig-master && \
+    echo "Installed $(ls /usr/share/libretro/autoconfig/udev/*.cfg /usr/share/libretro/autoconfig/sdl2/*.cfg 2>/dev/null | wc -l) autoconfig profiles"
 
 # Copy entrypoint script
 COPY retroarch-entrypoint.sh /usr/local/bin/retroarch-entrypoint.sh

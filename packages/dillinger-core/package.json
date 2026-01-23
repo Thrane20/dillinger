@@ -4,7 +4,7 @@
   "description": "Dillinger Core (Next.js app with integrated API)",
   "private": true,
   "scripts": {
-    "dev": "DILLINGER_ROOT=${DILLINGER_ROOT:-$(pwd)/data} HOST_WORKSPACE_PATH=/mnt/linuxfast/dev/dillinger PORT=3010 next dev",
+    "dev": "DILLINGER_ROOT=${DILLINGER_ROOT:-$(pwd)/data} PORT=3011 next dev -p 3011",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

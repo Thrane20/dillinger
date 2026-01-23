@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { JSONStorageService } from '@/lib/services/storage';
 import { DockerService } from '@/lib/services/docker-service';
+import { analyzeLutrisScript, summarizeLutrisScript } from '@/lib/services/lutris-executor';
 import { v4 as uuidv4 } from 'uuid';
-import type { Game, Platform } from '@dillinger/shared';
+import type { Game, Platform, GamePlatformConfig } from '@dillinger/shared';
 
 const storage = JSONStorageService.getInstance();
 const dockerService = DockerService.getInstance();
@@ -105,6 +106,136 @@ export async function POST(
       console.log(`  🔧 DEBUG MODE: Container will be kept for inspection`);
     }
 
+    // Extract Lutris installer settings from game platform config
+    // The lutrisInstaller is stored when adding a GOG game with a Lutris script
+    let winetricks: string[] = [];
+    let effectiveWineArch = wineArch;
+    let dllOverrides: string | undefined;
+    let environmentVariables: Record<string, string> = {};
+    
+    // Lutris execution steps
+    let lutrisExtractSteps: Array<{ src: string; dst: string; format?: string }> = [];
+    let lutrisMoveSteps: Array<{ src: string; dst: string; operation?: 'move' | 'merge' | 'rename' }> = [];
+    let lutrisExecuteSteps: Array<{ command?: string; file?: string; args?: string; description?: string }> = [];
+    let lutrisWineexecSteps: Array<{ executable: string; args?: string; prefix?: string; blocking?: boolean }> = [];
+    let lutrisRegistrySettings: Array<{ path: string; name: string; type?: string; value: string }> = [];
+    
+    const platformConfig = game.platforms?.find((p: GamePlatformConfig) => p.platformId === platformId);
+    if (platformConfig?.lutrisInstaller?.script) {
+      console.log(`  🎯 Using Lutris installer: ${platformConfig.lutrisInstaller.version} (${platformConfig.lutrisInstaller.slug})`);
+      
+      const script = platformConfig.lutrisInstaller.script;
+      
+      // Use the comprehensive analyzer to extract all script settings
+      const analysis = analyzeLutrisScript(script as any);
+      const summary = summarizeLutrisScript(analysis);
+      console.log(`  Lutris summary: ${summary}`);
+      
+      // Log Lutris recommendations for debugging/visibility
+      if (Object.keys(analysis.recommendations).length > 0) {
+        console.log(`  📋 Lutris recommendations:`);
+        if (analysis.recommendations.useDxvk !== undefined) {
+          console.log(`    - DXVK: ${analysis.recommendations.useDxvk ? 'recommended' : 'not recommended'}`);
+        }
+        if (analysis.recommendations.useEsync !== undefined) {
+          console.log(`    - esync: ${analysis.recommendations.useEsync ? 'recommended' : 'not recommended'}`);
+        }
+        if (analysis.recommendations.wineVersion) {
+          console.log(`    - Wine version: ${analysis.recommendations.wineVersion}`);
+        }
+      }
+      
+      // Get winetricks from analysis
+      if (analysis.winetricks.length > 0) {
+        winetricks = analysis.winetricks;
+        console.log(`  Winetricks (from Lutris): ${winetricks.join(', ')}`);
+      }
+      
+      // If Lutris recommends DXVK, add it to winetricks (unless already present)
+      if (analysis.recommendations.useDxvk === true && !winetricks.includes('dxvk')) {
+        winetricks.push('dxvk');
+        console.log(`  📦 Added DXVK to winetricks (Lutris recommendation)`);
+      }
+      
+      // Use wine arch from analysis if not explicitly specified
+      if (!effectiveWineArch && analysis.wineArch) {
+        effectiveWineArch = analysis.wineArch;
+        console.log(`  Wine arch (from Lutris): ${effectiveWineArch}`);
+      }
+      
+      // Get DLL overrides from analysis
+      if (Object.keys(analysis.dllOverrides).length > 0) {
+        dllOverrides = Object.entries(analysis.dllOverrides)
+          .map(([dll, mode]) => `${dll}=${mode}`)
+          .join(';');
+        console.log(`  DLL overrides (from Lutris): ${dllOverrides}`);
+      }
+      
+      // Get environment variables from analysis
+      if (Object.keys(analysis.environment).length > 0) {
+        environmentVariables = { ...analysis.environment };
+        console.log(`  Environment vars (from Lutris): ${Object.keys(environmentVariables).join(', ')}`);
+      }
+      
+      // Process execution steps from analysis
+      for (const step of analysis.executionSteps) {
+        switch (step.type) {
+          case 'extract':
+            lutrisExtractSteps.push({
+              src: (step.params as any).file || '',
+              dst: (step.params as any).dst || '',
+              format: (step.params as any).format,
+            });
+            break;
+          case 'move':
+          case 'rename':
+            lutrisMoveSteps.push({
+              src: (step.params as any).src || '',
+              dst: (step.params as any).dst || '',
+              operation: step.type as 'move' | 'rename',
+            });
+            break;
+          case 'merge':
+            lutrisMoveSteps.push({
+              src: (step.params as any).src || '',
+              dst: (step.params as any).dst || '',
+              operation: 'merge',
+            });
+            break;
+          case 'execute':
+            lutrisExecuteSteps.push({
+              command: (step.params as any).command,
+              file: (step.params as any).file,
+              args: (step.params as any).args,
+              description: step.description,
+            });
+            break;
+          case 'wineexec':
+            // Skip create_prefix steps (handled automatically)
+            if ((step.params as any).name !== 'create_prefix') {
+              lutrisWineexecSteps.push({
+                executable: (step.params as any).executable || '',
+                args: (step.params as any).args,
+                blocking: true,
+              });
+            }
+            break;
+          case 'set_regedit':
+            if ((step.params as any).path && (step.params as any).key) {
+              lutrisRegistrySettings.push({
+                path: (step.params as any).path,
+                name: (step.params as any).key,
+                type: (step.params as any).type || 'REG_SZ',
+                value: (step.params as any).value || '',
+              });
+            }
+            break;
+        }
+      }
+      
+      console.log(`  Lutris steps: ${lutrisExtractSteps.length} extract, ${lutrisMoveSteps.length} move/merge, ${lutrisExecuteSteps.length} execute, ${lutrisWineexecSteps.length} wineexec, ${lutrisRegistrySettings.length} registry`);
+    }
+
     // Start installation container
     const containerInfo = await dockerService.installGame({
       installerPath,
@@ -115,7 +246,15 @@ export async function POST(
       installerArgs,
       debugMode,
       wineVersionId,
-      wineArch,
+      wineArch: effectiveWineArch,
+      winetricks,
+      dllOverrides,
+      environmentVariables,
+      lutrisExtractSteps: lutrisExtractSteps.length > 0 ? lutrisExtractSteps : undefined,
+      lutrisMoveSteps: lutrisMoveSteps.length > 0 ? lutrisMoveSteps : undefined,
+      lutrisExecuteSteps: lutrisExecuteSteps.length > 0 ? lutrisExecuteSteps : undefined,
+      lutrisWineexecSteps: lutrisWineexecSteps.length > 0 ? lutrisWineexecSteps : undefined,
+      lutrisRegistrySettings: lutrisRegistrySettings.length > 0 ? lutrisRegistrySettings : undefined,
     });
 
     // Update game with installation information
@@ -153,6 +292,12 @@ export async function POST(
         const latest = await storage.readEntity<Game>('games', fileKey);
         if (!latest) return;
 
+        // Try to get launch command from Lutris script's game.exe field
+        const latestPlatformConfig = latest.platforms?.find((p: GamePlatformConfig) => p.platformId === platformId);
+        const lutrisScript = latestPlatformConfig?.lutrisInstaller?.script ||
+          latestPlatformConfig?.lutrisInstallers?.find(i => i.id === latestPlatformConfig?.selectedLutrisInstallerId)?.script;
+        const lutrisScriptExe = (lutrisScript?.game as Record<string, unknown> | undefined)?.exe as string | undefined;
+
         const finishedAt = new Date().toISOString();
         const completedGame = updateGameInstallationFields(latest, platformId, {
           status: nextStatus,
@@ -164,7 +309,22 @@ export async function POST(
         } as any);
 
         // Auto-select an executable when we can find one.
-        if (hasExecutables) {
+        // Priority: 1) Lutris script game.exe, 2) First scanned executable
+        if (lutrisScriptExe) {
+          // Lutris exe paths are relative to the install directory, e.g., "drive_c/Program Files/Game/game.exe"
+          // or just "game.exe" if it's in the root
+          (completedGame as any).filePath = `${installPath}/${lutrisScriptExe}`;
+          (completedGame as any).settings = {
+            ...(completedGame as any).settings,
+            launch: {
+              ...((completedGame as any).settings?.launch || {}),
+              command: lutrisScriptExe,
+              workingDirectory:
+                (completedGame as any).settings?.launch?.workingDirectory || installPath || '',
+            },
+          };
+          console.log(`  🎯 Auto-configured launch from Lutris script: ${lutrisScriptExe}`);
+        } else if (hasExecutables) {
           (completedGame as any).filePath = `${installPath}/${executables[0]}`;
           (completedGame as any).settings = {
             ...(completedGame as any).settings,
@@ -254,6 +414,12 @@ export async function GET(
           ? ('installed' as const)
           : (containerResult.success ? ('installed' as const) : ('failed' as const));
 
+        // Try to get launch command from Lutris script's game.exe field
+        const getPlatformConfig = game.platforms?.find((p: GamePlatformConfig) => p.platformId === installPlatformId);
+        const getLutrisScript = getPlatformConfig?.lutrisInstaller?.script ||
+          getPlatformConfig?.lutrisInstallers?.find(i => i.id === getPlatformConfig?.selectedLutrisInstallerId)?.script;
+        const lutrisScriptExe = (getLutrisScript?.game as Record<string, unknown> | undefined)?.exe as string | undefined;
+
         let updatedGame = updateGameInstallationFields(game, installPlatformId, {
           ...installation,
           status: finalStatus,
@@ -264,18 +430,39 @@ export async function GET(
           containerId: undefined,
         } as any);
 
-        if (hasExecutables) {
+        // Auto-select executable - priority: 1) Lutris script game.exe, 2) First scanned executable
+        if (lutrisScriptExe) {
+          (updatedGame as any).filePath = `${installation.installPath}/${lutrisScriptExe}`;
+          (updatedGame as any).settings = {
+            ...(updatedGame as any).settings,
+            launch: {
+              ...((updatedGame as any).settings?.launch || {}),
+              command: lutrisScriptExe,
+              workingDirectory:
+                (updatedGame as any).settings?.launch?.workingDirectory || installation.installPath || '',
+            },
+          };
+          console.log(`  🎯 Auto-configured launch from Lutris script: ${lutrisScriptExe}`);
+        } else if (hasExecutables) {
           (updatedGame as any).filePath = `${installation.installPath}/${executables[0]}`;
+          (updatedGame as any).settings = {
+            ...(updatedGame as any).settings,
+            launch: {
+              ...((updatedGame as any).settings?.launch || {}),
+              workingDirectory:
+                (updatedGame as any).settings?.launch?.workingDirectory || installation.installPath || '',
+            },
+          };
+        } else {
+          (updatedGame as any).settings = {
+            ...(updatedGame as any).settings,
+            launch: {
+              ...((updatedGame as any).settings?.launch || {}),
+              workingDirectory:
+                (updatedGame as any).settings?.launch?.workingDirectory || installation.installPath || '',
+            },
+          };
         }
-
-        (updatedGame as any).settings = {
-          ...(updatedGame as any).settings,
-          launch: {
-            ...((updatedGame as any).settings?.launch || {}),
-            workingDirectory:
-              (updatedGame as any).settings?.launch?.workingDirectory || installation.installPath || '',
-          },
-        };
 
         (updatedGame as any).updated = finishedAt;
 

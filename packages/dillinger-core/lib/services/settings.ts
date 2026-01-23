@@ -30,6 +30,10 @@ export interface GOGSettings {
 export interface DownloadSettings {
   maxConcurrent?: number; // Maximum number of concurrent download worker threads (default: 2)
   defaultInstallVolumeId?: string; // ID of the configured volume for game installations
+  /** Where to store downloaded installers */
+  installerCacheMode?: 'with_game' | 'custom_volume';
+  /** Volume ID if installerCacheMode is 'custom_volume' */
+  installerCacheVolumeId?: string;
 }
 
 export interface JoystickConfig {

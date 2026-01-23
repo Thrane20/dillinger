@@ -97,17 +97,23 @@ export default function DownloadMonitor() {
     setSparklineHeights(Array.from({ length: 20 }, () => 20 + Math.random() * 30));
   }, []);
 
+  // Track if we have active downloads to adjust polling frequency
+  const hasActiveDownloads = Array.from(downloads.values()).some(
+    (d) => d.status === 'downloading' || d.status === 'queued'
+  );
+
   useEffect(() => {
     // Initial fetch
     fetchDownloads();
     
-    // Poll every 2 seconds
-    const interval = setInterval(fetchDownloads, 2000);
+    // Poll every 2 seconds when downloads are active, every 10 seconds when idle
+    const pollInterval = hasActiveDownloads ? 2000 : 10000;
+    const interval = setInterval(fetchDownloads, pollInterval);
     
     return () => {
       clearInterval(interval);
     };
-  }, [fetchDownloads]);
+  }, [fetchDownloads, hasActiveDownloads]);
 
   const activeDownloads = Array.from(downloads.values()).filter(
     (d) => d.status === 'downloading' || d.status === 'queued' || d.status === 'paused'

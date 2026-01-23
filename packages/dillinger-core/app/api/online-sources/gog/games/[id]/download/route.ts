@@ -58,6 +58,8 @@ export async function POST(
       runner,
       image,
       gameId: localGameId, // Optional - the Dillinger game ID to associate with
+      lutrisInstaller, // Optional - Single Lutris installer (deprecated, use lutrisInstallers)
+      lutrisInstallers, // Optional - Array of Lutris installers for Wine configuration
     } = body;
 
     // Get game details and installers
@@ -116,23 +118,56 @@ export async function POST(
     const now = new Date().toISOString();
     const platformId = runner === 'linux' ? 'linux-native' : 'windows-wine';
 
+    // Normalize installers - support both single and array format
+    const installers: Array<typeof lutrisInstaller> = Array.isArray(lutrisInstallers) && lutrisInstallers.length > 0
+      ? lutrisInstallers
+      : (lutrisInstaller && typeof lutrisInstaller === 'object' ? [lutrisInstaller] : []);
+    
+    const hasLutrisInstallers = installers.length > 0;
+
+    // Build platform config with optional Lutris installer(s)
+    const platformConfig: Game['platforms'][0] = {
+      platformId,
+      installation: {
+        status: 'not_installed',
+        installMethod: hasLutrisInstallers ? 'lutris' : 'automated',
+      },
+    };
+
+    // Store Lutris installers in the platform config (new array format)
+    if (hasLutrisInstallers) {
+      platformConfig.lutrisInstallers = installers.map((inst: Record<string, unknown>) => ({
+        id: inst.id as number,
+        slug: inst.slug as string,
+        version: inst.version as string,
+        gameSlug: inst.gameSlug as string,
+        script: (inst.script || {}) as Record<string, unknown>,
+        fetchedAt: now,
+        notes: inst.notes as string | undefined,
+      }));
+      
+      // Also set single installer for backward compatibility (use first one)
+      const firstInstaller = installers[0];
+      platformConfig.lutrisInstaller = {
+        id: firstInstaller.id,
+        slug: firstInstaller.slug,
+        version: firstInstaller.version,
+        gameSlug: firstInstaller.gameSlug,
+        script: firstInstaller.script || {},
+        fetchedAt: now,
+        notes: firstInstaller.notes,
+      };
+    }
+
     const game: Game = {
       id: humanReadableGameId,
       slug: humanReadableGameId,
       title,
       installation: {
         status: 'not_installed',
-        installMethod: 'automated',
+        installMethod: hasLutrisInstallers ? 'lutris' : 'automated',
       },
-      platforms: [
-        {
-          platformId,
-          installation: {
-            status: 'not_installed',
-            installMethod: 'automated',
-          },
-        },
-      ],
+      platforms: [platformConfig],
       defaultPlatformId: platformId,
       collectionIds: [],
       tags: ['gog'],

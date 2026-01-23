@@ -81,13 +81,62 @@ pacman -Scc --noconfirm
 _INSTALL_WINE
 
 #######################################################
-# Install DXVK for DirectX to Vulkan translation
+# Install DXVK for DirectX 9/10/11 to Vulkan translation
+# Pre-installed to /opt/dxvk for fast prefix setup
 #######################################################
 
-RUN set -e && \
-    echo "**** Installing DXVK ****" && \
-    mkdir -p /opt/dxvk && \
-    echo "DXVK can be installed per-prefix using winetricks dxvk"
+RUN <<_INSTALL_DXVK
+set -e
+echo "**** Installing DXVK (latest release) ****"
+
+# Fetch latest DXVK release from GitHub
+DXVK_VERSION=$(curl -s https://api.github.com/repos/doitsujin/dxvk/releases/latest | grep -oP '"tag_name": "\K[^"]+' || echo "v2.5.3")
+echo "Installing DXVK ${DXVK_VERSION}"
+
+mkdir -p /opt/dxvk
+cd /opt/dxvk
+
+# Download and extract
+curl -L "https://github.com/doitsujin/dxvk/releases/download/${DXVK_VERSION}/dxvk-${DXVK_VERSION#v}.tar.gz" -o dxvk.tar.gz
+tar xzf dxvk.tar.gz --strip-components=1
+rm dxvk.tar.gz
+
+# Create version marker
+echo "${DXVK_VERSION#v}" > /opt/dxvk/version
+
+# Verify installation
+ls -la /opt/dxvk/
+echo "✓ DXVK ${DXVK_VERSION} installed to /opt/dxvk"
+_INSTALL_DXVK
+
+#######################################################
+# Install VKD3D-Proton for DirectX 12 to Vulkan translation
+# Pre-installed to /opt/vkd3d-proton for DX12 game support
+#######################################################
+
+RUN <<_INSTALL_VKD3D
+set -e
+echo "**** Installing VKD3D-Proton (latest release) ****"
+
+# Fetch latest VKD3D-Proton release from GitHub
+VKD3D_VERSION=$(curl -s https://api.github.com/repos/HansKristian-Work/vkd3d-proton/releases/latest | grep -oP '"tag_name": "\K[^"]+' || echo "v2.13")
+echo "Installing VKD3D-Proton ${VKD3D_VERSION}"
+
+mkdir -p /opt/vkd3d-proton
+cd /opt/vkd3d-proton
+
+# Download and extract
+curl -L "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/${VKD3D_VERSION}/vkd3d-proton-${VKD3D_VERSION#v}.tar.zst" -o vkd3d.tar.zst
+tar --zstd -xf vkd3d.tar.zst --strip-components=1
+rm vkd3d.tar.zst
+
+# Create version marker
+echo "${VKD3D_VERSION#v}" > /opt/vkd3d-proton/version
+
+# Verify installation  
+ls -la /opt/vkd3d-proton/
+echo "✓ VKD3D-Proton ${VKD3D_VERSION} installed to /opt/vkd3d-proton"
+_INSTALL_VKD3D
 
 #######################################################
 # Install UMU Launcher for GE-Proton support

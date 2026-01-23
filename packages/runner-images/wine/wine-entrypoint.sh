@@ -195,6 +195,32 @@ fi
 echo ""
 
 #######################################################
+# Installation Context (from Docker environment)
+#######################################################
+echo -e "${BLUE}Installation Context:${NC}"
+if [ -n "$INSTALLER_PATH" ]; then
+    echo -e "  INSTALLER_PATH: $INSTALLER_PATH"
+    if [ -e "$INSTALLER_PATH" ]; then
+        echo -e "    ✓ File exists"
+        ls -la "$INSTALLER_PATH" 2>/dev/null || true
+        file "$INSTALLER_PATH" 2>/dev/null || true
+    else
+        echo -e "    ${RED}✗ File NOT FOUND!${NC}"
+    fi
+else
+    echo -e "  INSTALLER_PATH: (not set)"
+fi
+if [ -n "$INSTALL_TARGET" ]; then
+    echo -e "  INSTALL_TARGET: $INSTALL_TARGET"
+else
+    echo -e "  INSTALL_TARGET: (not set)"
+fi
+if [ -n "$INSTALLER_ARGS" ]; then
+    echo -e "  INSTALLER_ARGS: $INSTALLER_ARGS"
+fi
+echo ""
+
+#######################################################
 # Wine-Specific Setup
 #######################################################
 
@@ -483,12 +509,23 @@ if [ ! -d "$WINEPREFIX" ]; then
     mkdir -p "$WINEPREFIX" || true
 fi
 
+# Ensure INSTALL_TARGET directory exists (used by Lutris installers for $INSTALL substitution)
+# Default to /install if not set
+INSTALL_TARGET="${INSTALL_TARGET:-/install}"
+export INSTALL_TARGET
+if [ ! -d "$INSTALL_TARGET" ]; then
+    echo "  Creating install target directory: $INSTALL_TARGET"
+    mkdir -p "$INSTALL_TARGET" || true
+fi
+
 # Best-effort ownership fix: requires entrypoint to run as root.
 if [ "$(id -u)" = "0" ]; then
     if [ -n "$PUID" ] && [ -n "$PGID" ]; then
         chown -R "$PUID:$PGID" "$WINEPREFIX" 2>/dev/null || true
+        chown -R "$PUID:$PGID" "$INSTALL_TARGET" 2>/dev/null || true
     else
         chown -R "${UNAME:-gameuser}:${UNAME:-gameuser}" "$WINEPREFIX" 2>/dev/null || true
+        chown -R "${UNAME:-gameuser}:${UNAME:-gameuser}" "$INSTALL_TARGET" 2>/dev/null || true
     fi
 fi
 
@@ -537,11 +574,21 @@ fi
 echo -e "${BLUE}Applying Wine gaming optimizations...${NC}"
 
 # Allow per-game override of the Direct3D renderer.
-# Supported values: vulkan | opengl
-WINE_D3D_RENDERER="${WINE_D3D_RENDERER:-vulkan}"
-if [ "$WINE_D3D_RENDERER" != "vulkan" ] && [ "$WINE_D3D_RENDERER" != "opengl" ]; then
-    echo -e "${YELLOW}⚠ Invalid WINE_D3D_RENDERER='$WINE_D3D_RENDERER' (expected 'vulkan' or 'opengl'); defaulting to 'vulkan'${NC}"
-    WINE_D3D_RENDERER="vulkan"
+# Supported values: 
+#   - "opengl" (default, most compatible, best for old games)
+#   - "vulkan" (WineD3D Vulkan backend - newer but buggy, NOT the same as DXVK)
+#   - "gdi" (software rendering, slowest but most compatible for ancient games)
+#
+# NOTE: For DirectX 9/10/11 games that need performance, use DXVK instead
+#       (set INSTALL_DXVK=true). DXVK replaces the DLLs entirely and bypasses
+#       this WineD3D renderer setting.
+#
+# For DirectDraw games (like Commandos, 1998), use "opengl" - these games
+# predate Direct3D and neither DXVK nor WineD3D-Vulkan handles them well.
+WINE_D3D_RENDERER="${WINE_D3D_RENDERER:-opengl}"
+if [ "$WINE_D3D_RENDERER" != "vulkan" ] && [ "$WINE_D3D_RENDERER" != "opengl" ] && [ "$WINE_D3D_RENDERER" != "gdi" ]; then
+    echo -e "${YELLOW}⚠ Invalid WINE_D3D_RENDERER='$WINE_D3D_RENDERER' (expected 'vulkan', 'opengl', or 'gdi'); defaulting to 'opengl'${NC}"
+    WINE_D3D_RENDERER="opengl"
 fi
 
 # If Vulkan is requested but not available, fall back to OpenGL.
@@ -550,6 +597,10 @@ if [ "$WINE_D3D_RENDERER" = "vulkan" ]; then
     if [ ! -c /dev/dri/renderD128 ] && [ ! -c /dev/dri/renderD129 ] && [ ! -c /dev/dri/renderD130 ]; then
         echo -e "${YELLOW}⚠ Vulkan requested but no /dev/dri/renderD* device found; falling back to OpenGL${NC}"
         WINE_D3D_RENDERER="opengl"
+    else
+        echo -e "${YELLOW}⚠ WineD3D Vulkan backend selected. This is experimental and may cause black screens.${NC}"
+        echo -e "${YELLOW}  For DirectX 9/10/11 games, consider using DXVK instead (enable in game settings).${NC}"
+        echo -e "${YELLOW}  For old DirectDraw games, switch to 'opengl' renderer.${NC}"
     fi
 fi
 
@@ -631,6 +682,218 @@ fi
 if [ -n "$WINEDLLOVERRIDES" ]; then
     echo -e "${BLUE}Using WINEDLLOVERRIDES: ${WINEDLLOVERRIDES}${NC}"
     export WINEDLLOVERRIDES
+fi
+
+#######################################################
+# Lutris Script Execution Support
+# These environment variables allow executing Lutris
+# installer script operations during installation
+#######################################################
+
+# LUTRIS_EXTRACT_STEPS - Extract archives
+# Format: JSON array of { src, dst, format? }
+# format can be: "innoextract", "7z", "zip", "tar", or auto-detect
+if [ -n "$LUTRIS_EXTRACT_STEPS" ] && command -v python3 >/dev/null 2>&1; then
+    echo -e "${BLUE}Executing Lutris extract steps...${NC}"
+    python3 << 'PYEOF'
+import json
+import subprocess
+import os
+
+steps = json.loads(os.environ.get('LUTRIS_EXTRACT_STEPS', '[]'))
+user = os.environ.get('UNAME', 'gameuser')
+gamedir = os.environ.get('WINEPREFIX', '/wineprefix')
+install_target = os.environ.get('INSTALL_TARGET', '/install')
+cache = '/tmp/lutris_cache'
+
+# Ensure cache directory exists
+os.makedirs(cache, exist_ok=True)
+
+for step in steps:
+    src = step.get('src', '')
+    dst = step.get('dst', '')
+    fmt = step.get('format', 'auto')
+    
+    # Variable substitution
+    src = src.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    dst = dst.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    
+    if not src or not dst:
+        continue
+        
+    print(f'  Extracting: {src} -> {dst}')
+    
+    # Create destination directory
+    os.makedirs(dst, exist_ok=True)
+    
+    try:
+        if fmt == 'innoextract':
+            subprocess.run(['innoextract', '-d', dst, src], check=True, capture_output=True)
+        elif fmt == '7z' or src.endswith('.7z'):
+            subprocess.run(['7z', 'x', f'-o{dst}', src, '-y'], check=True, capture_output=True)
+        elif fmt == 'zip' or src.endswith('.zip'):
+            subprocess.run(['unzip', '-o', src, '-d', dst], check=True, capture_output=True)
+        elif fmt == 'tar' or any(src.endswith(ext) for ext in ['.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tar.xz']):
+            subprocess.run(['tar', '-xf', src, '-C', dst], check=True, capture_output=True)
+        else:
+            # Auto-detect format
+            if '.exe' in src.lower() or 'setup' in src.lower():
+                # Likely an Inno Setup installer
+                subprocess.run(['innoextract', '-d', dst, src], check=True, capture_output=True)
+            else:
+                # Try 7z as fallback (handles most formats)
+                subprocess.run(['7z', 'x', f'-o{dst}', src, '-y'], check=True, capture_output=True)
+        print(f'    ✓ Extracted successfully')
+    except subprocess.CalledProcessError as e:
+        print(f'    ✗ Extract failed: {e}')
+    except Exception as e:
+        print(f'    ✗ Error: {e}')
+PYEOF
+    echo -e "${GREEN}✓ Lutris extract steps complete${NC}"
+fi
+
+# LUTRIS_MOVE_STEPS - Move or merge files/directories
+# Format: JSON array of { src, dst, operation? }
+# operation can be: "move", "merge" (copy), "rename"
+if [ -n "$LUTRIS_MOVE_STEPS" ] && command -v python3 >/dev/null 2>&1; then
+    echo -e "${BLUE}Executing Lutris move/merge steps...${NC}"
+    python3 << 'PYEOF'
+import json
+import shutil
+import os
+
+steps = json.loads(os.environ.get('LUTRIS_MOVE_STEPS', '[]'))
+gamedir = os.environ.get('WINEPREFIX', '/wineprefix')
+install_target = os.environ.get('INSTALL_TARGET', '/install')
+cache = '/tmp/lutris_cache'
+
+for step in steps:
+    src = step.get('src', '')
+    dst = step.get('dst', '')
+    op = step.get('operation', 'move')
+    
+    # Variable substitution
+    src = src.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    dst = dst.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    
+    if not src or not dst:
+        continue
+        
+    print(f'  {op.capitalize()}: {src} -> {dst}')
+    
+    try:
+        # Create parent directory
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        
+        if op == 'move' or op == 'rename':
+            shutil.move(src, dst)
+        elif op == 'merge':
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+        print(f'    ✓ {op.capitalize()} successful')
+    except Exception as e:
+        print(f'    ✗ Error: {e}')
+PYEOF
+    echo -e "${GREEN}✓ Lutris move/merge steps complete${NC}"
+fi
+
+# LUTRIS_EXECUTE_STEPS - Execute shell commands
+# Format: JSON array of { command?, file?, args?, description? }
+if [ -n "$LUTRIS_EXECUTE_STEPS" ] && command -v python3 >/dev/null 2>&1; then
+    echo -e "${BLUE}Executing Lutris shell commands...${NC}"
+    python3 << 'PYEOF'
+import json
+import subprocess
+import os
+
+steps = json.loads(os.environ.get('LUTRIS_EXECUTE_STEPS', '[]'))
+user = os.environ.get('UNAME', 'gameuser')
+gamedir = os.environ.get('WINEPREFIX', '/wineprefix')
+install_target = os.environ.get('INSTALL_TARGET', '/install')
+cache = '/tmp/lutris_cache'
+
+for step in steps:
+    command = step.get('command', '')
+    file = step.get('file', '')
+    args = step.get('args', '')
+    desc = step.get('description', command or file)
+    
+    # Variable substitution
+    command = command.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    file = file.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    args = args.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    
+    print(f'  Executing: {desc}')
+    
+    try:
+        if command:
+            subprocess.run(['gosu', user, 'bash', '-c', command], check=True)
+        elif file:
+            cmd = [file]
+            if args:
+                cmd.extend(args.split())
+            subprocess.run(['gosu', user] + cmd, check=True)
+        print(f'    ✓ Command successful')
+    except subprocess.CalledProcessError as e:
+        print(f'    ✗ Command failed with exit code: {e.returncode}')
+    except Exception as e:
+        print(f'    ✗ Error: {e}')
+PYEOF
+    echo -e "${GREEN}✓ Lutris shell commands complete${NC}"
+fi
+
+# LUTRIS_WINEEXEC_STEPS - Execute Windows programs via Wine
+# Format: JSON array of { executable, args?, prefix?, arch?, blocking? }
+if [ -n "$LUTRIS_WINEEXEC_STEPS" ] && command -v python3 >/dev/null 2>&1; then
+    echo -e "${BLUE}Executing Lutris Wine commands...${NC}"
+    python3 << 'PYEOF'
+import json
+import subprocess
+import os
+
+steps = json.loads(os.environ.get('LUTRIS_WINEEXEC_STEPS', '[]'))
+user = os.environ.get('UNAME', 'gameuser')
+gamedir = os.environ.get('WINEPREFIX', '/wineprefix')
+install_target = os.environ.get('INSTALL_TARGET', '/install')
+cache = '/tmp/lutris_cache'
+wine_binary = os.environ.get('WINE_BINARY', 'wine')
+
+for step in steps:
+    executable = step.get('executable', '')
+    args = step.get('args', '')
+    prefix = step.get('prefix', gamedir)
+    blocking = step.get('blocking', True)
+    
+    # Variable substitution
+    executable = executable.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    args = args.replace('$GAMEDIR', gamedir).replace('$CACHE', cache).replace('$INSTALL', install_target)
+    
+    if not executable:
+        continue
+        
+    print(f'  Wine exec: {executable} {args}')
+    
+    try:
+        env = os.environ.copy()
+        env['WINEPREFIX'] = prefix
+        
+        cmd = ['gosu', user, wine_binary, executable]
+        if args:
+            cmd.extend(args.split())
+        
+        if blocking:
+            subprocess.run(cmd, env=env, check=True)
+        else:
+            subprocess.Popen(cmd, env=env)
+        print(f'    ✓ Wine exec successful')
+    except subprocess.CalledProcessError as e:
+        print(f'    ✗ Wine exec failed with exit code: {e.returncode}')
+    except Exception as e:
+        print(f'    ✗ Error: {e}')
+PYEOF
+    echo -e "${GREEN}✓ Lutris Wine commands complete${NC}"
 fi
 
 # Run winetricks verbs if specified via WINE_WINETRICKS environment variable
@@ -717,19 +980,194 @@ for setting in settings:
     echo -e "${GREEN}✓ Custom registry settings applied${NC}"
 fi
 
+#######################################################
+# DXVK / Vulkan Setup and Diagnostics
+#######################################################
+
+# Always show Vulkan/GPU info for diagnostics
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  Graphics Stack Diagnostics${NC}"
+echo -e "${BLUE}========================================${NC}"
+
+# Check Vulkan availability
+if command -v vulkaninfo >/dev/null 2>&1; then
+    VULKAN_GPU=$(vulkaninfo 2>/dev/null | grep -m1 "deviceName" | cut -d'=' -f2 | xargs || echo "unknown")
+    VULKAN_DRIVER=$(vulkaninfo 2>/dev/null | grep -m1 "driverInfo" | cut -d'=' -f2 | xargs || echo "unknown")
+    VULKAN_API=$(vulkaninfo 2>/dev/null | grep -m1 "apiVersion" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+    
+    if [ "$VULKAN_GPU" != "unknown" ] && [ -n "$VULKAN_GPU" ]; then
+        echo -e "${GREEN}✓ Vulkan available${NC}"
+        echo -e "  GPU:     $VULKAN_GPU"
+        echo -e "  Driver:  $VULKAN_DRIVER"
+        echo -e "  API:     Vulkan $VULKAN_API"
+        VULKAN_AVAILABLE=true
+    else
+        echo -e "${YELLOW}⚠ Vulkan not detected (vulkaninfo returned no GPU)${NC}"
+        echo "  This may happen if:"
+        echo "    - No GPU is passed to the container (--device=/dev/dri)"
+        echo "    - Vulkan drivers aren't installed for your GPU"
+        echo "    - Running in a VM without GPU passthrough"
+        VULKAN_AVAILABLE=false
+    fi
+else
+    echo -e "${YELLOW}⚠ vulkaninfo not available - cannot verify Vulkan support${NC}"
+    VULKAN_AVAILABLE=false
+fi
+
+# Check OpenGL as fallback info
+if command -v glxinfo >/dev/null 2>&1 && [ -n "$DISPLAY" ]; then
+    OPENGL_RENDERER=$(glxinfo 2>/dev/null | grep "OpenGL renderer" | cut -d':' -f2 | xargs || echo "unknown")
+    OPENGL_VERSION=$(glxinfo 2>/dev/null | grep "OpenGL version" | cut -d':' -f2 | xargs || echo "unknown")
+    echo -e "  OpenGL:  $OPENGL_VERSION"
+    echo -e "  Renderer: $OPENGL_RENDERER"
+fi
+echo ""
+
 # Check if DXVK should be installed
 if [ "$INSTALL_DXVK" = "true" ]; then
-    # Check if DXVK DLL overrides are configured in the registry
-    if ! grep -q "d3d11.*native" "$WINEPREFIX/user.reg" 2>/dev/null; then
-        echo -e "${BLUE}Installing/Configuring DXVK...${NC}"
-        # Force reinstall by removing winetricks cache marker
-        rm -f "$WINEPREFIX/.winetricks_cache/dxvk"
-        # Install DXVK (will configure DLL overrides)
-        gosu ${UNAME:-gameuser} winetricks -f dxvk 2>&1 | tail -20 || echo "DXVK installation skipped or failed"
+    echo -e "${BLUE}DXVK Mode: ENABLED (DirectX → Vulkan translation)${NC}"
+    
+    if [ "$VULKAN_AVAILABLE" = "false" ]; then
+        echo -e "${RED}✗ WARNING: DXVK requires Vulkan but Vulkan is not available!${NC}"
+        echo -e "${RED}  Games will likely fail or fall back to software rendering.${NC}"
+        echo -e "${RED}  Consider switching to OpenGL mode in game settings.${NC}"
+        echo ""
+    fi
+    
+    # Check if a specific DXVK version is requested
+    DXVK_VERSION_ID="${DXVK_VERSION_ID:-}"
+    DXVK_VERSIONS_DIR="/data/storage/dxvk-versions"
+    
+    if [ -n "$DXVK_VERSION_ID" ] && [ -d "$DXVK_VERSIONS_DIR/$DXVK_VERSION_ID" ]; then
+        # Use specific downloaded DXVK version
+        echo -e "  Using DXVK version: ${GREEN}$DXVK_VERSION_ID${NC}"
+        DXVK_PATH="$DXVK_VERSIONS_DIR/$DXVK_VERSION_ID"
+        
+        # Install DXVK DLLs to the Wine prefix
+        install_dxvk_from_path() {
+            local src_arch="$1"
+            local dest_dir="$2"
+            local dll_count=0
+            
+            if [ -d "$DXVK_PATH/$src_arch" ]; then
+                mkdir -p "$dest_dir"
+                for dll in "$DXVK_PATH/$src_arch"/*.dll; do
+                    if [ -f "$dll" ]; then
+                        dll_name=$(basename "$dll")
+                        # Backup original if not already backed up
+                        if [ -f "$dest_dir/$dll_name" ] && [ ! -f "$dest_dir/$dll_name.orig" ]; then
+                            mv "$dest_dir/$dll_name" "$dest_dir/$dll_name.orig"
+                        fi
+                        cp "$dll" "$dest_dir/"
+                        ((dll_count++)) || true
+                    fi
+                done
+                echo -e "    Installed $dll_count DLLs to ${dest_dir##*/}"
+            fi
+        }
+        
+        # Determine Wine arch
+        if [ "$WINEARCH" = "win32" ]; then
+            echo -e "  Installing 32-bit DXVK DLLs..."
+            install_dxvk_from_path "x32" "$WINEPREFIX/drive_c/windows/system32"
+        else
+            echo -e "  Installing 64-bit DXVK DLLs..."
+            install_dxvk_from_path "x64" "$WINEPREFIX/drive_c/windows/system32"
+            # Also install 32-bit DLLs to syswow64 for 32-bit game compatibility
+            if [ -d "$DXVK_PATH/x32" ]; then
+                echo -e "  Installing 32-bit DXVK DLLs (for WoW64)..."
+                install_dxvk_from_path "x32" "$WINEPREFIX/drive_c/windows/syswow64"
+            fi
+        fi
+        
+        # Set DLL overrides for DXVK
+        echo -e "  Setting DLL overrides for DXVK..."
+        gosu ${UNAME:-gameuser} wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d9 /t REG_SZ /d native /f >/dev/null 2>&1 || true
+        gosu ${UNAME:-gameuser} wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d10core /t REG_SZ /d native /f >/dev/null 2>&1 || true
+        gosu ${UNAME:-gameuser} wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d11 /t REG_SZ /d native /f >/dev/null 2>&1 || true
+        gosu ${UNAME:-gameuser} wine reg add 'HKCU\Software\Wine\DllOverrides' /v dxgi /t REG_SZ /d native /f >/dev/null 2>&1 || true
+        echo -e "${GREEN}✓ DXVK $DXVK_VERSION_ID installed from local cache${NC}"
     else
-        echo -e "${GREEN}✓ DXVK already configured${NC}"
+        # Fallback to winetricks installation
+        if [ -n "$DXVK_VERSION_ID" ]; then
+            echo -e "${YELLOW}⚠ DXVK version $DXVK_VERSION_ID not found, falling back to winetricks${NC}"
+        fi
+        
+        # Check if DXVK DLL overrides are configured in the registry
+        if ! grep -q "d3d11.*native" "$WINEPREFIX/user.reg" 2>/dev/null; then
+            echo -e "${BLUE}Installing/Configuring DXVK via winetricks...${NC}"
+            # Force reinstall by removing winetricks cache marker
+            rm -f "$WINEPREFIX/.winetricks_cache/dxvk"
+            # Install DXVK (will configure DLL overrides)
+            if gosu ${UNAME:-gameuser} winetricks -f dxvk 2>&1 | tail -20; then
+                echo -e "${GREEN}✓ DXVK installed successfully via winetricks${NC}"
+            else
+                echo -e "${YELLOW}⚠ DXVK installation may have failed${NC}"
+            fi
+        else
+            echo -e "${GREEN}✓ DXVK already configured in prefix${NC}"
+        fi
+    fi
+    
+    # Show DXVK DLLs in prefix
+    if [ -d "$WINEPREFIX/drive_c/windows/system32" ]; then
+        DXVK_DLLS=$(ls -la "$WINEPREFIX/drive_c/windows/system32/"d3d*.dll 2>/dev/null | wc -l || echo "0")
+        echo -e "  DXVK DLLs in system32: $DXVK_DLLS"
+    fi
+    
+    # Log DXVK_HUD setting
+    if [ -n "$DXVK_HUD" ]; then
+        echo -e "  DXVK_HUD: $DXVK_HUD (will show overlay in-game)"
+    else
+        echo -e "  DXVK_HUD: not set (no overlay)"
+    fi
+else
+    echo -e "${BLUE}DXVK Mode: DISABLED (using Wine's OpenGL/WineD3D)${NC}"
+    echo -e "  DirectX games will use WineD3D (OpenGL-based translation)"
+    echo -e "  This is more compatible but may have lower performance"
+fi
+
+# VKD3D-Proton for DirectX 12 support
+INSTALL_VKD3D="${INSTALL_VKD3D:-false}"
+if [ "$INSTALL_VKD3D" = "true" ]; then
+    echo -e "${BLUE}VKD3D-Proton Mode: ENABLED (DirectX 12 → Vulkan translation)${NC}"
+    
+    VKD3D_VERSION_ID="${VKD3D_VERSION_ID:-}"
+    VKD3D_VERSIONS_DIR="/data/storage/dxvk-versions"
+    
+    if [ -n "$VKD3D_VERSION_ID" ] && [ -d "$VKD3D_VERSIONS_DIR/$VKD3D_VERSION_ID" ]; then
+        echo -e "  Using VKD3D-Proton version: ${GREEN}$VKD3D_VERSION_ID${NC}"
+        VKD3D_PATH="$VKD3D_VERSIONS_DIR/$VKD3D_VERSION_ID"
+        
+        # Install VKD3D DLLs similar to DXVK
+        if [ "$WINEARCH" = "win32" ]; then
+            if [ -d "$VKD3D_PATH/x86" ]; then
+                cp "$VKD3D_PATH/x86"/*.dll "$WINEPREFIX/drive_c/windows/system32/" 2>/dev/null || true
+            fi
+        else
+            if [ -d "$VKD3D_PATH/x64" ]; then
+                cp "$VKD3D_PATH/x64"/*.dll "$WINEPREFIX/drive_c/windows/system32/" 2>/dev/null || true
+            fi
+            if [ -d "$VKD3D_PATH/x86" ]; then
+                mkdir -p "$WINEPREFIX/drive_c/windows/syswow64"
+                cp "$VKD3D_PATH/x86"/*.dll "$WINEPREFIX/drive_c/windows/syswow64/" 2>/dev/null || true
+            fi
+        fi
+        
+        # Set DLL overrides for VKD3D
+        gosu ${UNAME:-gameuser} wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d12 /t REG_SZ /d native /f >/dev/null 2>&1 || true
+        gosu ${UNAME:-gameuser} wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d12core /t REG_SZ /d native /f >/dev/null 2>&1 || true
+        echo -e "${GREEN}✓ VKD3D-Proton $VKD3D_VERSION_ID installed${NC}"
+    else
+        # Fallback to winetricks if available
+        if [ -n "$VKD3D_VERSION_ID" ]; then
+            echo -e "${YELLOW}⚠ VKD3D version $VKD3D_VERSION_ID not found${NC}"
+        fi
+        echo -e "  VKD3D-Proton installation from winetricks..."
+        gosu ${UNAME:-gameuser} winetricks -f vkd3d 2>&1 | tail -10 || echo -e "${YELLOW}⚠ VKD3D installation may have issues${NC}"
     fi
 fi
+echo ""
 
 #######################################################
 # Gamescope Setup
@@ -771,7 +1209,21 @@ if [ "$USE_GAMESCOPE" = "true" ]; then
             fi
         else
             # Standard nested X11 mode for local display
-            GAMESCOPE_CMD="$GAMESCOPE_CMD --xwayland-count 1 --nested-refresh $GAMESCOPE_REFRESH"
+            # Check if we have X11 display access first
+            if [ -n "$DISPLAY" ] && xdpyinfo >/dev/null 2>&1; then
+                echo -e "${GREEN}✓ X11 display $DISPLAY accessible${NC}"
+                # Use SDL backend which handles X11 better in nested mode
+                GAMESCOPE_CMD="$GAMESCOPE_CMD --backend sdl --xwayland-count 1 --nested-refresh $GAMESCOPE_REFRESH"
+            else
+                echo -e "${YELLOW}⚠ X11 display not accessible, Gamescope may fail${NC}"
+                echo -e "  Ensure xhost +local:docker has been run on the host"
+                echo -e "  Or that XAUTHORITY is properly mounted"
+                # Still try - maybe it will work
+                GAMESCOPE_CMD="$GAMESCOPE_CMD --backend sdl --xwayland-count 1 --nested-refresh $GAMESCOPE_REFRESH"
+            fi
+            
+            # Export Gamescope's wayland display for child processes
+            export GAMESCOPE_WAYLAND_DISPLAY="gamescope-0"
         fi
         
         # Output resolution (what appears in the window/stream)
@@ -826,6 +1278,21 @@ echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Wine Runner Ready${NC}"
 echo -e "${GREEN}========================================${NC}"
+
+# Summary of graphics configuration
+echo ""
+echo -e "${BLUE}Graphics Configuration Summary:${NC}"
+if [ "$INSTALL_DXVK" = "true" ]; then
+    echo -e "  Renderer:  ${GREEN}DXVK (Vulkan)${NC}"
+    echo -e "  DirectX → Vulkan translation active"
+    if [ -n "$DXVK_HUD" ]; then
+        echo -e "  HUD:       Enabled ($DXVK_HUD)"
+        echo -e "             Look for overlay in top-left showing GPU/FPS"
+    fi
+else
+    echo -e "  Renderer:  ${YELLOW}WineD3D (OpenGL)${NC}"
+    echo -e "  DirectX → OpenGL translation (slower but more compatible)"
+fi
 echo ""
 
 # Apply xrandr mode *after* display has been set up and *before* launching anything.
@@ -833,15 +1300,76 @@ apply_xrandr_mode
 
 # Execute command as game user if provided
 if [ "$#" -gt 0 ]; then
+    echo ""
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}  Command Analysis${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    
+    # Show the resolved GAME_EXECUTABLE
+    if [ -n "$GAME_EXECUTABLE" ]; then
+        echo -e "  GAME_EXECUTABLE: $GAME_EXECUTABLE"
+        if [ -f "$GAME_EXECUTABLE" ]; then
+            echo -e "    ${GREEN}✓ File exists${NC}"
+            file "$GAME_EXECUTABLE" 2>/dev/null | head -1 || true
+        else
+            echo -e "    ${RED}✗ FILE NOT FOUND!${NC}"
+            # Try to help debug by showing the parent directory
+            PARENT_DIR=$(dirname "$GAME_EXECUTABLE")
+            if [ -d "$PARENT_DIR" ]; then
+                echo -e "    Parent directory exists. Contents:"
+                ls -la "$PARENT_DIR" 2>/dev/null | head -10 || true
+            else
+                echo -e "    Parent directory also doesn't exist: $PARENT_DIR"
+                # Go up one more level
+                GRANDPARENT=$(dirname "$PARENT_DIR")
+                if [ -d "$GRANDPARENT" ]; then
+                    echo -e "    Grandparent directory contents:"
+                    ls -la "$GRANDPARENT" 2>/dev/null | head -10 || true
+                fi
+            fi
+        fi
+        echo ""
+    fi
+    
+    echo -e "  Raw command: $@"
+    echo -e "  Number of args: $#"
+    for i in $(seq 1 $#); do
+        eval arg=\$$i
+        echo -e "    Arg $i: '$arg'"
+        # If it looks like a path, check if it exists
+        if [[ "$arg" == /* ]]; then
+            if [ -e "$arg" ]; then
+                echo -e "      ✓ Path exists"
+                file "$arg" 2>/dev/null | head -1 || true
+            else
+                echo -e "      ✗ Path NOT FOUND!"
+                # Try to find similar files
+                parent=$(dirname "$arg")
+                if [ -d "$parent" ]; then
+                    echo -e "      Parent dir exists, contents:"
+                    ls -la "$parent" 2>/dev/null | head -10 || true
+                fi
+            fi
+        fi
+    done
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+    
     # Check if MangoHUD is enabled
     ENABLE_MANGOHUD="${ENABLE_MANGOHUD:-false}"
     
     # Check if this is a wine command and virtual desktop is requested
     # NOTE: Wine virtual desktop does NOT work with Proton/GE-Proton (UMU launcher)
-    # For Proton, use Gamescope instead for fullscreen support
+    # NOTE: Wine virtual desktop should NOT be used with Gamescope (they conflict)
+    # For Proton or Gamescope, skip Wine virtual desktop
     if [ -n "$WINE_VIRTUAL_DESKTOP" ]; then
+        # Check if Gamescope is enabled - don't use both
+        if [ "$USE_GAMESCOPE" = "true" ]; then
+            echo -e "${YELLOW}⚠ Wine virtual desktop disabled - Gamescope handles window management${NC}"
+            echo -e "${YELLOW}  Gamescope will provide fullscreen/upscaling instead.${NC}"
+            echo ""
         # Check if we're using Proton (UMU launcher or GE-Proton)
-        if [ -n "$WINE_VERSION_ID" ] && echo "$WINE_VERSION_ID" | grep -qi "proton\|umu\|ge-"; then
+        elif [ -n "$WINE_VERSION_ID" ] && echo "$WINE_VERSION_ID" | grep -qi "proton\|umu\|ge-"; then
             echo -e "${YELLOW}⚠ Wine virtual desktop is not supported with Proton/GE-Proton${NC}"
             echo -e "${YELLOW}  Skipping virtual desktop. Use Gamescope for fullscreen support.${NC}"
             echo ""
@@ -849,29 +1377,51 @@ if [ "$#" -gt 0 ]; then
             # Extract resolution for virtual desktop (only for regular Wine)
             VD_RES="${WINE_VIRTUAL_DESKTOP}"
             
+            echo -e "${BLUE}Wine virtual desktop requested: ${VD_RES}${NC}"
+            echo -e "  Command \$1: '$1'"
+            
             # Check if the command starts with 'wine ' or 'bash' - we need to wrap it with explorer
             case "$1" in
                 wine)
                     # Remove 'wine' from the start and wrap with explorer /desktop=
                     shift
-                    echo -e "${BLUE}Using Wine virtual desktop: ${VD_RES}${NC}"
+                    echo -e "${GREEN}✓ Using Wine virtual desktop: ${VD_RES}${NC}"
                     set -- wine explorer /desktop=Default,${VD_RES} "$@"
                     ;;
                 bash)
                     # If it's a bash command containing wine, we need to modify the inner command
-                    # This is typically: bash -lc 'wine "..."'
+                    # This is typically: bash -lc 'wine "${GAME_EXECUTABLE}"'
                     # $1=bash, $2=-lc, $3='wine "${GAME_EXECUTABLE}"'
                     if [ "$2" = "-lc" ] || [ "$2" = "-c" ]; then
                         BASH_FLAG="$2"
                         WINE_CMD="$3"
                         shift 3  # Remove bash, -lc, and the wine command
                         
-                        # Modify the wine command to include explorer /desktop=
-                        MODIFIED_CMD=$(echo "$WINE_CMD" | sed "s/^wine /wine explorer \\/desktop=Default,${VD_RES} /")
+                        echo -e "  Original inner command: $WINE_CMD"
                         
-                        echo -e "${BLUE}Using Wine virtual desktop: ${VD_RES}${NC}"
+                        # Modify the wine command to include explorer /desktop=
+                        # Handle both 'wine ...' and 'wine "...' patterns
+                        if echo "$WINE_CMD" | grep -q '^wine '; then
+                            MODIFIED_CMD=$(echo "$WINE_CMD" | sed "s/^wine /wine explorer \\/desktop=Default,${VD_RES} /")
+                        elif echo "$WINE_CMD" | grep -q '^wine"'; then
+                            # Handle case like: wine"${GAME_EXECUTABLE}" (no space)
+                            MODIFIED_CMD=$(echo "$WINE_CMD" | sed "s/^wine/wine explorer \\/desktop=Default,${VD_RES} /")
+                        else
+                            # Just prepend explorer to whatever follows wine
+                            MODIFIED_CMD=$(echo "$WINE_CMD" | sed "s/^wine/wine explorer \\/desktop=Default,${VD_RES}/")
+                        fi
+                        
+                        echo -e "${GREEN}✓ Using Wine virtual desktop: ${VD_RES}${NC}"
+                        echo -e "  Modified inner command: $MODIFIED_CMD"
                         set -- bash "$BASH_FLAG" "$MODIFIED_CMD" "$@"
+                    else
+                        echo -e "${YELLOW}⚠ Bash command format not recognized, virtual desktop not applied${NC}"
+                        echo -e "  \$2='$2' (expected -lc or -c)"
                     fi
+                    ;;
+                *)
+                    echo -e "${YELLOW}⚠ Command doesn't start with 'wine' or 'bash', virtual desktop not applied${NC}"
+                    echo -e "  First arg: '$1'"
                     ;;
             esac
         fi

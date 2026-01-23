@@ -2,29 +2,17 @@
 
 import { useState, useEffect } from 'react';
 
-interface Volume {
-  id: string;
-  name: string;
-  dockerVolumeName: string;
-  hostPath: string;
-}
-
-interface VolumeDefaults {
-  defaults: {
-    installers: string | null;
-    downloads: string | null;
-    installed: string | null;
-    roms: string | null;
-  };
-  volumeMetadata: Record<string, {
-    storageType?: 'ssd' | 'platter' | 'archive';
-  }>;
+interface VolumeSettings {
+  mountPath: string;
+  friendlyName?: string;
+  storageType?: 'ssd' | 'platter' | 'archive';
+  isDefaultFor: string[];
 }
 
 interface VolumeSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  volume: Volume;
+  volume: VolumeSettings;
   onSave: () => void;
 }
 
@@ -57,92 +45,80 @@ const DEFAULT_LABELS: Record<DefaultType, { label: string; icon: string; descrip
 const STORAGE_TYPES: { value: StorageType; label: string; icon: string; description: string }[] = [
   { value: '', label: 'Not Set', icon: '❓', description: 'No storage type specified' },
   { value: 'ssd', label: 'SSD', icon: '⚡', description: 'Fast solid-state storage for active games' },
-  { value: 'platter', label: 'Platter', icon: '💿', description: 'Traditional hard drive for general storage' },
+  { value: 'platter', label: 'HDD', icon: '💿', description: 'Traditional hard drive for general storage' },
   { value: 'archive', label: 'Archive', icon: '📚', description: 'Cold storage for games you rarely play' },
 ];
 
 export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }: VolumeSettingsModalProps) {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [defaults, setDefaults] = useState<VolumeDefaults | null>(null);
-  const [selectedDefaults, setSelectedDefaults] = useState<Set<DefaultType>>(new Set());
-  const [storageType, setStorageType] = useState<StorageType>('');
+  const [friendlyName, setFriendlyName] = useState(volume.friendlyName || '');
+  const [selectedDefaults, setSelectedDefaults] = useState<Set<DefaultType>>(
+    new Set(volume.isDefaultFor as DefaultType[])
+  );
+  const [storageType, setStorageType] = useState<StorageType>(volume.storageType || '');
   const [error, setError] = useState<string | null>(null);
 
-  // Load current defaults on mount
+  // Reset state when volume changes
   useEffect(() => {
     if (isOpen) {
-      loadDefaults();
+      setFriendlyName(volume.friendlyName || '');
+      setSelectedDefaults(new Set(volume.isDefaultFor as DefaultType[]));
+      setStorageType(volume.storageType || '');
+      setError(null);
     }
-  }, [isOpen, volume.id]);
-
-  async function loadDefaults() {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch('/api/volumes/defaults');
-      const data = await response.json();
-      if (data.success) {
-        setDefaults(data.data);
-        
-        // Set which defaults this volume is assigned to
-        const assigned = new Set<DefaultType>();
-        const defs = data.data.defaults;
-        if (defs.installers === volume.id) assigned.add('installers');
-        if (defs.downloads === volume.id) assigned.add('downloads');
-        if (defs.installed === volume.id) assigned.add('installed');
-        if (defs.roms === volume.id) assigned.add('roms');
-        setSelectedDefaults(assigned);
-        
-        // Set storage type
-        const meta = data.data.volumeMetadata[volume.id];
-        setStorageType(meta?.storageType || '');
-      } else {
-        setError(data.error || 'Failed to load settings');
-      }
-    } catch (err) {
-      setError('Failed to load volume settings');
-      console.error('Failed to load volume defaults:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [isOpen, volume]);
 
   async function handleSave() {
     setSaving(true);
     setError(null);
     try {
-      // Save each default assignment
-      for (const defaultType of ['installers', 'downloads', 'installed', 'roms'] as DefaultType[]) {
-        const isSelected = selectedDefaults.has(defaultType);
-        const wasSelected = defaults?.defaults[defaultType] === volume.id;
-        
-        if (isSelected !== wasSelected) {
-          await fetch('/api/volumes/defaults', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              volumeId: isSelected ? volume.id : null,
-              defaultType,
-            }),
-          });
-        }
+      // Build the update payload
+      const payload: {
+        mountPath: string;
+        friendlyName?: string;
+        storageType?: string;
+        setAsDefault?: string[];
+        clearDefault?: string[];
+      } = {
+        mountPath: volume.mountPath,
+      };
+
+      // Only include friendlyName if changed
+      if (friendlyName !== (volume.friendlyName || '')) {
+        payload.friendlyName = friendlyName || undefined;
       }
 
-      // Save storage type
-      await fetch('/api/volumes/defaults', {
+      // Only include storageType if changed
+      if (storageType !== (volume.storageType || '')) {
+        payload.storageType = storageType || undefined;
+      }
+
+      // Figure out which defaults changed
+      const currentDefaults = new Set(volume.isDefaultFor);
+      const toAdd = [...selectedDefaults].filter(d => !currentDefaults.has(d));
+      const toRemove = [...currentDefaults].filter(d => !selectedDefaults.has(d as DefaultType));
+
+      if (toAdd.length > 0) {
+        payload.setAsDefault = toAdd;
+      }
+      if (toRemove.length > 0) {
+        payload.clearDefault = toRemove;
+      }
+
+      const response = await fetch('/api/volumes/metadata', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          volumeId: volume.id,
-          storageType: storageType || null,
-        }),
+        body: JSON.stringify(payload),
       });
 
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to save settings');
+      }
+
       onSave();
-      onClose();
     } catch (err) {
-      setError('Failed to save settings');
+      setError(err instanceof Error ? err.message : 'Failed to save settings');
       console.error('Failed to save volume settings:', err);
     } finally {
       setSaving(false);
@@ -161,13 +137,12 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
     });
   }
 
-  function getOtherVolumeForDefault(type: DefaultType): string | null {
-    if (!defaults) return null;
-    const currentId = defaults.defaults[type];
-    if (currentId && currentId !== volume.id) {
-      return currentId;
-    }
-    return null;
+  // Get display name for the volume
+  function getDisplayName(): string {
+    if (volume.friendlyName) return volume.friendlyName;
+    if (volume.mountPath === '/data') return 'dillinger_root';
+    const segments = volume.mountPath.split('/').filter(Boolean);
+    return segments[segments.length - 1] || volume.mountPath;
   }
 
   if (!isOpen) return null;
@@ -180,7 +155,7 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-text">Volume Settings</h2>
-              <p className="text-sm text-muted mt-0.5 font-mono">{volume.name}</p>
+              <p className="text-sm text-muted mt-0.5 font-mono">{volume.mountPath}</p>
             </div>
             <button
               onClick={onClose}
@@ -195,105 +170,105 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          {loading ? (
-            <div className="text-center py-8 text-muted">Loading settings...</div>
-          ) : error ? (
+          {error && (
             <div className="p-4 bg-error/10 border border-error/30 rounded-lg text-error text-sm">
               {error}
             </div>
-          ) : (
-            <>
-              {/* Default Assignments */}
-              <div>
-                <h3 className="text-sm font-semibold text-text mb-3">Default Assignments</h3>
-                <p className="text-xs text-muted mb-4">
-                  Set this volume as the default location for different content types.
-                  These will be used when downloading, installing, or browsing for files.
-                </p>
-                <div className="space-y-2">
-                  {(Object.keys(DEFAULT_LABELS) as DefaultType[]).map(type => {
-                    const { label, icon, description } = DEFAULT_LABELS[type];
-                    const isSelected = selectedDefaults.has(type);
-                    const otherVolumeId = getOtherVolumeForDefault(type);
-                    
-                    return (
-                      <button
-                        key={type}
-                        onClick={() => toggleDefault(type)}
-                        className={`w-full p-3 rounded-lg border text-left transition-all ${
-                          isSelected
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border hover:border-primary/50 hover:bg-background'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <span className="text-xl">{icon}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-text">{label}</span>
-                              {isSelected && (
-                                <span className="px-2 py-0.5 text-[10px] font-semibold bg-primary text-white rounded">
-                                  DEFAULT
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-muted mt-0.5">{description}</p>
-                            {otherVolumeId && !isSelected && (
-                              <p className="text-xs text-warning mt-1">
-                                Currently set to another volume
-                              </p>
-                            )}
-                            {!otherVolumeId && !isSelected && defaults?.defaults[type] === null && (
-                              <p className="text-xs text-muted/70 mt-1 italic">
-                                Not yet set
-                              </p>
-                            )}
-                          </div>
-                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                            isSelected ? 'border-primary bg-primary' : 'border-muted'
-                          }`}>
-                            {isSelected && (
-                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Storage Type */}
-              <div>
-                <h3 className="text-sm font-semibold text-text mb-3">Storage Type</h3>
-                <p className="text-xs text-muted mb-4">
-                  Classify this volume&apos;s physical storage type. This helps with future features
-                  like archiving games or promoting them to faster storage.
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {STORAGE_TYPES.map(({ value, label, icon, description }) => (
-                    <button
-                      key={value || 'none'}
-                      onClick={() => setStorageType(value)}
-                      className={`p-3 rounded-lg border text-left transition-all ${
-                        storageType === value
-                          ? 'border-primary bg-primary/10'
-                          : 'border-border hover:border-primary/50 hover:bg-background'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span>{icon}</span>
-                        <span className="font-medium text-text text-sm">{label}</span>
-                      </div>
-                      <p className="text-[10px] text-muted">{description}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
           )}
+
+          {/* Friendly Name */}
+          <div>
+            <h3 className="text-sm font-semibold text-text mb-3">Display Name</h3>
+            <input
+              type="text"
+              value={friendlyName}
+              onChange={(e) => setFriendlyName(e.target.value)}
+              placeholder={getDisplayName()}
+              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <p className="text-xs text-muted mt-2">
+              A friendly name to identify this volume. Leave blank to use the path.
+            </p>
+          </div>
+
+          {/* Storage Type */}
+          <div>
+            <h3 className="text-sm font-semibold text-text mb-3">Storage Type</h3>
+            <p className="text-xs text-muted mb-4">
+              Classify this volume&apos;s physical storage type. This helps with future features
+              like archiving games or promoting them to faster storage.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {STORAGE_TYPES.map(({ value, label, icon, description }) => (
+                <button
+                  key={value || 'none'}
+                  onClick={() => setStorageType(value)}
+                  className={`p-3 rounded-lg border text-left transition-all ${
+                    storageType === value
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50 hover:bg-background'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span>{icon}</span>
+                    <span className="font-medium text-text text-sm">{label}</span>
+                  </div>
+                  <p className="text-[10px] text-muted">{description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Default Assignments */}
+          <div>
+            <h3 className="text-sm font-semibold text-text mb-3">Default Assignments</h3>
+            <p className="text-xs text-muted mb-4">
+              Set this volume as the default location for different content types.
+              These will be used when downloading, installing, or browsing for files.
+            </p>
+            <div className="space-y-2">
+              {(Object.keys(DEFAULT_LABELS) as DefaultType[]).map(type => {
+                const { label, icon, description } = DEFAULT_LABELS[type];
+                const isSelected = selectedDefaults.has(type);
+                
+                return (
+                  <button
+                    key={type}
+                    onClick={() => toggleDefault(type)}
+                    className={`w-full p-3 rounded-lg border text-left transition-all ${
+                      isSelected
+                        ? 'border-primary bg-primary/10'
+                        : 'border-border hover:border-primary/50 hover:bg-background'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl">{icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-text">{label}</span>
+                          {isSelected && (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold bg-primary text-white rounded">
+                              DEFAULT
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted mt-0.5">{description}</p>
+                      </div>
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                        isSelected ? 'border-primary bg-primary' : 'border-muted'
+                      }`}>
+                        {isSelected && (
+                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* Footer */}
@@ -306,7 +281,7 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
           </button>
           <button
             onClick={handleSave}
-            disabled={loading || saving}
+            disabled={saving}
             className="px-4 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {saving ? 'Saving...' : 'Save Settings'}

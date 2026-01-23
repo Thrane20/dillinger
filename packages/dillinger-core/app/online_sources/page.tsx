@@ -2,13 +2,6 @@
 
 import { useState, useEffect } from 'react';
 
-interface GOGGame {
-  id: string;
-  title: string;
-  image: string;
-  url: string;
-}
-
 interface GOGAuthStatus {
   authenticated: boolean;
   connected: boolean;
@@ -17,13 +10,14 @@ interface GOGAuthStatus {
 
 export default function OnlineSourcesPage() {
   const [gogAuthStatus, setGogAuthStatus] = useState<GOGAuthStatus>({ authenticated: false, connected: false });
-  const [gogGames, setGogGames] = useState<GOGGame[]>([]);
+  const [gameCount, setGameCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authWindow, setAuthWindow] = useState<Window | null>(null);
   const [gogAccessCode, setGogAccessCode] = useState('');
   const [accessCodeSaving, setAccessCodeSaving] = useState(false);
   const [accessCodeSuccess, setAccessCodeSuccess] = useState(false);
+  const [showAuthCodeInput, setShowAuthCodeInput] = useState(false);
 
   // Check GOG authentication status on mount
   useEffect(() => {
@@ -151,7 +145,7 @@ export default function OnlineSourcesPage() {
 
       if (response.ok) {
         setGogAuthStatus({ authenticated: false, connected: false });
-        setGogGames([]);
+        setGameCount(0);
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Failed to logout from GOG');
@@ -163,16 +157,15 @@ export default function OnlineSourcesPage() {
 
   async function loadGOGGames() {
     setLoading(true);
-    // Don't clear error here - preserve errors from other operations like exchange-code
-    // setError(null);
 
     try {
-      const response = await fetch('/api/online-sources/gog/games');
+      // Just fetch page 1 with limit 1 to get the total count efficiently
+      const response = await fetch('/api/online-sources/gog/games?page=1&limit=1');
       if (response.ok) {
         const data = await response.json();
-        // Games API returns { games, total, page, limit, totalPages } - no success field
-        if (data.games) {
-          setGogGames(data.games || []);
+        // Games API returns { games, total, page, limit, totalPages }
+        if (data.total !== undefined) {
+          setGameCount(data.total);
         } else if (data.error) {
           setError(data.error);
         }
@@ -277,45 +270,12 @@ export default function OnlineSourcesPage() {
             </div>
             <div className="flex gap-2">
               {gogAuthStatus.authenticated || gogAuthStatus.connected ? (
-                <>
-                  <a
-                    href="/online_sources/gog-library"
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors inline-flex items-center gap-2"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                      />
-                    </svg>
-                    Browse Library
-                  </a>
-                  {gogAuthStatus.authenticated ? (
-                    <button
-                      onClick={logoutFromGOG}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      Logout
-                    </button>
-                  ) : (
-                    <button
-                      onClick={loginToGOG}
-                      disabled={loading}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      {loading ? (
-                        <>
-                          <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                          Connecting...
-                        </>
-                      ) : (
-                        'Reconnect GOG'
-                      )}
-                    </button>
-                  )}
-                </>
+                <button
+                  onClick={logoutFromGOG}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Logout
+                </button>
               ) : (
                 <button
                   onClick={loginToGOG}
@@ -335,149 +295,136 @@ export default function OnlineSourcesPage() {
             </div>
           </div>
 
-          {/* GOG Access Code Section */}
-          <div className="pt-4 border-t border-border">
-            <div className="space-y-3">
-              <label htmlFor="gogAccessCode" className="block text-sm font-medium text-text">
-                GOG Authorization Code
-              </label>
-              <p className="text-xs text-muted">
-                Alternative login: Paste the authorization code from the GOG login redirect URL (code=...). It will be automatically exchanged for an access token.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  id="gogAccessCode"
-                  value={gogAccessCode}
-                  onChange={(e) => setGogAccessCode(e.target.value)}
-                  placeholder="Paste authorization code from redirect URL..."
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-                <button
-                  onClick={saveGOGAccessCode}
-                  disabled={accessCodeSaving || !gogAccessCode.trim()}
-                  className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {accessCodeSaving ? (
-                    <>
-                      <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                      Saving...
-                    </>
-                  ) : (
-                    'Save'
-                  )}
-                </button>
-              </div>
-              {accessCodeSuccess && (
-                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                  Access code saved successfully
-                </div>
-              )}
-            </div>
-          </div>
-
-          {gogAuthStatus.authenticated && (
+          {/* Authenticated: Show game count and browse button */}
+          {(gogAuthStatus.authenticated || gogAuthStatus.connected) && (
             <div className="pt-4 border-t border-border">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-lg font-semibold text-text">
-                  Your GOG Library ({gogGames.length} games)
-                </h4>
-                <button
-                  onClick={loadGOGGames}
-                  disabled={loading}
-                  className="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-primary">{gameCount}</div>
+                    <div className="text-sm text-muted">Games Owned</div>
+                  </div>
+                </div>
+                <a
+                  href="/online_sources/gog-library"
+                  className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors inline-flex items-center gap-2 text-lg font-semibold"
                 >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
                     />
                   </svg>
-                  Refresh
-                </button>
+                  Browse Library
+                </a>
               </div>
+            </div>
+          )}
 
-              {loading ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-                </div>
-              ) : gogGames.length === 0 ? (
-                <div className="text-center py-12">
-                  <svg
-                    className="mx-auto h-12 w-12 text-muted"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
+          {/* Authorization Code Section - only show input if not logged in, or if user clicked button */}
+          {(!gogAuthStatus.authenticated && !gogAuthStatus.connected) ? (
+            <div className="pt-4 border-t border-border">
+              <div className="space-y-3">
+                <label htmlFor="gogAccessCode" className="block text-sm font-medium text-text">
+                  GOG Authorization Code
+                </label>
+                <p className="text-xs text-muted">
+                  Alternative login: Paste the authorization code from the GOG login redirect URL (code=...). It will be automatically exchanged for an access token.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="gogAccessCode"
+                    value={gogAccessCode}
+                    onChange={(e) => setGogAccessCode(e.target.value)}
+                    placeholder="Paste authorization code from redirect URL..."
+                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <button
+                    onClick={saveGOGAccessCode}
+                    disabled={accessCodeSaving || !gogAccessCode.trim()}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-                    />
-                  </svg>
-                  <h3 className="mt-4 text-lg font-medium text-text">No games found</h3>
-                  <p className="mt-2 text-sm text-muted">
-                    Your GOG library appears to be empty or could not be loaded.
-                  </p>
+                    {accessCodeSaving ? (
+                      <>
+                        <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                        Exchanging...
+                      </>
+                    ) : (
+                      'Exchange Code'
+                    )}
+                  </button>
                 </div>
+                {accessCodeSuccess && (
+                  <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                    Authentication successful!
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* When logged in, show a button to re-authenticate with a new code */
+            <div className="pt-4 border-t border-border">
+              {!showAuthCodeInput ? (
+                <button
+                  onClick={() => setShowAuthCodeInput(true)}
+                  className="text-sm text-muted hover:text-text transition-colors"
+                >
+                  Paste new authorization code...
+                </button>
               ) : (
-                <div className="grid grid-cols-4 gap-4">
-                  {gogGames.map((game) => (
-                    <div
-                      key={game.id}
-                      className="card transition-all duration-200 hover:scale-[1.02] cursor-pointer"
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="gogAccessCode" className="block text-sm font-medium text-text">
+                      New Authorization Code
+                    </label>
+                    <button
+                      onClick={() => {
+                        setShowAuthCodeInput(false);
+                        setGogAccessCode('');
+                      }}
+                      className="text-xs text-muted hover:text-text"
                     >
-                      {game.image && (
-                        <div className="w-full h-32 bg-gray-200 dark:bg-gray-700 overflow-hidden rounded-t-lg">
-                          <img
-                            src={game.image}
-                            alt={game.title}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      id="gogAccessCode"
+                      value={gogAccessCode}
+                      onChange={(e) => setGogAccessCode(e.target.value)}
+                      placeholder="Paste authorization code from redirect URL..."
+                      className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <button
+                      onClick={async () => {
+                        await saveGOGAccessCode();
+                        setShowAuthCodeInput(false);
+                      }}
+                      disabled={accessCodeSaving || !gogAccessCode.trim()}
+                      className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {accessCodeSaving ? (
+                        <>
+                          <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                          Exchanging...
+                        </>
+                      ) : (
+                        'Exchange Code'
                       )}
-                      <div className="p-3">
-                        <h5 className="text-sm font-semibold text-text line-clamp-2" title={game.title}>
-                          {game.title}
-                        </h5>
-                        <div className="mt-2 flex gap-2">
-                          <button
-                            className="flex-1 text-xs px-2 py-1 bg-primary text-primary-foreground rounded hover:bg-primary-hover transition-colors"
-                            title="Add to library"
-                          >
-                            Add
-                          </button>
-                          <a
-                            href={game.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                            title="View on GOG"
-                          >
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                              />
-                            </svg>
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

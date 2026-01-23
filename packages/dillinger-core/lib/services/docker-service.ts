@@ -1,6 +1,6 @@
 import Docker from 'dockerode';
 import path from 'path';
-import { existsSync, statSync } from 'fs';
+import { existsSync, statSync, readFileSync } from 'fs';
 import type { Game, Platform } from '@dillinger/shared';
 import { JSONStorageService } from './storage';
 import { SettingsService } from './settings';
@@ -27,6 +27,15 @@ export interface GameInstallOptions {
   debugMode?: boolean; // If true, keep container after exit for debugging
   wineVersionId?: string; // Wine version to use for installation (e.g., 'system', 'ge-proton-10-27')
   wineArch?: 'win32' | 'win64'; // Wine architecture (default: win64)
+  winetricks?: string[]; // Winetricks verbs to run before installation (from Lutris scripts)
+  dllOverrides?: string; // WINEDLLOVERRIDES format (from Lutris scripts)
+  environmentVariables?: Record<string, string>; // Additional env vars (from Lutris scripts)
+  // Lutris script execution steps
+  lutrisExtractSteps?: Array<{ src: string; dst: string; format?: string }>;
+  lutrisMoveSteps?: Array<{ src: string; dst: string; operation?: 'move' | 'merge' | 'rename' }>;
+  lutrisExecuteSteps?: Array<{ command?: string; file?: string; args?: string; description?: string }>;
+  lutrisWineexecSteps?: Array<{ executable: string; args?: string; prefix?: string; blocking?: boolean }>;
+  lutrisRegistrySettings?: Array<{ path: string; name: string; type?: string; value: string }>;
 }
 
 export interface ContainerInfo {
@@ -704,12 +713,17 @@ export class DockerService {
         .filter(arg => arg !== ''); // Remove empty strings
 
       // Resolve the launch command into a path under the mounted prefix.
-      // Support both Windows-style paths (C:\GOG Games\...) and Linux absolute paths
-      // that already point to a Wine prefix on the host filesystem.
+      // Support multiple formats:
+      // 1. Linux absolute path with drive_c: /mnt/m2fast/game-slug/drive_c/GOG Games/CC3.exe
+      // 2. Relative path with drive_c: drive_c/GOG Games/Commandos/comandos.exe
+      // 3. Windows-style path: C:\GOG Games\...
+      // 4. Relative Windows path without drive letter: GOG Games\Commandos\comandos.exe
       
       // Check if this is already a Linux absolute path containing drive_c
       // (e.g., /mnt/m2fast/game-slug/drive_c/GOG Games/CC3.exe)
       const driveCIndex = launchCommand.indexOf('/drive_c/');
+      const driveCRelativeIndex = launchCommand.indexOf('drive_c/');
+      
       if (launchCommand.startsWith('/') && driveCIndex !== -1) {
         // Linux absolute path - extract the relative path after drive_c
         const relativeWindowsPath = launchCommand.substring(driveCIndex + '/drive_c'.length);
@@ -717,11 +731,21 @@ export class DockerService {
         logger.info(`  Detected Linux absolute path with Wine prefix`);
         logger.info(`    Full path: ${launchCommand}`);
         logger.info(`    Relative Windows path: ${relativeWindowsPath}`);
+      } else if (driveCRelativeIndex === 0) {
+        // Path already starts with "drive_c/" - just prepend /wineprefix/
+        let linuxPath = launchCommand.replace(/\\/g, '/');
+        gameExecutable = path.posix.join('/wineprefix', linuxPath);
+        logger.info(`  Detected relative path with drive_c prefix`);
+        logger.info(`    Launch command: ${launchCommand}`);
+        logger.info(`    Resolved to: ${gameExecutable}`);
       } else {
         // Traditional Windows-style path (C:\GOG Games\...) - convert to Linux
         let linuxPath = launchCommand.replace(/^[A-Za-z]:/, '');
         linuxPath = linuxPath.replace(/\\/g, '/');
         gameExecutable = path.posix.join('/wineprefix/drive_c', linuxPath);
+        logger.info(`  Detected Windows-style path`);
+        logger.info(`    Launch command: ${launchCommand}`);
+        logger.info(`    Resolved to: ${gameExecutable}`);
       }
 
       // Note: Docker's `Cmd` does not perform shell expansion, so passing
@@ -960,9 +984,12 @@ export class DockerService {
       logger.warn('Failed to inject joystick configuration:', err);
     }
 
-    // Pass PUID/PGID to runner if set in environment
-    if (process.env.PUID) env.push(`PUID=${process.env.PUID}`);
-    if (process.env.PGID) env.push(`PGID=${process.env.PGID}`);
+    // Pass PUID/PGID to runner so files are created with correct ownership
+    // Default to 1000:1000 which is the typical first user on Linux
+    const puid = process.env.PUID || '1000';
+    const pgid = process.env.PGID || '1000';
+    env.push(`PUID=${puid}`);
+    env.push(`PGID=${pgid}`);
 
     // Pass global GPU selection to runner (base entrypoint consumes GPU_VENDOR)
     try {
@@ -980,9 +1007,25 @@ export class DockerService {
     const wineConfig = game.settings?.wine;
     if (wineConfig?.useDxvk) {
       env.push('INSTALL_DXVK=true');
-      // Enable DXVK HUD for verification (shows GPU info, driver, FPS)
-      env.push('DXVK_HUD=devinfo,fps');
+      // DXVK_HUD is not set by default - use MangoHUD for overlays instead
       logger.info(`  DXVK enabled (DirectX to Vulkan translation)`);
+      
+      // If a specific DXVK version is selected, pass it to the container
+      if (wineConfig.dxvkVersion) {
+        env.push(`DXVK_VERSION_ID=${wineConfig.dxvkVersion}`);
+        logger.info(`  DXVK version: ${wineConfig.dxvkVersion}`);
+      }
+    }
+    
+    // VKD3D-Proton for DirectX 12 support
+    if (wineConfig?.useVkd3dProton) {
+      env.push('INSTALL_VKD3D=true');
+      logger.info(`  VKD3D-Proton enabled (DirectX 12 to Vulkan translation)`);
+      
+      if (wineConfig.vkd3dVersion) {
+        env.push(`VKD3D_VERSION_ID=${wineConfig.vkd3dVersion}`);
+        logger.info(`  VKD3D-Proton version: ${wineConfig.vkd3dVersion}`);
+      }
     }
 
     // Add Wine version selection (for GE-Proton / UMU launcher support)
@@ -1151,7 +1194,7 @@ export class DockerService {
 
       // Allow per-game selection of D3D renderer (Wine runner consumes WINE_D3D_RENDERER)
       const renderer = game.settings?.wine?.renderer;
-      if (renderer === 'vulkan' || renderer === 'opengl') {
+      if (renderer === 'vulkan' || renderer === 'opengl' || renderer === 'gdi') {
         env.push(`WINE_D3D_RENDERER=${renderer}`);
         logger.info(`  Wine renderer: ${renderer}`);
       }
@@ -1233,7 +1276,10 @@ export class DockerService {
       // This allows each game to have its own emulator config, saves, screenshots, etc.
       const dillingerRoot = this.storage.getDillingerRoot();
       const emulatorHomeDir = path.join(dillingerRoot, 'emulator-homes', gameIdentifier);
-      emulatorHomePath = this.getHostPath(emulatorHomeDir);
+      
+      // Use the container-accessible path for filesystem operations
+      // We'll convert to host path later when setting up Docker volume mounts
+      const containerAccessiblePath = emulatorHomeDir;
       
       // Ensure the directory exists with proper permissions
       try {
@@ -1241,34 +1287,56 @@ export class DockerService {
         const { chmod } = await import('fs/promises');
         
         // Create parent directory first if it doesn't exist
-        const parentDir = path.dirname(emulatorHomePath);
+        const parentDir = path.dirname(containerAccessiblePath);
         await fs.ensureDir(parentDir);
         
         // Create the game-specific directory
-        await fs.ensureDir(emulatorHomePath);
+        await fs.ensureDir(containerAccessiblePath);
         
-        // Pre-create .config/pulse directory for PulseAudio
-        // This prevents Docker from creating it as root when mounting pulse/cookie
-        const pulseDir = path.join(emulatorHomePath, '.config', 'pulse');
+        // Pre-create .config/pulse directory for PulseAudio and copy the cookie
+        // We copy instead of bind-mounting because the emulator home is mounted as a whole
+        const pulseDir = path.join(containerAccessiblePath, '.config', 'pulse');
         await fs.ensureDir(pulseDir);
+        
+        // Copy PulseAudio cookie if it exists (needed for audio in container)
+        const userHome = process.env.HOME || '/home/node';
+        const pulseCookiePaths = [
+          `${userHome}/.config/pulse/cookie`,
+          '/home/dillinger/.config/pulse/cookie',
+        ];
+        for (const pulseCookie of pulseCookiePaths) {
+          if (await fs.pathExists(pulseCookie)) {
+            const destCookie = path.join(pulseDir, 'cookie');
+            await fs.copy(pulseCookie, destCookie);
+            await chmod(destCookie, 0o644);
+            logger.info(`  Copied PulseAudio cookie to emulator home`);
+            break;
+          }
+        }
 
         // Pre-create .cache directory for applications that expect it (like VICE)
-        const cacheDir = path.join(emulatorHomePath, '.cache');
+        const cacheDir = path.join(containerAccessiblePath, '.cache');
         await fs.ensureDir(cacheDir);
         
         // Set permissions so the container user can write to it
         // Use 777 to ensure the container user (uid 1000) can write even if created by root
-        await chmod(emulatorHomePath, 0o777);
-        await chmod(path.join(emulatorHomePath, '.config'), 0o777);
+        await chmod(containerAccessiblePath, 0o777);
+        await chmod(path.join(containerAccessiblePath, '.config'), 0o777);
         await chmod(pulseDir, 0o777);
         await chmod(cacheDir, 0o777);
-        logger.info(`  Emulator home directory: ${emulatorHomePath}`);
+        
+        // Now convert to host path for Docker volume mounting
+        emulatorHomePath = this.getHostPath(containerAccessiblePath);
+        logger.info(`  Emulator home directory: ${containerAccessiblePath}`);
+        if (emulatorHomePath !== containerAccessiblePath) {
+          logger.info(`    Host path for Docker: ${emulatorHomePath}`);
+        }
 
         // --- MASTER CONFIG INJECTION ---
         // Check if this is an Arcade/RetroArch game and if we need to inject the master config
         const platformType = platform.type as string;
         if (platformType === 'arcade' || game.platformId === 'mame' || game.platformId === 'arcade' || platform.configuration.containerImage?.includes('retroarch')) {
-          const retroArchConfigPath = path.join(emulatorHomePath, '.config', 'retroarch', 'retroarch.cfg');
+          const retroArchConfigPath = path.join(containerAccessiblePath, '.config', 'retroarch', 'retroarch.cfg');
           
           // If config doesn't exist, try to copy from master
           if (!await fs.pathExists(retroArchConfigPath)) {
@@ -1290,7 +1358,7 @@ export class DockerService {
 
       } catch (error: any) {
         logger.error(`  ✗ Failed to create emulator home directory: ${error.message}`);
-        logger.error(`    Path: ${emulatorHomePath}`);
+        logger.error(`    Path: ${containerAccessiblePath}`);
         logger.error(`    Error code: ${error.code}`);
         // Don't mount if we can't create the directory
         emulatorHomePath = null;
@@ -1450,8 +1518,12 @@ export class DockerService {
     }
     
     // Add display configuration volumes AFTER game-specific mounts
-    // This allows individual file mounts (like .Xauthority, pulse/cookie) to overlay
-    binds.push(...displayConfig.volumes);
+    // Filter out pulse cookie mount if we have an emulator home (cookie is already copied there)
+    let filteredDisplayVolumes = displayConfig.volumes;
+    if (emulatorHomePath) {
+      filteredDisplayVolumes = displayConfig.volumes.filter(v => !v.includes('pulse/cookie'));
+    }
+    binds.push(...filteredDisplayVolumes);
 
     try {
       // Get Docker settings for auto-remove policy
@@ -1481,6 +1553,7 @@ export class DockerService {
           Devices: displayConfig.devices,
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
+          NetworkMode: displayConfig.networkMode,
         },
         // For interactive testing, attach TTY
         Tty: true,
@@ -1710,6 +1783,7 @@ export class DockerService {
           Devices: displayConfig.devices,
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
+          NetworkMode: displayConfig.networkMode,
         },
         Tty: true,
         OpenStdin: true,
@@ -2022,55 +2096,76 @@ export class DockerService {
   async installGame(options: GameInstallOptions): Promise<ContainerInfo> {
     const { installerPath, installPath, platform, sessionId, game, installerArgs } = options;
 
-    // Ensure host path is detected
-    await this.detectHostPath();
-
     logger.info(`Installing game with installer: ${installerPath}`);
     logger.info(`  Installation target: ${installPath}`);
     logger.info(`  Platform: ${platform.name} (${platform.type})`);
     logger.info(`  Container Image: ${platform.configuration.containerImage}`);
     logger.info(`  Game slug: ${game.slug || game.id}`);
 
+    // Determine how to mount the installer based on its location
+    const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
     const installerIsInInstallersVolume = typeof installerPath === 'string' && installerPath.startsWith('/installers/');
-
-    // Convert paths to host paths for Docker bind mounts (only needed when installer is a host/bind path)
-    const hostInstallerPath = installerIsInInstallersVolume ? null : this.getHostPath(installerPath);
+    const installerIsInDillingerRoot = typeof installerPath === 'string' && installerPath.startsWith(DILLINGER_ROOT + '/');
+    
     // installPath is now passed in as a direct host path (e.g., /mnt/m2fast/game-slug)
     const hostInstallPath = installPath;
+
+    // Check if the install path is within a configured Docker volume
+    // This is important because bind-mounting a non-existent subdirectory fails,
+    // but we can mount the parent volume and create the subdirectory inside the container
+    const installVolumeInfo = await this.findVolumeForPath(hostInstallPath);
+    let installBindMount: string;
+    let installContainerPath: string;
+    let winePrefixContainerPath: string;
+    
+    if (installVolumeInfo) {
+      // Install path is within a managed Docker volume - mount the volume and use relative path
+      installBindMount = `${installVolumeInfo.volume.dockerVolumeName}:/mnt/install_volume:rw`;
+      installContainerPath = `/mnt/install_volume${installVolumeInfo.relativePath}`;
+      winePrefixContainerPath = installContainerPath; // Wine prefix is same as install dir
+      logger.info(`  Install volume: ${installVolumeInfo.volume.name} (${installVolumeInfo.volume.dockerVolumeName})`);
+      logger.info(`  Install path in container: ${installContainerPath}`);
+    } else {
+      // Direct bind mount (requires directory to exist on host)
+      installBindMount = `${hostInstallPath}:/install:rw`;
+      installContainerPath = '/install';
+      winePrefixContainerPath = '/install';
+    }
 
     // Get display forwarding configuration
     const displayConfig = await this.getDisplayConfiguration();
     logger.info(`  Display mode: ${displayConfig.mode}`);
 
     // Preferred: the install directory itself is the Wine prefix (no extra subdirectory)
-    const winePrefixPath = hostInstallPath;
-    
-    logger.info(`  Wine prefix: ${winePrefixPath}`);
+    logger.info(`  Wine prefix (host): ${hostInstallPath}`);
+    logger.info(`  Wine prefix (container): ${winePrefixContainerPath}`);
 
-    // For Wine installations, ensure the Wine prefix directory exists with proper permissions
-    // We'll create it with a permissive mode so Wine can use it
-    if (platform.type === 'wine') {
-      try {
-        const fs = await import('fs-extra');
-        // Ensure install root exists too
-        await fs.ensureDir(hostInstallPath);
-        // Ensure prefix directory exists and is writable by the runner
-        await fs.chmod(hostInstallPath, 0o777);
-        logger.info(`  ✓ Wine prefix directory prepared with correct permissions`);
-      } catch (error) {
-        logger.warn(`  ⚠ Could not prepare Wine prefix directory:`, error);
-        // Continue anyway - Wine will try to create it
-      }
+    // Note: We don't pre-create the Wine prefix directory here because:
+    // 1. dillinger-core runs in a container where host paths like /mnt/linuxfast aren't accessible
+    // 2. The runner container has the volume mounted and will create the directory when Wine initializes
+    // 3. The entrypoint script in the runner handles prefix initialization
+
+    // Determine the installer container path based on where the installer is located
+    let installerContainerPath: string;
+    if (installerIsInInstallersVolume) {
+      // Installer is in /installers/ volume - use as-is
+      installerContainerPath = installerPath;
+      logger.info(`  Installer source: /installers volume`);
+    } else if (installerIsInDillingerRoot) {
+      // Installer is within DILLINGER_ROOT (/data) - mount dillinger_root volume and use same path
+      installerContainerPath = installerPath; // Path stays the same since we mount to same location
+      logger.info(`  Installer source: dillinger_root volume (${DILLINGER_ROOT})`);
+    } else {
+      // Legacy: direct file path - mount as individual file
+      installerContainerPath = `/installer/${path.basename(installerPath)}`;
+      logger.info(`  Installer source: direct bind mount`);
     }
-
-    const installerContainerPath = installerIsInInstallersVolume
-      ? installerPath
-      : `/installer/${path.basename(installerPath)}`;
 
     // Prepare environment variables for installation
     const env = [
       `INSTALLER_PATH=${installerContainerPath}`,
-      `INSTALL_TARGET=/install`,
+      `INSTALL_TARGET=${installContainerPath}`,
+      `WINEPREFIX=${winePrefixContainerPath}`,
       ...displayConfig.env
     ];
 
@@ -2079,23 +2174,27 @@ export class DockerService {
       env.push(`INSTALLER_ARGS=${installerArgs}`);
     }
 
-    // Pass PUID/PGID to runner if set in environment
-    if (process.env.PUID) env.push(`PUID=${process.env.PUID}`);
-    if (process.env.PGID) env.push(`PGID=${process.env.PGID}`);
+    // Pass PUID/PGID to runner so files are created with correct ownership
+    // Default to 1000:1000 which is the typical first user on Linux
+    const puid = process.env.PUID || '1000';
+    const pgid = process.env.PGID || '1000';
+    env.push(`PUID=${puid}`);
+    env.push(`PGID=${pgid}`);
+    logger.info(`  File ownership: PUID=${puid} PGID=${pgid}`);
 
     // Add Wine-specific configuration for Windows installers
     if (platform.type === 'wine') {
-      // Get Wine architecture from install options, game settings, or default to win64
-      const wineArch = options.wineArch || game.settings?.wine?.arch || 'win64';
-      
       // Build WINEDEBUG from game settings
       // Enable verbose logging in debug mode for installation troubleshooting
       const wineDebug = this.buildWineDebug(game, options.debugMode === true);
       
+      // Note: WINEPREFIX is already set earlier to winePrefixContainerPath
+      // We don't override it here - it points to the correct container path
+      // Note: We do NOT pass WINEARCH - modern Wine (9.x+) with WoW64 mode handles
+      // both 32-bit and 64-bit apps natively. Passing WINEARCH=win32 causes errors.
+      // The entrypoint will handle architecture detection automatically.
       env.push(
         `WINEDEBUG=${wineDebug}`, // Use game's debug settings (or verbose if debugMode)
-        `WINEPREFIX=/wineprefix`, // Wine prefix mounted separately
-        `WINEARCH=${wineArch}`, // Wine architecture (win32 or win64)
         'DISPLAY_WINEPREFIX=1' // Signal to show Wine configuration if needed
       );
       
@@ -2116,8 +2215,55 @@ export class DockerService {
         logger.info(`  Wine version: system (default)`);
       }
       
-      logger.info(`  Wine architecture: ${wineArch}`);
+      logger.info(`  Wine architecture: auto (WoW64 mode)`);
       logger.info(`  WINEDEBUG=${wineDebug}`);
+      
+      // Add winetricks verbs from Lutris installer script
+      if (options.winetricks && options.winetricks.length > 0) {
+        const winetricksStr = options.winetricks.join(';');
+        env.push(`WINE_WINETRICKS=${winetricksStr}`);
+        logger.info(`  Winetricks (Lutris): ${winetricksStr}`);
+      }
+      
+      // Add DLL overrides from Lutris installer script
+      if (options.dllOverrides) {
+        env.push(`WINEDLLOVERRIDES=${options.dllOverrides}`);
+        logger.info(`  DLL overrides (Lutris): ${options.dllOverrides}`);
+      }
+      
+      // Add custom environment variables from Lutris script
+      if (options.environmentVariables) {
+        for (const [key, value] of Object.entries(options.environmentVariables)) {
+          env.push(`${key}=${value}`);
+          logger.info(`  Env (Lutris): ${key}=${value}`);
+        }
+      }
+      
+      // Add Lutris execution steps as JSON environment variables
+      if (options.lutrisExtractSteps && options.lutrisExtractSteps.length > 0) {
+        env.push(`LUTRIS_EXTRACT_STEPS=${JSON.stringify(options.lutrisExtractSteps)}`);
+        logger.info(`  Lutris extract steps: ${options.lutrisExtractSteps.length}`);
+      }
+      
+      if (options.lutrisMoveSteps && options.lutrisMoveSteps.length > 0) {
+        env.push(`LUTRIS_MOVE_STEPS=${JSON.stringify(options.lutrisMoveSteps)}`);
+        logger.info(`  Lutris move/merge steps: ${options.lutrisMoveSteps.length}`);
+      }
+      
+      if (options.lutrisExecuteSteps && options.lutrisExecuteSteps.length > 0) {
+        env.push(`LUTRIS_EXECUTE_STEPS=${JSON.stringify(options.lutrisExecuteSteps)}`);
+        logger.info(`  Lutris execute steps: ${options.lutrisExecuteSteps.length}`);
+      }
+      
+      if (options.lutrisWineexecSteps && options.lutrisWineexecSteps.length > 0) {
+        env.push(`LUTRIS_WINEEXEC_STEPS=${JSON.stringify(options.lutrisWineexecSteps)}`);
+        logger.info(`  Lutris wineexec steps: ${options.lutrisWineexecSteps.length}`);
+      }
+      
+      if (options.lutrisRegistrySettings && options.lutrisRegistrySettings.length > 0) {
+        env.push(`WINE_REGISTRY_SETTINGS=${JSON.stringify(options.lutrisRegistrySettings)}`);
+        logger.info(`  Lutris registry settings: ${options.lutrisRegistrySettings.length}`);
+      }
     }
 
     try {
@@ -2137,6 +2283,20 @@ export class DockerService {
         logger.info(`  🔧 DEBUG MODE: Container will be kept after exit for inspection`);
       }
 
+      // Build the bind mounts based on installer location
+      const installerBinds: string[] = [];
+      if (installerIsInInstallersVolume) {
+        // Installer is in /installers/ volume - already mounted below
+      } else if (installerIsInDillingerRoot) {
+        // Installer is in dillinger_root - mount the volume to same path
+        installerBinds.push(`dillinger_root:${DILLINGER_ROOT}:ro`);
+      } else {
+        // Legacy: direct bind mount - need to translate to host path
+        await this.detectHostPath();
+        const hostInstallerPath = this.getHostPath(installerPath);
+        installerBinds.push(`${hostInstallerPath}:/installer/${path.basename(installerPath)}:ro`);
+      }
+
       // Create installation container with GUI passthrough
       const container = await docker.createContainer({
         Image: resolvedImage,
@@ -2145,17 +2305,15 @@ export class DockerService {
         HostConfig: {
           AutoRemove: autoRemove,
           Binds: [
-            ...(installerIsInInstallersVolume
-              ? []
-              : [`${hostInstallerPath}:/installer/${path.basename(installerPath)}:ro`]), // Mount installer as read-only
-            `${hostInstallPath}:/install:rw`, // Mount installation target as read-write
-            `${winePrefixPath}:/wineprefix:rw`, // Game-specific Wine prefix (prevents interference between games)
+            ...installerBinds,
+            installBindMount, // Mount installation target (either volume or direct bind)
             `dillinger_installers:/installers:rw`, // Helper volume for finding installers
             ...displayConfig.volumes
           ],
           Devices: displayConfig.devices,
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
+          NetworkMode: displayConfig.networkMode,
         },
         // Interactive mode for installation GUI
         Tty: true,
@@ -2804,6 +2962,62 @@ export class DockerService {
   }
 
   /**
+   * Resolve the host path for a mount point inside this container.
+   * When running inside a container, paths we see might be bind mounts from the host.
+   * Docker needs the HOST path to mount into child containers, not our container path.
+   * 
+   * Uses /proc/self/mountinfo to find the source path on the host.
+   */
+  private resolveHostPath(containerPath: string): string {
+    try {
+      const mountinfo = readFileSync('/proc/self/mountinfo', 'utf8');
+      const lines = mountinfo.split('\n');
+      
+      for (const line of lines) {
+        // mountinfo format: ID parent major:minor root mountpoint options - type source opts
+        // We need to find the line where mountpoint matches our containerPath
+        const parts = line.split(' ');
+        if (parts.length < 10) continue;
+        
+        const mountpoint = parts[4];
+        if (mountpoint === containerPath) {
+          // Found the mount - extract the source info
+          const separatorIdx = parts.indexOf('-');
+          if (separatorIdx === -1) continue;
+          
+          const fsType = parts[separatorIdx + 1];
+          const root = parts[3]; // This is the path within the mounted filesystem
+          
+          // For tmpfs mounts (like /run/user/1000), the root shows the relative path
+          // e.g., root=/xauth_SRETBv means /run/user/1000/xauth_SRETBv on host
+          if (fsType === 'tmpfs') {
+            // Check if this is a /run/user mount
+            const match = line.match(/mode=700,uid=1000/);
+            if (match && root !== '/') {
+              // This is likely a file from /run/user/1000
+              const hostPath = `/run/user/1000${root}`;
+              logger.info(`  Resolved ${containerPath} → ${hostPath} (from tmpfs mount)`);
+              return hostPath;
+            }
+          }
+          
+          // For ext4/normal mounts, the root is relative to the device mount
+          // e.g., root=/home/ians/.Xauthority on ext4
+          if ((fsType === 'ext4' || fsType === 'btrfs' || fsType === 'xfs') && root !== '/') {
+            logger.info(`  Resolved ${containerPath} → ${root} (from ${fsType} mount)`);
+            return root;
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn(`  Could not read mountinfo: ${error}`);
+    }
+    
+    // Return original path if we can't resolve it
+    return containerPath;
+  }
+
+  /**
    * Get display forwarding configuration based on host environment
    * Supports X11 and Wayland display protocols
    * Prefers X11 when both are available (more compatible with games)
@@ -2815,6 +3029,7 @@ export class DockerService {
     devices: Array<{ PathOnHost: string; PathInContainer: string; CgroupPermissions: string }>;
     ipcMode?: string;
     securityOpt?: string[];
+    networkMode?: string;
   }> {
     const display = process.env.DISPLAY;
     const waylandDisplay = process.env.WAYLAND_DISPLAY;
@@ -2822,25 +3037,42 @@ export class DockerService {
     
     // Prefer X11 first (more compatible with legacy games and tools like xterm)
     if (display) {
-      const xauthority = process.env.XAUTHORITY || `${process.env.HOME}/.Xauthority`;
+      // Try multiple paths for Xauthority - devcontainer env may not match host
+      // We check paths we can see inside this container, then resolve to host paths
+      const xauthorityCandidates = [
+        process.env.XAUTHORITY,
+        `${process.env.HOME}/.Xauthority`,
+        '/home/ians/.Xauthority',  // Common host user path
+        '/home/node/.Xauthority',
+      ].filter(Boolean) as string[];
+      
       logger.info(`Using X11 display: ${display}`);
       
       // Check if Xauthority file exists AND is actually a file (not a directory)
       // Docker creates directories when mounting non-existent files, so we must verify
-      let xauthorityExists = false;
-      try {
-        const stat = statSync(xauthority);
-        xauthorityExists = stat.isFile() && stat.size > 0;
-      } catch {
-        // File doesn't exist
+      let xauthorityPath: string | null = null;
+      let xauthorityContainerPath: string | null = null; // The path we found inside this container
+      for (const candidate of xauthorityCandidates) {
+        try {
+          const stat = statSync(candidate);
+          if (stat.isFile() && stat.size > 0) {
+            xauthorityContainerPath = candidate;
+            // Resolve to host path - this is critical when running inside a container
+            // because Docker daemon needs the HOST path, not our container path
+            xauthorityPath = this.resolveHostPath(candidate);
+            break;
+          }
+        } catch {
+          // File doesn't exist, try next
+        }
       }
       
       const volumes = ['/tmp/.X11-unix:/tmp/.X11-unix:rw'];
-      if (xauthorityExists) {
-        volumes.push(`${xauthority}:/home/gameuser/.Xauthority:ro`);
-        logger.info(`  Xauthority: ${xauthority}`);
+      if (xauthorityPath) {
+        volumes.push(`${xauthorityPath}:/home/gameuser/.Xauthority:ro`);
+        logger.info(`  Xauthority: ${xauthorityContainerPath} → host: ${xauthorityPath}`);
       } else {
-        logger.warn(`  ⚠ No valid Xauthority file found at ${xauthority}, X11 may require xhost +local:docker`);
+        logger.warn(`  ⚠ No valid Xauthority file found, using host network mode for X11 auth`);
       }
       
       // Add PulseAudio socket for audio support
@@ -2861,8 +3093,10 @@ export class DockerService {
       }
       
       if (pulseSocketPath) {
-        volumes.push(`${pulseSocketPath}:/run/user/1000/pulse:rw`);
-        logger.info(`  ✓ PulseAudio socket available at ${pulseSocketPath}`);
+        // Resolve pulse socket path to host path
+        const hostPulseSocketPath = this.resolveHostPath(pulseSocketPath);
+        volumes.push(`${hostPulseSocketPath}:/run/user/1000/pulse:rw`);
+        logger.info(`  ✓ PulseAudio socket: ${pulseSocketPath} → host: ${hostPulseSocketPath}`);
         
         // Mount PulseAudio cookie if it exists
         const pulseCookiePaths = [
@@ -2871,8 +3105,10 @@ export class DockerService {
         ];
         for (const pulseCookie of pulseCookiePaths) {
           if (existsSync(pulseCookie)) {
-            volumes.push(`${pulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
-            logger.info(`  ✓ PulseAudio cookie available at ${pulseCookie}`);
+            // Resolve cookie path to host path
+            const hostPulseCookie = this.resolveHostPath(pulseCookie);
+            volumes.push(`${hostPulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
+            logger.info(`  ✓ PulseAudio cookie: ${pulseCookie} → host: ${hostPulseCookie}`);
             break;
           }
         }
@@ -2937,9 +3173,10 @@ export class DockerService {
       const audioSettings = await settingsService.getAudioSettings();
       const pulseSink = audioSettings.defaultSink || process.env.PULSE_SINK || '';
       
+      // If we have Xauthority, set it; otherwise empty triggers xhost-style auth
       const envVars = [
         `DISPLAY=${display}`,
-        'XAUTHORITY=',  // Disable Xauthority requirement
+        xauthorityPath ? `XAUTHORITY=/home/gameuser/.Xauthority` : 'XAUTHORITY=',
         'PULSE_SERVER=unix:/run/user/1000/pulse/native',
         'PULSE_COOKIE=/home/gameuser/.config/pulse/cookie',
       ];
@@ -2948,13 +3185,20 @@ export class DockerService {
         envVars.push(`PULSE_SINK=${pulseSink}`);
       }
       
+      // Always use host network mode for X11
+      // Modern display servers (Wayland with XWayland) use abstract sockets (@/tmp/.X11-unix/X0)
+      // which are in the network namespace, not accessible from containers without host network.
+      // The file socket (/tmp/.X11-unix/X0) is just a fallback that often doesn't work.
+      logger.info(`  Display mode: x11`);
+      
       return {
         mode: 'x11',
         env: envVars,
         volumes,
         devices,
         ipcMode: 'host', // Required for X11 shared memory
-        securityOpt: ['seccomp=unconfined'] // Some X11 apps need this
+        securityOpt: ['seccomp=unconfined'], // Some X11 apps need this
+        networkMode: 'host', // Required for abstract socket access (XWayland)
       };
     }
     

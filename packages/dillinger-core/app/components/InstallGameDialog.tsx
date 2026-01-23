@@ -30,6 +30,44 @@ interface WineVersion {
   version?: string;
 }
 
+interface LutrisInstallerInfo {
+  id: number;
+  slug: string;
+  version: string;
+  gameSlug?: string;
+  notes?: string;
+  script?: {
+    game?: { arch?: string; exe?: string };
+    wine?: { overrides?: Record<string, string> };
+    system?: { env?: Record<string, string> };
+    installer?: Array<{ task?: { name: string; app?: string } }>;
+  };
+}
+
+interface GameData {
+  id: string;
+  title: string;
+  slug?: string;
+  tags?: string[];
+  platforms?: Array<{
+    platformId: string;
+    lutrisInstaller?: LutrisInstallerInfo;
+    lutrisInstallers?: LutrisInstallerInfo[];
+    selectedLutrisInstallerId?: number;
+    installation?: {
+      status?: string;
+      installerPath?: string;
+      downloadCachePath?: string;
+    };
+  }>;
+}
+
+interface CachedInstaller {
+  filename: string;
+  path: string;
+  size: number;
+}
+
 interface InstallGameDialogProps {
   gameId: string;
   platformId: string;
@@ -51,7 +89,113 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
   const [availableVolumes, setAvailableVolumes] = useState<Volume[]>([]);
   const [selectedVolume, setSelectedVolume] = useState<string | null>(null);
   const [volumeDefaults, setVolumeDefaults] = useState<VolumeDefaults | null>(null);
+  
+  // Install mode selection (null = not chosen yet)
+  const [installMode, setInstallMode] = useState<'lutris' | 'standard' | null>(null);
+  
+  // Lutris-aware state
+  const [_gameData, setGameData] = useState<GameData | null>(null);
+  const [lutrisInstaller, setLutrisInstaller] = useState<LutrisInstallerInfo | null>(null);
+  const [lutrisInstallers, setLutrisInstallers] = useState<LutrisInstallerInfo[]>([]);
+  const [selectedLutrisInstallerId, setSelectedLutrisInstallerId] = useState<number | null>(null);
+  const [cachedInstallers, setCachedInstallers] = useState<CachedInstaller[]>([]);
+  const [downloadCachePath, setDownloadCachePath] = useState<string | null>(null);
+  const [loadingGameData, setLoadingGameData] = useState(true);
+  
   const isWinePlatform = platformId === 'windows-wine' || platformId.includes('wine');
+
+  // Extract Lutris script details for display
+  const getLutrisWinetricks = (): string[] => {
+    if (!lutrisInstaller?.script?.installer) return [];
+    const verbs: string[] = [];
+    for (const step of lutrisInstaller.script.installer) {
+      if (step.task?.name === 'winetricks' && step.task.app) {
+        verbs.push(...step.task.app.split(/\s+/));
+      }
+    }
+    return verbs;
+  };
+
+  const getLutrisDllOverrides = (): string[] => {
+    if (!lutrisInstaller?.script?.wine?.overrides) return [];
+    return Object.keys(lutrisInstaller.script.wine.overrides);
+  };
+
+  // Fetch game data and check for Lutris installer on mount
+  useEffect(() => {
+    const loadGameData = async () => {
+      setLoadingGameData(true);
+      try {
+        // Load game data
+        const gameResponse = await fetch(`/api/games/${gameId}`);
+        if (gameResponse.ok) {
+          const gameResult = await gameResponse.json();
+          if (gameResult.success && gameResult.data) {
+            setGameData(gameResult.data);
+            
+            // Check if this platform has Lutris installers configured
+            const platformConfig = gameResult.data.platforms?.find(
+              (p: any) => p.platformId === platformId
+            );
+            
+            // Handle both single (deprecated) and multiple installers
+            const installers: LutrisInstallerInfo[] = platformConfig?.lutrisInstallers || 
+              (platformConfig?.lutrisInstaller ? [platformConfig.lutrisInstaller] : []);
+            
+            if (installers.length > 0) {
+              setLutrisInstallers(installers);
+              
+              // Check if there's a pre-selected installer
+              const preselectedId = platformConfig?.selectedLutrisInstallerId;
+              if (preselectedId && installers.find(i => i.id === preselectedId)) {
+                setSelectedLutrisInstallerId(preselectedId);
+                const selected = installers.find(i => i.id === preselectedId);
+                if (selected) {
+                  setLutrisInstaller(selected);
+                  // Apply Lutris settings from selected installer
+                  if (selected.script?.game?.arch) {
+                    setWineArch(selected.script.game.arch as 'win32' | 'win64');
+                  }
+                }
+              } else if (installers.length === 1) {
+                // Auto-select if only one installer
+                setSelectedLutrisInstallerId(installers[0].id);
+                setLutrisInstaller(installers[0]);
+                if (installers[0].script?.game?.arch) {
+                  setWineArch(installers[0].script.game.arch as 'win32' | 'win64');
+                }
+              }
+            }
+            
+            // Store download cache path if available
+            if (platformConfig?.installation?.downloadCachePath) {
+              setDownloadCachePath(platformConfig.installation.downloadCachePath);
+            }
+            
+            // For GOG games, check the cache for installer files
+            if (gameResult.data.tags?.includes('gog')) {
+              const cacheResponse = await fetch(`/api/gog/cache/${gameId}/files`);
+              if (cacheResponse.ok) {
+                const cacheResult = await cacheResponse.json();
+                if (cacheResult.success && cacheResult.files?.length > 0) {
+                  setCachedInstallers(cacheResult.files);
+                  // Auto-select the first installer
+                  if (cacheResult.files.length === 1) {
+                    setInstallerPath(cacheResult.files[0].path);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load game data:', err);
+      } finally {
+        setLoadingGameData(false);
+      }
+    };
+    loadGameData();
+  }, [gameId, platformId]);
 
   // Fetch available volumes and defaults on mount
   useEffect(() => {
@@ -102,8 +246,13 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
     return volumeDefaults?.defaults[purpose] === volumeId;
   };
 
-  // Get the initial path for installer browser (uses 'installers' default volume)
+  // Get the initial path for installer browser (uses download cache path if available, else 'installers' default volume)
   const getInstallersBrowsePath = (): string | undefined => {
+    // First priority: use the download cache path from the game
+    if (downloadCachePath) {
+      return downloadCachePath;
+    }
+    // Fallback: use the installers default volume
     const installersVolumeId = volumeDefaults?.defaults.installers;
     if (installersVolumeId) {
       const volume = getVolumeById(installersVolumeId);
@@ -198,6 +347,20 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
   };
 
   const isConfirmStep = installerPath && installPath;
+  
+  // Determine if we need to show the install mode selection
+  // Only show if Lutris installers are available and mode hasn't been chosen
+  const hasLutrisInstallers = lutrisInstallers.length > 0;
+  const needsInstallModeSelection = hasLutrisInstallers && installMode === null && !loadingGameData;
+  
+  // Helper to get step description
+  const getStepDescription = () => {
+    if (loadingGameData) return 'Checking for Lutris installer and cached files...';
+    if (needsInstallModeSelection) return 'Step 1: Choose installation method';
+    if (!installerPath) return hasLutrisInstallers ? 'Step 2: Select the installer file' : 'Step 1: Select the installer file';
+    if (!installPath) return hasLutrisInstallers ? 'Step 3: Select installation directory' : 'Step 2: Select installation directory';
+    return hasLutrisInstallers ? 'Step 4: Confirm and start installation' : 'Step 3: Confirm and start installation';
+  };
 
   return (
     <>
@@ -205,11 +368,11 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
           {/* Header */}
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-2xl font-bold text-text">Install Game</h2>
+            <h2 className="text-2xl font-bold text-text">
+              {loadingGameData ? 'Loading...' : 'Install Game'}
+            </h2>
             <p className="text-sm text-muted mt-1">
-              {!installerPath && 'Step 1: Select the installer file'}
-              {installerPath && !installPath && 'Step 2: Select installation directory'}
-              {isConfirmStep && 'Step 3: Confirm and start installation'}
+              {getStepDescription()}
             </p>
           </div>
 
@@ -221,10 +384,243 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
               </div>
             )}
 
-            {!installerPath && (
+            {/* Install Mode Selection - first step when Lutris installers are available */}
+            {needsInstallModeSelection && (
+              <div className="space-y-4">
+                <p className="text-sm text-muted">
+                  This game has Lutris installer scripts available. Choose how you want to install:
+                </p>
+                
+                {/* Lutris Install Option */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInstallMode('lutris');
+                    // Auto-select single installer
+                    if (lutrisInstallers.length === 1) {
+                      setSelectedLutrisInstallerId(lutrisInstallers[0].id);
+                      setLutrisInstaller(lutrisInstallers[0]);
+                      if (lutrisInstallers[0].script?.game?.arch) {
+                        setWineArch(lutrisInstallers[0].script.game.arch as 'win32' | 'win64');
+                      }
+                    }
+                  }}
+                  className="w-full p-4 rounded-lg border-2 border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 hover:border-purple-400 dark:hover:border-purple-600 transition-colors text-left"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-3xl">🎮</span>
+                    <div className="flex-1">
+                      <div className="font-semibold text-purple-900 dark:text-purple-100">
+                        Use Lutris Installer Script
+                      </div>
+                      <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">
+                        Community-tested installation with automatic configuration (winetricks, DLL overrides, registry settings)
+                      </p>
+                      <div className="mt-2 text-xs text-purple-600 dark:text-purple-400">
+                        {lutrisInstallers.length} script{lutrisInstallers.length !== 1 ? 's' : ''} available
+                      </div>
+                    </div>
+                    <span className="text-purple-400">→</span>
+                  </div>
+                </button>
+
+                {/* Standard Install Option */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInstallMode('standard');
+                    // Clear any Lutris installer selection
+                    setLutrisInstaller(null);
+                    setSelectedLutrisInstallerId(null);
+                  }}
+                  className="w-full p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 hover:border-gray-400 dark:hover:border-gray-500 transition-colors text-left"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-3xl">📦</span>
+                    <div className="flex-1">
+                      <div className="font-semibold text-text">
+                        Standard Installation
+                      </div>
+                      <p className="text-sm text-muted mt-1">
+                        Run the installer manually without Lutris script configuration
+                      </p>
+                      <div className="mt-2 text-xs text-gray-500">
+                        Full control over the installation process
+                      </div>
+                    </div>
+                    <span className="text-gray-400">→</span>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* Lutris Installer Selection - show when Lutris mode selected and multiple installers available */}
+            {installMode === 'lutris' && lutrisInstallers.length > 1 && !installerPath && (
+              <div className="mb-4 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">🎮</span>
+                  <div>
+                    <h3 className="font-semibold text-purple-900 dark:text-purple-100">
+                      Select Lutris Installer
+                    </h3>
+                    <p className="text-xs text-purple-600 dark:text-purple-400">
+                      {lutrisInstallers.length} installers available - pick one to use
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {lutrisInstallers.map((installer) => {
+                    const isSelected = selectedLutrisInstallerId === installer.id;
+                    const winetricks = installer.script?.installer
+                      ?.filter((step: any) => step.task?.name === 'winetricks' && step.task.app)
+                      .map((step: any) => step.task.app.split(/\s+/))
+                      .flat() || [];
+
+                    return (
+                      <label
+                        key={installer.id}
+                        className={`block p-3 rounded border cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'border-purple-500 bg-purple-100 dark:bg-purple-800/30'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-purple-300 dark:hover:border-purple-600'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="radio"
+                            name="lutrisInstallerSelect"
+                            checked={isSelected}
+                            onChange={() => {
+                              setSelectedLutrisInstallerId(installer.id);
+                              setLutrisInstaller(installer);
+                              if (installer.script?.game?.arch) {
+                                setWineArch(installer.script.game.arch as 'win32' | 'win64');
+                              }
+                            }}
+                            className="mt-1 h-4 w-4 text-purple-600"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-text">{installer.version}</span>
+                              <span className="text-xs text-muted">({installer.slug})</span>
+                            </div>
+                            {installer.notes && (
+                              <p className="text-xs text-muted mt-1">{installer.notes}</p>
+                            )}
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {installer.script?.game?.arch && (
+                                <span className="text-xs px-2 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">
+                                  {installer.script.game.arch}
+                                </span>
+                              )}
+                              {winetricks.length > 0 && (
+                                <span className="text-xs px-2 py-0.5 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded">
+                                  winetricks
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Lutris Installer Banner - show when Lutris mode selected with single installer */}
+            {installMode === 'lutris' && lutrisInstaller && !installerPath && lutrisInstallers.length <= 1 && (
+              <div className="mb-4 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl">🎮</span>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-purple-900 dark:text-purple-100">
+                      Lutris Installer Configured
+                    </h3>
+                    <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">
+                      <strong>{lutrisInstaller.version}</strong> by {lutrisInstaller.slug}
+                    </p>
+                    {lutrisInstaller.notes && (
+                      <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 italic">
+                        {lutrisInstaller.notes}
+                      </p>
+                    )}
+                    
+                    {/* Show what the Lutris script will do */}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {getLutrisWinetricks().length > 0 && (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-purple-100 dark:bg-purple-800 text-purple-800 dark:text-purple-200">
+                          🧪 Winetricks: {getLutrisWinetricks().join(', ')}
+                        </span>
+                      )}
+                      {getLutrisDllOverrides().length > 0 && (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-purple-100 dark:bg-purple-800 text-purple-800 dark:text-purple-200">
+                          📦 DLL Overrides: {getLutrisDllOverrides().join(', ')}
+                        </span>
+                      )}
+                      {lutrisInstaller.script?.game?.arch && (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-purple-100 dark:bg-purple-800 text-purple-800 dark:text-purple-200">
+                          🖥️ {lutrisInstaller.script.game.arch === 'win32' ? '32-bit' : '64-bit'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Download Cache Path - show where GOG files are stored */}
+            {downloadCachePath && !installerPath && !needsInstallModeSelection && (
+              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-blue-800 dark:text-blue-200">
+                  <span>📁</span>
+                  <span>Downloaded files location:</span>
+                  <code className="text-xs bg-blue-100 dark:bg-blue-800 px-2 py-0.5 rounded">
+                    {downloadCachePath}
+                  </code>
+                </div>
+              </div>
+            )}
+
+            {/* Cached GOG Installers */}
+            {!installerPath && cachedInstallers.length > 0 && !needsInstallModeSelection && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-muted mb-2">
+                  📥 Downloaded Installers (from GOG)
+                </label>
+                <div className="space-y-2">
+                  {cachedInstallers.map((installer, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setInstallerPath(installer.path)}
+                      className="w-full text-left p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-medium">{installer.filename}</span>
+                          <span className="text-sm text-muted ml-2">
+                            ({(installer.size / (1024 * 1024)).toFixed(1)} MB)
+                          </span>
+                        </div>
+                        <span className="text-blue-600 dark:text-blue-400">Select →</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  These installers were downloaded from GOG and are ready to use.
+                </p>
+              </div>
+            )}
+
+            {!installerPath && !needsInstallModeSelection && (
               <div>
                 <p className="text-sm text-muted mb-4">
-                  Click the button below to browse for the game installer file (.exe, .msi, etc.)
+                  {cachedInstallers.length > 0 
+                    ? 'Or browse for a different installer file:'
+                    : 'Click the button below to browse for the game installer file (.exe, .msi, etc.)'
+                  }
                 </p>
                 <button
                   type="button"
@@ -352,6 +748,33 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
 
             {isConfirmStep && (
               <div className="space-y-4">
+                {/* Lutris Installer Summary in Confirmation */}
+                {lutrisInstaller && (
+                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">🎮</span>
+                      <h4 className="font-semibold text-purple-900 dark:text-purple-100">Lutris Configuration Active</h4>
+                    </div>
+                    <p className="text-sm text-purple-700 dark:text-purple-300 mb-2">
+                      Using <strong>{lutrisInstaller.version}</strong> installer script
+                    </p>
+                    <div className="text-xs text-purple-600 dark:text-purple-400 space-y-1">
+                      {getLutrisWinetricks().length > 0 && (
+                        <p>• Winetricks: {getLutrisWinetricks().join(', ')}</p>
+                      )}
+                      {getLutrisDllOverrides().length > 0 && (
+                        <p>• DLL Overrides: {getLutrisDllOverrides().join(', ')}</p>
+                      )}
+                      {lutrisInstaller.script?.game?.arch && (
+                        <p>• Architecture: {lutrisInstaller.script.game.arch}</p>
+                      )}
+                      {lutrisInstaller.script?.system?.env && Object.keys(lutrisInstaller.script.system.env).length > 0 && (
+                        <p>• Environment: {Object.keys(lutrisInstaller.script.system.env).join(', ')}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg space-y-3">
                   <div>
                     <label className="text-sm font-medium text-muted">Installer:</label>

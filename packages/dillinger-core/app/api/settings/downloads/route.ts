@@ -25,7 +25,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { maxConcurrent, defaultInstallVolume, defaultInstallPath } = body;
+    const { maxConcurrent, defaultInstallVolume, defaultInstallPath, installerCacheMode, installerCacheVolumeId } = body;
     
     const updates: Record<string, any> = {};
     
@@ -42,6 +42,14 @@ export async function PUT(request: NextRequest) {
     
     if (defaultInstallPath !== undefined) {
       updates.defaultInstallPath = defaultInstallPath;
+    }
+    
+    if (installerCacheMode !== undefined) {
+      updates.installerCacheMode = installerCacheMode;
+    }
+    
+    if (installerCacheVolumeId !== undefined) {
+      updates.installerCacheVolumeId = installerCacheVolumeId;
     }
     
     if (Object.keys(updates).length > 0) {

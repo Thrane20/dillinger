@@ -33,7 +33,15 @@ RUN pnpm run build
 
 FROM node:18-slim AS runner
 WORKDIR /app
+
+# Install gosu for dropping privileges and other runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm config set strict-ssl false && npm install -g pnpm@10.20.0 pm2 && npm config set strict-ssl true
+
+# Create app user with default uid/gid (will be updated at runtime via PUID/PGID)
 RUN groupadd --gid 1001 nodejs && useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home dillinger
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -55,7 +63,13 @@ COPY --from=deps --chown=dillinger:nodejs /app/packages/dillinger-core/node_modu
 RUN mkdir -p /data && chown -R dillinger:nodejs /data
 
 COPY --chown=dillinger:nodejs docker/dillinger-core/ecosystem.config.cjs ./
+COPY --chmod=755 docker/dillinger-core/entrypoint.sh /entrypoint.sh
 
+# Default PUID/PGID (override at runtime for your user)
+ENV PUID=1000
+ENV PGID=1000
+
+# Run as root initially - entrypoint will drop to PUID/PGID
 # USER dillinger
 EXPOSE 3010
 ENV NODE_ENV=production
@@ -64,4 +78,5 @@ ENV DILLINGER_ROOT=/data
 ENV FRONTEND_URL=http://localhost:3010
 ENV DOCKER_CONTAINER=true
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["pm2-runtime", "start", "ecosystem.config.cjs"]

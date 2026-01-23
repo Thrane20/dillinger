@@ -48,6 +48,9 @@ RUN set -e && \
     pacman-key --init && \
     pacman-key --populate archlinux && \
     \
+    echo "**** Update keyring package to get latest keys ****" && \
+    pacman -Sy --noconfirm archlinux-keyring && \
+    \
     echo "**** Initial system update (bootstrap reflector) ****" && \
     pacman -Sy --noconfirm && \
     \
@@ -83,7 +86,8 @@ RUN set -e && \
         psmisc \
         procps-ng \
         net-tools \
-        inetutils && \
+        inetutils \
+        zstd && \
     \
     echo "**** Install gosu for user switching ****" && \
     GOSU_VERSION=1.17 && \
@@ -141,20 +145,26 @@ echo "**** Install Mesa and Vulkan drivers ****"
 GPU_PKGS=(
     mesa \
     mesa-utils \
+    libglvnd \
     vulkan-icd-loader \
     vulkan-tools \
     vulkan-mesa-layers \
     libva-mesa-driver \
-    vulkan-radeon
+    vulkan-radeon \
+    vulkan-intel \
+    vulkan-swrast
 )
 
 # Optional 32-bit userspace (requires multilib). Skip if repo/package isn't available.
 OPTIONAL_32BIT_PKGS=(
     lib32-mesa \
+    lib32-libglvnd \
     lib32-vulkan-icd-loader \
     lib32-libva-mesa-driver \
     lib32-mesa-vdpau \
-    lib32-vulkan-radeon
+    lib32-vulkan-radeon \
+    lib32-vulkan-intel \
+    lib32-vulkan-mesa-layers
 )
 
 # Optional VDPAU support (package name has changed over time on Arch)

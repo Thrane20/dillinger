@@ -193,3 +193,27 @@ Built with:
 ---
 
 **Made with ❤️ for Linux gamers who want simplicity**
+
+
+ps: a conversation i had with my dev copilot...
+
+Would you like me to help set up TCP X11 forwarding as a workaround, or do you want to try rebuilding the devcontainer first?
+
+Restore Checkpoint
+i'll rebuild the devcontainer. bearing in mind YOU are running in the container so you may disappear for while. you good with that?
+
+Used 2 references
+Summarized conversation history
+
+Confirmed understanding and approved devcontainer rebuild.
+Absolutely! Go for it. 🚀
+
+Rebuilding the devcontainer is the right call - it should properly apply that X11 bind mount from the devcontainer.json config.
+
+When I'm back online after the rebuild, we can verify:
+
+mount | grep X11 shows a bind mount instead of tmpfs
+xdpyinfo can connect to display :0
+Then re-launch Commandos and see that beautiful 1998 tactical goodness on your screen
+See you on the other side! 👋
+

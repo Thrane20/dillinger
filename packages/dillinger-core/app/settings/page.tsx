@@ -69,16 +69,14 @@ export default function SettingsPage() {
   
   // Download settings
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
+  const [installerCacheMode, setInstallerCacheMode] = useState<'with_game' | 'custom_volume'>('with_game');
+  const [installerCacheVolumeId, setInstallerCacheVolumeId] = useState<string>('');
+  const [availableVolumes, setAvailableVolumes] = useState<Array<{ id: string; name: string; hostPath: string }>>([]);
   
   // Joystick settings
   const [joysticks, setJoysticks] = useState<Array<{ id: string; name: string; path: string }>>([]);
   const [joystickSettings, setJoystickSettings] = useState<Record<string, { deviceId: string; deviceName: string }>>({});
   const [selectedJoystickPlatform, setSelectedJoystickPlatform] = useState('arcade');
-
-  // Platform Config settings
-  const [platformConfigContent, setPlatformConfigContent] = useState('');
-  const [selectedConfigPlatform, setSelectedConfigPlatform] = useState('arcade');
-  const [configLoading, setConfigLoading] = useState(false);
 
   // Maintenance
   const [cleanupLoading, setCleanupLoading] = useState(false);
@@ -151,7 +149,6 @@ export default function SettingsPage() {
     loadDownloadSettings();
     loadJoystickSettings();
     loadAiSettings();
-    loadPlatformConfig('arcade');
   }, []);
 
   const loadSettings = async () => {
@@ -270,12 +267,22 @@ export default function SettingsPage() {
 
   const loadDownloadSettings = async () => {
     try {
+      // Load download settings
       const response = await fetch(`${API_BASE_URL}/api/settings/downloads`);
       if (!response.ok) {
         throw new Error('Failed to load download settings');
       }
       const data = await response.json();
       setMaxConcurrentDownloads(data.settings?.maxConcurrent || 2);
+      setInstallerCacheMode(data.settings?.installerCacheMode || 'with_game');
+      setInstallerCacheVolumeId(data.settings?.installerCacheVolumeId || '');
+      
+      // Load available volumes for the dropdown
+      const volumesResponse = await fetch(`${API_BASE_URL}/api/volumes`);
+      if (volumesResponse.ok) {
+        const volumesData = await volumesResponse.json();
+        setAvailableVolumes(volumesData.data || []);
+      }
     } catch (error) {
       console.error('Failed to load download settings:', error);
     }
@@ -393,6 +400,8 @@ export default function SettingsPage() {
         },
         body: JSON.stringify({ 
           maxConcurrent: maxConcurrentDownloads,
+          installerCacheMode,
+          installerCacheVolumeId: installerCacheMode === 'custom_volume' ? installerCacheVolumeId : undefined,
         }),
       });
 
@@ -571,73 +580,6 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: 'Failed to save joystick settings' });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const loadPlatformConfig = async (platformId: string) => {
-    try {
-      setConfigLoading(true);
-      const response = await fetch(`${API_BASE_URL}/api/settings/platforms/${platformId}/config`);
-      if (response.status === 404) {
-        setPlatformConfigContent(''); // No config yet
-        return;
-      }
-      if (!response.ok) {
-        throw new Error('Failed to load platform config');
-      }
-      const data = await response.json();
-      setPlatformConfigContent(data.content || '');
-    } catch (error) {
-      console.error('Failed to load platform config:', error);
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  const savePlatformConfig = async () => {
-    try {
-      setSaving(true);
-      setMessage(null);
-
-      const response = await fetch(`${API_BASE_URL}/api/settings/platforms/${selectedConfigPlatform}/config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: platformConfigContent
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save platform config');
-      }
-
-      showSaveIndicator('platforms', 'Platform config saved!');
-    } catch (error) {
-      console.error('Failed to save platform config:', error);
-      setMessage({ type: 'error', text: 'Failed to save platform config' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const launchRetroArchGui = async () => {
-    try {
-      setMessage(null);
-      const response = await fetch(`${API_BASE_URL}/api/settings/platforms/retroarch/launch-gui`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to launch RetroArch GUI');
-      }
-      
-      const data = await response.json();
-      setMessage({ type: 'success', text: `RetroArch GUI launched! Container ID: ${data.containerId.substring(0, 12)}` });
-    } catch (error) {
-      console.error('Failed to launch RetroArch GUI:', error);
-      setMessage({ type: 'error', text: 'Failed to launch RetroArch GUI' });
     }
   };
 
@@ -954,13 +896,7 @@ export default function SettingsPage() {
                 {['arcade', 'console', 'computer'].map((platform) => (
                   <button
                     key={platform}
-                    onClick={() => {
-                      setSelectedJoystickPlatform(platform);
-                      if (platform === 'arcade') {
-                          setSelectedConfigPlatform('arcade');
-                          loadPlatformConfig('arcade');
-                      }
-                    }}
+                    onClick={() => setSelectedJoystickPlatform(platform)}
                     className={`px-4 py-2 rounded-lg capitalize ${
                       selectedJoystickPlatform === platform
                         ? 'bg-blue-600 text-white'
@@ -1008,57 +944,6 @@ export default function SettingsPage() {
                 )}
               </div>
             </div>
-
-            {/* Config Section (only for supported platforms) */}
-            {selectedJoystickPlatform === 'arcade' && (
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                    <h3 className="text-lg font-medium mb-3">Platform Configuration (RetroArch)</h3>
-                    
-                    {/* Launch GUI Button */}
-                    <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-900">
-                        <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2">Interactive Configuration</h4>
-                        <p className="text-sm text-purple-800 dark:text-purple-200 mb-4">
-                            Launch the full RetroArch interface to configure input, video, and other settings interactively. 
-                            Changes saved in the GUI will be persisted to the master configuration.
-                        </p>
-                        <button 
-                            onClick={launchRetroArchGui}
-                            className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                            </svg>
-                            Launch RetroArch GUI
-                        </button>
-                    </div>
-
-                    {/* Config Editor */}
-                    <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
-                      <h4 className="font-medium mb-3">Master Configuration File (retroarch.cfg)</h4>
-                      
-                      {configLoading ? (
-                        <div className="text-center py-4">Loading configuration...</div>
-                      ) : (
-                        <div className="space-y-4">
-                          <textarea
-                            value={platformConfigContent}
-                            onChange={(e) => setPlatformConfigContent(e.target.value)}
-                            className="w-full h-96 px-4 py-2 font-mono text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="Configuration content..."
-                          />
-                          
-                          <button
-                            onClick={savePlatformConfig}
-                            disabled={saving}
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                          >
-                            {saving ? 'Saving...' : 'Save Master Configuration'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                </div>
-            )}
             </div>
           </div>
 
@@ -1178,9 +1063,84 @@ export default function SettingsPage() {
                 </p>
               </div>
 
+              {/* Installer Cache Location */}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <label className="block text-sm font-medium mb-2">
+                  Downloaded Installer Storage
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  Choose where to store downloaded game installers (GOG .exe files, etc.) after download completes.
+                </p>
+                
+                <div className="space-y-3">
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-300 dark:hover:border-blue-600 transition-colors">
+                    <input
+                      type="radio"
+                      name="installerCacheMode"
+                      value="with_game"
+                      checked={installerCacheMode === 'with_game'}
+                      onChange={() => setInstallerCacheMode('with_game')}
+                      className="mt-1 h-4 w-4 text-blue-600"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 dark:text-gray-100">Store with game data</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        Installers are stored in <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">dillinger_root/storage/games/&lt;game-id&gt;/installers/</code>
+                      </div>
+                      <div className="text-xs text-green-600 dark:text-green-400 mt-1">
+                        ✓ Recommended - Automatically found during installation
+                      </div>
+                    </div>
+                  </label>
+                  
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-300 dark:hover:border-blue-600 transition-colors">
+                    <input
+                      type="radio"
+                      name="installerCacheMode"
+                      value="custom_volume"
+                      checked={installerCacheMode === 'custom_volume'}
+                      onChange={() => setInstallerCacheMode('custom_volume')}
+                      className="mt-1 h-4 w-4 text-blue-600"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 dark:text-gray-100">Use a separate volume</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        Store installers in a dedicated volume (useful for keeping large files on a different drive)
+                      </div>
+                    </div>
+                  </label>
+                  
+                  {installerCacheMode === 'custom_volume' && (
+                    <div className="ml-7">
+                      <label htmlFor="installerCacheVolume" className="block text-sm font-medium mb-2">
+                        Select Volume
+                      </label>
+                      <select
+                        id="installerCacheVolume"
+                        value={installerCacheVolumeId}
+                        onChange={(e) => setInstallerCacheVolumeId(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="">-- Select a volume --</option>
+                        {availableVolumes.map((volume) => (
+                          <option key={volume.id} value={volume.id}>
+                            {volume.name} ({volume.hostPath})
+                          </option>
+                        ))}
+                      </select>
+                      {availableVolumes.length === 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          No volumes configured. Use the Volume Manager to add volumes first.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  💡 <strong>Tip:</strong> Default install locations, download directories, and ROM paths are now configured per-volume.
+                  💡 <strong>Tip:</strong> Default install locations for games are configured per-volume.
                   Use the Volume Manager in the left sidebar and click the pencil icon to configure a volume as the default for each purpose.
                 </p>
               </div>

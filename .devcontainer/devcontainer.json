@@ -22,6 +22,8 @@
     "--device=/dev/bus/usb"
   ],
   "mounts": [
+    "source=dillinger_root,target=/data,type=volume",
+    "source=dillinger_installers,target=/installers,type=volume",
     "source=dillinger-pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
@@ -29,11 +31,8 @@
     "source=${localEnv:HOME}/.Xauthority,target=/home/node/.Xauthority,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.config/pulse,target=/home/node/.config/pulse,type=bind"
   ],
-  "forwardPorts": [3010, 3002, 3003, 8080],
+  "forwardPorts": [8080],
   "portsAttributes": {
-    "3010": { "label": "Dillinger (Next.js)" },
-    "3002": { "label": "Runner API (legacy)" },
-    "3003": { "label": "Runner API" },
     "8080": { "label": "Streaming/WebRTC" }
   },
   "customizations": {
@@ -52,11 +51,15 @@
     }
   },
   "postCreateCommand": "pnpm install",
-  "postStartCommand": "sudo chown -R node:node /home/node/.local/share/pnpm/store && sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
+  "postStartCommand": "sudo chown -R $(id -u):$(id -g) /data /installers /home/node/.local/share/pnpm/store 2>/dev/null || true && sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
   "containerEnv": {
     "PNPM_HOME": "/home/node/.local/share/pnpm",
+    "DILLINGER_ROOT": "/data",
+    "PUID": "1000",
+    "PGID": "1000",
     "DISPLAY": "${localEnv:DISPLAY}",
     "XDG_RUNTIME_DIR": "/run/user/1000",
-    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}"
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "PULSE_SERVER": "unix:/run/user/1000/pulse/native"
   }
 }

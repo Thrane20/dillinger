@@ -1,14 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon, PlusIcon, TrashIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 import type { GamePlatformConfig } from '@dillinger/shared';
 import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
 import ContainerLogsDialog from './ContainerLogsDialog';
 import WineVersionSelector from './WineVersionSelector';
+import DxvkVersionSelector from './DxvkVersionSelector';
+import WineInstallationMonitorModal from './WineInstallationMonitorModal';
 import Link from 'next/link';
 
 interface GameFormData {
@@ -36,7 +38,10 @@ interface GameFormData {
       umuGameId?: string; // UMU Game ID for protonfixes
       arch?: 'win32' | 'win64';
       useDxvk?: boolean;
-      renderer?: 'vulkan' | 'opengl';
+      dxvkVersion?: string; // DXVK version ID (e.g., "dxvk-2.4")
+      useVkd3dProton?: boolean;
+      vkd3dVersion?: string;
+      renderer?: 'vulkan' | 'opengl' | 'gdi';
       compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10';
       dlls?: Record<string, string>;
       dllOverrides?: string; // WINEDLLOVERRIDES format (e.g., "quartz=disabled;wmvcore=disabled")
@@ -146,7 +151,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [showFileExplorer, setShowFileExplorer] = useState(false);
   const [showRomFileExplorer, setShowRomFileExplorer] = useState(false);
   const [showLogsDialog, setShowLogsDialog] = useState(false);
+  const [showWineMonitorModal, setShowWineMonitorModal] = useState(false);
   const [showAddPlatform, setShowAddPlatform] = useState(false);
+  
+  // Section navigation state for sidebar shortcuts
+  const [activeSection, setActiveSection] = useState<string>('basic');
+  const [installConfigCollapsed, setInstallConfigCollapsed] = useState(false);
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  
   const [formData, setFormData] = useState<GameFormData>({
     title: '',
     slug: '',
@@ -189,6 +201,61 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   // Convenience accessors for the currently selected platform config
   const activePlatformConfig = formData.platforms.find(p => p.platformId === formData.platformId);
   const activeInstallation = activePlatformConfig?.installation || formData._originalGame?.installation;
+  const activeLutrisInstallers = activePlatformConfig?.lutrisInstallers || [];
+
+  // Section definitions for sidebar navigation (Wine games only)
+  const WINE_SECTIONS = [
+    { id: 'basic', label: 'Basic Information', icon: '📋' },
+    { id: 'install', label: 'Installation', icon: '📦' },
+    { id: 'rendering', label: 'Rendering', icon: '🎨' },
+    { id: 'wine-advanced', label: 'Wine Advanced', icon: '🍷' },
+    { id: 'game-info', label: 'Game Information', icon: '📖' },
+  ];
+  
+  // Other platforms use simpler sections
+  const DEFAULT_SECTIONS = [
+    { id: 'basic', label: 'Basic Information', icon: '📋' },
+    { id: 'install', label: 'Configuration', icon: '⚙️' },
+    { id: 'game-info', label: 'Game Information', icon: '📖' },
+  ];
+  
+  const sections = formData.platformId === 'windows-wine' ? WINE_SECTIONS : DEFAULT_SECTIONS;
+  
+  // Scroll to section function
+  const scrollToSection = (sectionId: string) => {
+    const element = sectionRefs.current[sectionId];
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveSection(sectionId);
+    }
+  };
+  
+  // IntersectionObserver to track active section based on scroll position
+  useEffect(() => {
+    const observers: IntersectionObserver[] = [];
+    
+    sections.forEach(section => {
+      const element = sectionRefs.current[section.id];
+      if (element) {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting) {
+                setActiveSection(section.id);
+              }
+            });
+          },
+          { threshold: 0.3, rootMargin: '-100px 0px -60% 0px' }
+        );
+        observer.observe(element);
+        observers.push(observer);
+      }
+    });
+    
+    return () => {
+      observers.forEach(observer => observer.disconnect());
+    };
+  }, [sections, formData.platformId]);
 
   // Display paths as-is since they are now direct host paths on configured volumes
   const formatInstalledPathForDisplay = (p: string) => p;
@@ -219,6 +286,17 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     };
     loadVolumeDefaults();
   }, []);
+
+  // Auto-open Wine Installation Monitor when installation is in progress
+  useEffect(() => {
+    if (
+      formData.platformId === 'windows-wine' &&
+      activeInstallation?.status === 'installing' &&
+      gameId
+    ) {
+      setShowWineMonitorModal(true);
+    }
+  }, [activeInstallation?.status, formData.platformId, gameId]);
 
   // Load game data if in edit mode
   useEffect(() => {
@@ -1001,40 +1079,70 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-6xl mx-auto space-y-6">
-      <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-text">
-            {mode === 'edit' ? 'Edit Game' : 'Add New Game'}
-          </h2>
-          
-          {/* Refresh from Scraper Button */}
-          {mode === 'edit' && formData._originalGame?.metadata?.igdbId && (
-            <button
-              type="button"
-              onClick={handleRefreshFromScraper}
-              disabled={isRefreshing}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              {isRefreshing ? 'Refreshing...' : 'Refresh from Scraper'}
-            </button>
+    <form onSubmit={handleSubmit} className="max-w-7xl mx-auto">
+      <div className="bg-white dark:bg-gray-800 shadow rounded-lg">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-text">
+              {mode === 'edit' ? 'Edit Game' : 'Add New Game'}
+            </h2>
+            
+            {/* Refresh from Scraper Button */}
+            {mode === 'edit' && formData._originalGame?.metadata?.igdbId && (
+              <button
+                type="button"
+                onClick={handleRefreshFromScraper}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {isRefreshing ? 'Refreshing...' : 'Refresh from Scraper'}
+              </button>
+            )}
+          </div>
+
+          {error && (
+            <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md">
+              <p className="text-red-800 dark:text-red-200 text-sm">{error}</p>
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-md">
+              <p className="text-green-800 dark:text-green-200 text-sm">{successMessage}</p>
+            </div>
           )}
         </div>
 
-        {error && (
-          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md">
-            <p className="text-red-800 dark:text-red-200 text-sm">{error}</p>
-          </div>
-        )}
+        {/* Main content with sidebar */}
+        <div className="flex">
+          {/* Sidebar Navigation */}
+          <nav className="w-56 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 p-4 sticky top-0 self-start max-h-screen overflow-y-auto hidden lg:block">
+            <ul className="space-y-1">
+              {sections.map((section) => (
+                <li key={section.id}>
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection(section.id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                      activeSection === section.id
+                        ? 'bg-blue-600 text-white'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-text'
+                    }`}
+                  >
+                    <span>{section.icon}</span>
+                    <span className="text-sm">{section.label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
 
-        {successMessage && (
-          <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-md">
-            <p className="text-green-800 dark:text-green-200 text-sm">{successMessage}</p>
-          </div>
-        )}
+          {/* Main Content Area */}
+          <div className="flex-1 p-6 overflow-y-auto">
 
         {/* Info about preserved scraper data */}
         {mode === 'edit' && formData._originalGame?.metadata?.similarGames && (
@@ -1054,7 +1162,11 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         )}
 
         {/* Basic Information */}
-        <div className="space-y-4 mb-6">
+        <div 
+          id="basic"
+          ref={(el) => { sectionRefs.current['basic'] = el; }}
+          className="space-y-4 mb-6"
+        >
           <h3 className="text-lg font-semibold text-text border-b pb-2">Basic Information</h3>
           
           {/* Title */}
@@ -1217,6 +1329,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               )}
             </div>
           </div>
+        </div>{/* End Basic Information section */}
 
           {/* Rom File Selection - Show for emulator platforms */}
           {['nes', 'snes', 'c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
@@ -1258,8 +1371,50 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
 
           {/* Launch Settings - Hide for emulator platforms that use ROMs */}
           {!['nes', 'snes', 'c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
-            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">Launch Configuration</h3>
+            <div 
+              id="install"
+              ref={(el) => { sectionRefs.current['install'] = el; }}
+              className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
+            >
+              {/* Section Header - Collapsible when installed */}
+              <button
+                type="button"
+                onClick={() => activeInstallation?.status === 'installed' && setInstallConfigCollapsed(!installConfigCollapsed)}
+                className="w-full flex items-center justify-between text-lg font-semibold text-text border-b pb-2"
+              >
+                <div className="flex items-center gap-3">
+                  <span>Install Configuration</span>
+                  {activeInstallation?.status === 'installed' && (
+                    <span className="px-2 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full">
+                      ✓ Installed
+                    </span>
+                  )}
+                </div>
+                {activeInstallation?.status === 'installed' && (
+                  installConfigCollapsed ? (
+                    <ChevronDownIcon className="w-5 h-5 text-gray-500" />
+                  ) : (
+                    <ChevronUpIcon className="w-5 h-5 text-gray-500" />
+                  )
+                )}
+              </button>
+
+              {/* Collapsible content */}
+              {(!installConfigCollapsed || activeInstallation?.status !== 'installed') && (
+                <div className="space-y-4">
+
+              {/* Lutris Installer Badge - simplified indicator */}
+              {formData.platformId === 'windows-wine' && activeLutrisInstallers.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
+                  <span className="text-lg">🎮</span>
+                  <span className="text-sm font-medium text-purple-700 dark:text-purple-300">
+                    {activeLutrisInstallers.length} Lutris Installer{activeLutrisInstallers.length !== 1 ? 's' : ''} attached
+                  </span>
+                  <span className="text-xs text-purple-500 dark:text-purple-400">
+                    — available when you install
+                  </span>
+                </div>
+              )}
 
               {/* Wine Version Selection - only show for Wine platform */}
               {formData.platformId === 'windows-wine' && (
@@ -1306,18 +1461,47 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   </div>
 
                   {activeInstallation?.status === 'installing' && (
-                    <div className="space-y-2">
-                      <div className="text-sm text-yellow-700 dark:text-yellow-300">
-                        Installation is running. When you finish the installer, come back here — we'll auto-detect executables and shortcuts.
+                    <div className="space-y-3">
+                      <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl animate-pulse">🍷</span>
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-purple-900 dark:text-purple-100">
+                              Wine Installation Running
+                            </div>
+                            <div className="text-xs text-purple-700 dark:text-purple-300 mt-0.5">
+                              Complete the installer in the Wine desktop, then come back here.
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleCancelInstallation}
-                        className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                        title="Stop the installation container and reset to not installed"
-                      >
-                        Cancel Installation
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowWineMonitorModal(true)}
+                          className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors flex items-center gap-2"
+                          title="Open installation monitor with live logs"
+                        >
+                          <span>🧘</span>
+                          Open Monitor
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowLogsDialog(true)}
+                          className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 text-text rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                          title="View raw container logs"
+                        >
+                          View Logs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelInstallation}
+                          className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                          title="Stop the installation container and reset to not installed"
+                        >
+                          Cancel Installation
+                        </button>
+                      </div>
                     </div>
                   )}
                   {activeInstallation?.status === 'failed' && (
@@ -1410,27 +1594,102 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   )}
                 </div>
               </div>
+              </div>
+              )}{/* End collapsible content */}
+            </div>
+          )}{/* End Install Configuration section */}
 
-              {/* Display Options - only show for Wine platform */}
-              {formData.platformId === 'windows-wine' && (
-                <>
+          {/* Rendering Section - Only show for Wine games when installed */}
+          {formData.platformId === 'windows-wine' && activeInstallation?.status === 'installed' && (
+            <div 
+              id="rendering"
+              ref={(el) => { sectionRefs.current['rendering'] = el; }}
+              className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
+            >
+              <h3 className="text-lg font-semibold text-text border-b pb-2">Rendering</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Configure graphics rendering for DirectX translation and display options.
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="settings.wine.renderer" className="block text-sm font-medium text-muted mb-2">
-                      Renderer
+                      WineD3D Renderer
                     </label>
                     <select
                       id="settings.wine.renderer"
                       name="settings.wine.renderer"
-                      value={formData.settings?.wine?.renderer || 'vulkan'}
+                      value={formData.settings?.wine?.renderer || 'opengl'}
                       onChange={handleChange}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
                     >
-                      <option value="vulkan">Vulkan (DXVK)</option>
-                      <option value="opengl">OpenGL (WineD3D)</option>
+                      <option value="opengl">OpenGL — Most Compatible</option>
+                      <option value="vulkan">Vulkan — Experimental (WineD3D)</option>
+                      <option value="gdi">GDI — Software/2D Games Only</option>
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
-                      Vulkan is faster when supported; OpenGL can help if Vulkan init fails.
+                      This sets how WineD3D translates DirectDraw/D3D calls. OpenGL is recommended for most games.
+                      For DX9-11 games with DXVK enabled, this setting is bypassed.
                     </p>
+                  </div>
+
+                  {/* DXVK / VKD3D-Proton Settings */}
+                  <div className="col-span-2">
+                    <DxvkVersionSelector
+                      enabled={formData.settings?.wine?.useDxvk || false}
+                      versionId={formData.settings?.wine?.dxvkVersion}
+                      onEnabledChange={(enabled) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          settings: {
+                            ...prev.settings,
+                            wine: {
+                              ...prev.settings?.wine,
+                              useDxvk: enabled,
+                            },
+                          },
+                        }));
+                      }}
+                      onVersionChange={(versionId) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          settings: {
+                            ...prev.settings,
+                            wine: {
+                              ...prev.settings?.wine,
+                              dxvkVersion: versionId,
+                            },
+                          },
+                        }));
+                      }}
+                      showVkd3d={true}
+                      vkd3dEnabled={formData.settings?.wine?.useVkd3dProton || false}
+                      vkd3dVersionId={formData.settings?.wine?.vkd3dVersion}
+                      onVkd3dEnabledChange={(enabled) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          settings: {
+                            ...prev.settings,
+                            wine: {
+                              ...prev.settings?.wine,
+                              useVkd3dProton: enabled,
+                            },
+                          },
+                        }));
+                      }}
+                      onVkd3dVersionChange={(versionId) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          settings: {
+                            ...prev.settings,
+                            wine: {
+                              ...prev.settings?.wine,
+                              vkd3dVersion: versionId,
+                            },
+                          },
+                        }));
+                      }}
+                    />
                   </div>
 
                   <div className="col-span-2">
@@ -1459,7 +1718,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                               className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
                             />
                             <span className="text-sm font-medium text-muted">
-                              Launch in fullscreen (Wine virtual desktop)
+                              Wine virtual desktop
                             </span>
                           </label>
                           {isProton ? (
@@ -1468,7 +1727,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                             </p>
                           ) : (
                             <p className="text-xs text-gray-500 mt-1 ml-6">
-                              Creates a virtual desktop for better window management and fullscreen support
+                              Creates a desktop window containing the game. Note: Old games run at their native resolution
+                              inside this window. For true fullscreen with upscaling, use <strong>Gamescope</strong> below.
                             </p>
                           )}
                         </>
@@ -1551,13 +1811,18 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                       </p>
                     </div>
                   )}
-                </>
-              )}
+              </div>{/* End grid */}
+            </div>
+          )}{/* End Rendering section */}
 
-              {/* Wine Advanced Settings - DLL Overrides, Winetricks, Registry */}
-              {formData.platformId === 'windows-wine' && (
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
-                  <h4 className="text-sm font-medium text-text mb-3">Wine Advanced Configuration</h4>
+          {/* Wine Advanced Settings - DLL Overrides, Winetricks, Registry */}
+          {formData.platformId === 'windows-wine' && (
+            <div 
+              id="wine-advanced"
+              ref={(el) => { sectionRefs.current['wine-advanced'] = el; }}
+              className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
+            >
+              <h3 className="text-lg font-semibold text-text border-b pb-2">Wine Advanced Configuration</h3>
                   
                   {/* DLL Overrides */}
                   <div className="mb-4">
@@ -1805,36 +2070,44 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                       Set Windows registry values before launching. Useful for game-specific settings like disabling intro videos.
                     </p>
                   </div>
-                </div>
-              )}
+            </div>
+          )}{/* End Wine Advanced section */}
 
-              {/* Gamescope Compositor */}
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <input
-                    type="checkbox"
-                    id="settings.gamescope.enabled"
-                    checked={formData.settings?.gamescope?.enabled || false}
-                    onChange={(e) => {
-                      setFormData({
-                        ...formData,
-                        settings: {
-                          ...formData.settings,
-                          gamescope: {
-                            ...formData.settings?.gamescope,
-                            enabled: e.target.checked,
-                          },
+          {/* Gamescope Compositor - Part of Rendering but always visible */}
+          {formData.platformId === 'windows-wine' && (
+            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+              <h3 className="text-lg font-semibold text-text border-b pb-2">Display Compositor</h3>
+              
+              {/* Gamescope toggle */}
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="checkbox"
+                  id="settings.gamescope.enabled"
+                  checked={formData.settings?.gamescope?.enabled || false}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...formData.settings,
+                        gamescope: {
+                          ...formData.settings?.gamescope,
+                          enabled: e.target.checked,
                         },
-                      });
-                    }}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                  />
+                      },
+                    });
+                  }}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                />
                   <label htmlFor="settings.gamescope.enabled" className="text-sm font-medium text-text">
-                    Use Gamescope compositor (advanced)
+                    Use Gamescope compositor
                   </label>
+                  <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded">
+                    Recommended for old games
+                  </span>
                 </div>
                 <p className="text-xs text-gray-500 mb-3">
-                  Gamescope is a micro-compositor that provides better control over game rendering, upscaling, and frame limiting
+                  Gamescope provides true fullscreen, upscaling (FSR/NIS), and proper resolution handling for old games.
+                  Set the game&apos;s native resolution below and Gamescope will upscale it to fill your display.
                 </p>
 
                 {formData.settings?.gamescope?.enabled && (
@@ -2055,7 +2328,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     </div>
                   </div>
                 )}
-              </div>
 
               {/* MangoHUD Performance Overlay */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
@@ -2087,10 +2359,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 </p>
               </div>
             </div>
-          )}
+          )}{/* End Display Compositor section */}
 
-          {/* Metadata Section */}
-          <div className="space-y-4 mb-6">
+          {/* Game Information Section */}
+          <div 
+            id="game-info"
+            ref={(el) => { sectionRefs.current['game-info'] = el; }}
+            className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
+          >
             <h3 className="text-lg font-semibold text-text border-b pb-2">Game Information</h3>
 
             {/* Description */}
@@ -2476,7 +2752,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               Cancel
             </button>
           </div>
-        </div>
+          </div>{/* End Main Content Area */}
+        </div>{/* End flex container */}
 
         {/* Installation Dialog */}
         {showInstallDialog && gameId && formData.platformId && (
@@ -2533,6 +2810,19 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           <ContainerLogsDialog
             gameId={gameId}
             onClose={() => setShowLogsDialog(false)}
+          />
+        )}
+
+        {/* Wine Installation Monitor Modal */}
+        {showWineMonitorModal && gameId && formData.platformId === 'windows-wine' && (
+          <WineInstallationMonitorModal
+            gameId={gameId}
+            gameTitle={formData.title || 'Unknown Game'}
+            onClose={() => setShowWineMonitorModal(false)}
+            onCancel={() => {
+              handleCancelInstallation();
+              setShowWineMonitorModal(false);
+            }}
           />
         )}
       </div>

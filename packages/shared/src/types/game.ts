@@ -81,8 +81,11 @@ export interface GamePlatformConfig {
       prefix?: string; // Wine prefix configuration
       dlls?: Record<string, string>; // DLL overrides (e.g., {"ddraw": "native", "d3d9": "native,builtin"})
       arch?: 'win32' | 'win64'; // Wine architecture (WINEARCH)
-      useDxvk?: boolean; // Install DXVK (DirectX to Vulkan translation layer) for better performance and MangoHUD compatibility
-      renderer?: 'vulkan' | 'opengl'; // Direct3D renderer selection
+      useDxvk?: boolean; // Enable DXVK (DirectX 9/10/11 to Vulkan translation layer)
+      dxvkVersion?: string; // DXVK version ID (e.g., "dxvk-2.4", "dxvk-2.3"), null = use winetricks default
+      useVkd3dProton?: boolean; // Enable VKD3D-Proton for DirectX 12 support
+      vkd3dVersion?: string; // VKD3D-Proton version ID
+      renderer?: 'vulkan' | 'opengl' | 'gdi'; // WineD3D renderer: opengl (most compatible), vulkan (experimental), gdi (software/2D games)
       compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10'; // Windows compatibility mode preset
       dllOverrides?: string; // WINEDLLOVERRIDES format (e.g., "quartz=disabled;wmvcore=disabled")
       winetricks?: string[]; // Winetricks verbs to run before game launch (e.g., ["vcrun2019", "dxvk"])
@@ -156,13 +159,37 @@ export interface GamePlatformConfig {
     status?: 'not_installed' | 'installing' | 'installed' | 'failed'; // Installation state
     installPath?: string; // Path where game is installed
     installerPath?: string; // Path to installer file (exe, msi, etc.)
+    downloadCachePath?: string; // Path to the download cache folder (where GOG downloads are stored)
     installedAt?: string; // ISO timestamp when installation completed
-    installMethod?: 'manual' | 'automated'; // How the game was installed
+    installMethod?: 'manual' | 'automated' | 'lutris'; // How the game was installed
     containerId?: string; // Active installation container ID
     error?: string; // Error message if installation failed
     wineVersionId?: string; // Wine version used for installation (e.g., 'system', 'ge-proton-10-27')
     wineArch?: 'win32' | 'win64'; // Wine architecture used for installation (win32 for 32-bit games)
   };
+  /** @deprecated Use lutrisInstallers array instead */
+  lutrisInstaller?: {
+    id: number; // Lutris installer ID
+    slug: string; // Lutris installer slug (e.g., "spelunky-gog")
+    version: string; // Installer version (e.g., "GOG", "GOG Classic")
+    gameSlug: string; // Lutris game slug
+    script: Record<string, unknown>; // The Lutris script (preserved for reinstall/reference)
+    fetchedAt: string; // ISO timestamp when installer was fetched
+    notes?: string; // Installer notes from Lutris
+  };
+  /** Multiple Lutris installers - user selects which to use at install time */
+  lutrisInstallers?: Array<{
+    id: number; // Lutris installer ID
+    slug: string; // Lutris installer slug (e.g., "spelunky-gog")
+    version: string; // Installer version (e.g., "GOG", "GOG Classic")
+    gameSlug: string; // Lutris game slug
+    script: Record<string, unknown>; // The Lutris script (preserved for reinstall/reference)
+    fetchedAt: string; // ISO timestamp when installer was fetched
+    notes?: string; // Installer notes from Lutris
+    user?: string; // Lutris user who created the installer
+  }>;
+  /** ID of the selected Lutris installer from lutrisInstallers array */
+  selectedLutrisInstallerId?: number;
 }
 
 export interface Game extends VersionedData {
