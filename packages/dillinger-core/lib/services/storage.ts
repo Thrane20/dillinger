@@ -30,6 +30,81 @@ export class JSONStorageService {
   private static instance: JSONStorageService;
   private loggedErrors = new Set<string>(); // Track logged errors to avoid spam
 
+  private getSessionsRoot(): string {
+    return path.join(DATA_PATH, 'sessions');
+  }
+
+  private async writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
+    const dir = path.dirname(filePath);
+    await fs.ensureDir(dir);
+    const tempPath = `${filePath}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await fs.writeJson(tempPath, data, { spaces: 2 });
+    await fs.move(tempPath, filePath, { overwrite: true });
+  }
+
+  private async getEntityFilePath(type: string, id: string, data?: Record<string, unknown>): Promise<string> {
+    if (type !== 'sessions') {
+      return path.join(DATA_PATH, type, `${id}.json`);
+    }
+
+    const sessionsRoot = this.getSessionsRoot();
+    const gameId = typeof data?.gameId === 'string' ? data.gameId : null;
+    if (gameId) {
+      return path.join(sessionsRoot, gameId, `${id}.json`);
+    }
+
+    return path.join(sessionsRoot, `${id}.json`);
+  }
+
+  private async findEntityFilePath(type: string, id: string): Promise<string | null> {
+    if (type !== 'sessions') {
+      return path.join(DATA_PATH, type, `${id}.json`);
+    }
+
+    const sessionsRoot = this.getSessionsRoot();
+    const legacyPath = path.join(sessionsRoot, `${id}.json`);
+    if (await fs.pathExists(legacyPath)) {
+      return legacyPath;
+    }
+
+    const entries = await fs.readdir(sessionsRoot, { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(sessionsRoot, entry.name, `${id}.json`);
+      if (await fs.pathExists(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  private async listEntityFiles(type: string, dirPath: string): Promise<string[]> {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    const files: string[] = [];
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (type === 'sessions') {
+          const subdir = path.join(dirPath, entry.name);
+          const subEntries = await fs.readdir(subdir);
+          subEntries.forEach((file) => {
+            if (file.endsWith('.json') && file !== 'index.json') {
+              files.push(path.join(entry.name, file));
+            }
+          });
+        }
+        continue;
+      }
+
+      if (entry.isFile() && entry.name.endsWith('.json') && entry.name !== 'index.json') {
+        files.push(entry.name);
+      }
+    }
+
+    return files;
+  }
+
   static getInstance(): JSONStorageService {
     if (!JSONStorageService.instance) {
       JSONStorageService.instance = new JSONStorageService();
@@ -77,12 +152,16 @@ export class JSONStorageService {
    * Automatically adds schema version to the data
    */
   async writeEntity<T>(type: string, id: string, data: T): Promise<void> {
-    const filePath = path.join(DATA_PATH, type, `${id}.json`);
+    const filePath = await this.getEntityFilePath(type, id, data as Record<string, unknown> | undefined);
     
     // Ensure data has schema version
     const versionedData = serializeVersionedData(data as Partial<VersionedData>);
-    
-    await fs.writeJson(filePath, versionedData, { spaces: 2 });
+
+    if (type === 'sessions') {
+      await this.writeJsonAtomic(filePath, versionedData);
+    } else {
+      await fs.writeJson(filePath, versionedData, { spaces: 2 });
+    }
     await this.updateIndex(type);
   }
 
@@ -91,7 +170,10 @@ export class JSONStorageService {
    * Automatically validates and normalizes schema version
    */
   async readEntity<T extends VersionedData>(type: string, id: string): Promise<T | null> {
-    const filePath = path.join(DATA_PATH, type, `${id}.json`);
+    const filePath = await this.findEntityFilePath(type, id);
+    if (!filePath) {
+      return null;
+    }
     try {
       const rawData = await fs.readJson(filePath);
       
@@ -121,7 +203,10 @@ export class JSONStorageService {
    * Delete an entity JSON file
    */
   async deleteEntity(type: string, id: string): Promise<boolean> {
-    const filePath = path.join(DATA_PATH, type, `${id}.json`);
+    const filePath = await this.findEntityFilePath(type, id);
+    if (!filePath) {
+      return false;
+    }
     try {
       await fs.remove(filePath);
       await this.updateIndex(type);
@@ -141,10 +226,7 @@ export class JSONStorageService {
   async listEntities<T extends VersionedData>(type: string): Promise<T[]> {
     const dirPath = path.join(DATA_PATH, type);
     try {
-      const files = await fs.readdir(dirPath);
-      const jsonFiles = files.filter(
-        (file) => file.endsWith('.json') && file !== 'index.json'
-      );
+      const jsonFiles = await this.listEntityFiles(type, dirPath);
 
       const entities: T[] = [];
       

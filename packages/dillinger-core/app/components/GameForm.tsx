@@ -125,6 +125,23 @@ interface Screenshot {
   modifiedTimestamp: number;
 }
 
+interface SaveFile {
+  filename: string;
+  type: 'sram' | 'state';
+  size: number;
+  modified: string;
+  modifiedTimestamp: number;
+  slot?: number;
+}
+
+// RetroArch-based platforms that support saves
+const RETROARCH_PLATFORMS = ['nes', 'snes', 'psx', 'mame'];
+const ROM_PLATFORMS = [
+  ...RETROARCH_PLATFORMS,
+  'c64', 'c128', 'vic20', 'plus4', 'pet',
+  'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32',
+];
+
 export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -145,6 +162,8 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   };
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
+  const [currentScreenshotIndex, setCurrentScreenshotIndex] = useState(0);
+  const [saveFiles, setSaveFiles] = useState<{ sram: SaveFile[]; states: SaveFile[] }>({ sram: [], states: [] });
   const [showImageSelector, setShowImageSelector] = useState<'primary' | 'backdrop' | null>(null);
   const [showInstallDialog, setShowInstallDialog] = useState(false);
   const [showShortcutDialog, setShowShortcutDialog] = useState(false);
@@ -526,6 +545,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     if (gameId && mode === 'edit') {
       loadAvailableImages(gameId);
       loadScreenshots(gameId);
+      loadSaves(gameId);
     }
   }, [gameId, mode]);
 
@@ -563,11 +583,61 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         const result = await response.json();
         if (result.success && result.data.screenshots) {
           setScreenshots(result.data.screenshots);
+          setCurrentScreenshotIndex(0);
         }
       }
     } catch (err) {
       console.error('Failed to load screenshots:', err);
     }
+  };
+
+  const loadSaves = async (id: string) => {
+    try {
+      const response = await fetch(`/api/games/${id}/saves`);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          setSaveFiles({
+            sram: result.data.sram || [],
+            states: result.data.states || [],
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load saves:', err);
+    }
+  };
+
+  const deleteSave = async (filename: string, type: 'sram' | 'state') => {
+    if (!gameId) return;
+    
+    if (!confirm(`Are you sure you want to delete "${filename}"? This cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(
+        `/api/games/${gameId}/saves?filename=${encodeURIComponent(filename)}&type=${type}`,
+        { method: 'DELETE' }
+      );
+      
+      if (response.ok) {
+        // Reload saves after deletion
+        await loadSaves(gameId);
+      } else {
+        const result = await response.json();
+        alert(`Failed to delete: ${result.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Failed to delete save:', err);
+      alert('Failed to delete save file');
+    }
+  };
+
+  const downloadSave = (filename: string, type: 'sram' | 'state') => {
+    if (!gameId) return;
+    const url = `/api/games/${gameId}/saves/${encodeURIComponent(filename)}?type=${type}`;
+    window.open(url, '_blank');
   };
 
   const formatRelativeTime = (isoDate: string): string => {
@@ -1060,6 +1130,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       'scummvm': 'ScummVM',
       'nes': 'Nintendo (NES)',
       'snes': 'Super Nintendo (SNES)',
+      'psx': 'PlayStation 1',
       'c64': 'Commodore 64',
       'c128': 'Commodore 128',
       'vic20': 'VIC-20',
@@ -1293,6 +1364,15 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                           Super Nintendo (SNES)
                         </button>
                         <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Sony</p>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPlatform('psx')}
+                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          PlayStation 1
+                        </button>
+                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
                         <p className="px-3 py-1 text-xs font-semibold text-gray-500">Commodore</p>
                         {['c64', 'c128', 'vic20', 'plus4', 'pet'].map(id => (
                           <button
@@ -1331,90 +1411,164 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           </div>
         </div>{/* End Basic Information section */}
 
-          {/* Rom File Selection - Show for emulator platforms */}
-          {['nes', 'snes', 'c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
+          {/* Game Screenshots */}
+          {mode === 'edit' && (
             <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">
-                Rom File ({getPlatformName(formData.platformId)})
-              </h3>
-              
-              <div>
-                <label htmlFor="filePath" className="block text-sm font-medium text-muted mb-2">
-                  ROM File Path
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    id="filePath"
-                    name="filePath"
-                    value={formData.filePath || ''}
-                    onChange={handleChange}
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                    placeholder="/path/to/game.d64"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowRomFileExplorer(true)}
-                    className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
-                    title="Browse for ROM file"
-                  >
-                    <FolderIcon className="w-4 h-4" />
-                    Browse
-                  </button>
+              <h3 className="text-lg font-semibold text-text border-b pb-2">📸 Screenshots</h3>
+
+              {screenshots.length === 0 ? (
+                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-6 text-center">
+                  <p className="text-muted">No screenshots captured yet.</p>
+                  <p className="text-sm text-gray-500 mt-2">
+                    Use the emulator screenshot hotkey (RetroArch default: F8) to capture screenshots.
+                  </p>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Select the ROM or disk image file for this game
-                </p>
-              </div>
+              ) : (
+                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                  {/* Carousel */}
+                  <div className="relative aspect-video rounded-lg overflow-hidden bg-black">
+                    <img
+                      src={screenshots[currentScreenshotIndex]?.path}
+                      alt={`Screenshot ${currentScreenshotIndex + 1}`}
+                      className="w-full h-full object-contain"
+                    />
+
+                    {screenshots.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCurrentScreenshotIndex(
+                              (prev) => (prev - 1 + screenshots.length) % screenshots.length
+                            )
+                          }
+                          className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
+                          title="Previous"
+                        >
+                          ‹
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCurrentScreenshotIndex(
+                              (prev) => (prev + 1) % screenshots.length
+                            )
+                          }
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
+                          title="Next"
+                        >
+                          ›
+                        </button>
+                      </>
+                    )}
+
+                    <div className="absolute bottom-2 right-2 px-2 py-1 text-xs bg-black/60 text-white rounded">
+                      {currentScreenshotIndex + 1} / {screenshots.length}
+                    </div>
+                  </div>
+
+                  {/* Thumbnails */}
+                  <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
+                    {screenshots.map((screenshot, index) => (
+                      <button
+                        key={screenshot.filename}
+                        type="button"
+                        onClick={() => setCurrentScreenshotIndex(index)}
+                        className={`flex-shrink-0 border rounded overflow-hidden ${
+                          index === currentScreenshotIndex
+                            ? 'border-blue-500 ring-2 ring-blue-400'
+                            : 'border-gray-300 dark:border-gray-600'
+                        }`}
+                      >
+                        <img
+                          src={screenshot.path}
+                          alt={`Screenshot ${index + 1}`}
+                          className="h-16 w-24 object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = screenshots[currentScreenshotIndex];
+                        if (!current) return;
+                        setFormData((prev) => ({
+                          ...prev,
+                          metadata: { ...prev.metadata, primaryImage: current.path },
+                        }));
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                    >
+                      Use as Cover
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = screenshots[currentScreenshotIndex];
+                        if (current) window.open(current.path, '_blank');
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                    >
+                      View Full Size
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Launch Settings - Hide for emulator platforms that use ROMs */}
-          {!['nes', 'snes', 'c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32', 'mame'].includes(formData.platformId) && (
-            <div 
+          {/* Install Configuration section */}
+          {mode === 'edit' && (
+            <div
               id="install"
               ref={(el) => { sectionRefs.current['install'] = el; }}
               className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
             >
-              {/* Section Header - Collapsible when installed */}
-              <button
-                type="button"
-                onClick={() => activeInstallation?.status === 'installed' && setInstallConfigCollapsed(!installConfigCollapsed)}
-                className="w-full flex items-center justify-between text-lg font-semibold text-text border-b pb-2"
-              >
-                <div className="flex items-center gap-3">
-                  <span>Install Configuration</span>
-                  {activeInstallation?.status === 'installed' && (
-                    <span className="px-2 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full">
-                      ✓ Installed
-                    </span>
-                  )}
-                </div>
-                {activeInstallation?.status === 'installed' && (
-                  installConfigCollapsed ? (
-                    <ChevronDownIcon className="w-5 h-5 text-gray-500" />
-                  ) : (
-                    <ChevronUpIcon className="w-5 h-5 text-gray-500" />
-                  )
-                )}
-              </button>
-
-              {/* Collapsible content */}
-              {(!installConfigCollapsed || activeInstallation?.status !== 'installed') && (
-                <div className="space-y-4">
-
-              {/* Lutris Installer Badge - simplified indicator */}
-              {formData.platformId === 'windows-wine' && activeLutrisInstallers.length > 0 && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
-                  <span className="text-lg">🎮</span>
-                  <span className="text-sm font-medium text-purple-700 dark:text-purple-300">
-                    {activeLutrisInstallers.length} Lutris Installer{activeLutrisInstallers.length !== 1 ? 's' : ''} attached
-                  </span>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-semibold text-text border-b pb-2">Install Configuration</h3>
+                {formData.platformId === 'windows-wine' && activeInstallation?.status !== 'installed' && (
                   <span className="text-xs text-purple-500 dark:text-purple-400">
                     — available when you install
                   </span>
-                </div>
-              )}
+                )}
+              </div>
+              <div className="space-y-4">
+                {/* ROM Selection for emulator platforms */}
+                {ROM_PLATFORMS.includes(formData.platformId) && (
+                  <div>
+                    <label htmlFor="filePath" className="block text-sm font-medium text-muted mb-2">
+                      ROM File
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        id="filePath"
+                        name="filePath"
+                        value={formData.filePath || ''}
+                        onChange={handleChange}
+                        className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        placeholder="Select a ROM file"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRomFileExplorer(true)}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
+                      >
+                        <FolderIcon className="w-4 h-4" />
+                        Select ROM
+                      </button>
+                    </div>
+                    {formData.filePath && (
+                      <p className="text-xs text-muted mt-2 break-all">
+                        Selected: {formData.filePath}
+                      </p>
+                    )}
+                  </div>
+                )}
 
               {/* Wine Version Selection - only show for Wine platform */}
               {formData.platformId === 'windows-wine' && (
@@ -1556,48 +1710,50 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 </div>
               )}
 
-              <div>
-                <label htmlFor="settings.launch.command" className="block text-sm font-medium text-muted mb-2">
-                  Launch Command
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    id="settings.launch.command"
-                    name="settings.launch.command"
-                    value={formData.settings?.launch?.command || ''}
-                    onChange={handleChange}
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                    placeholder="./start.sh or game.exe"
-                  />
-                  {activeInstallation?.status === 'installed' && activeInstallation?.installPath && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setShowShortcutDialog(true)}
-                        className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-1"
-                        title="Search for shortcut files"
-                      >
-                        <MagnifyingGlassIcon className="w-4 h-4" />
-                        Shortcuts
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowFileExplorer(true)}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
-                        title="Browse installation directory"
-                      >
-                        <FolderIcon className="w-4 h-4" />
-                        Browse
-                      </button>
-                    </>
-                  )}
+              {formData.platformId === 'windows-wine' && (
+                <div>
+                  <label htmlFor="settings.launch.command" className="block text-sm font-medium text-muted mb-2">
+                    Launch Command
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      id="settings.launch.command"
+                      name="settings.launch.command"
+                      value={formData.settings?.launch?.command || ''}
+                      onChange={handleChange}
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                      placeholder="./start.sh or game.exe"
+                    />
+                    {activeInstallation?.status === 'installed' && activeInstallation?.installPath && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowShortcutDialog(true)}
+                          className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-1"
+                          title="Search for shortcut files"
+                        >
+                          <MagnifyingGlassIcon className="w-4 h-4" />
+                          Shortcuts
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowFileExplorer(true)}
+                          className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
+                          title="Browse installation directory"
+                        >
+                          <FolderIcon className="w-4 h-4" />
+                          Browse
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
+              )}
               </div>
-              </div>
-              )}{/* End collapsible content */}
             </div>
-          )}{/* End Install Configuration section */}
+          )}
+          {/* End Install Configuration section */}
 
           {/* Rendering Section - Only show for Wine games when installed */}
           {formData.platformId === 'windows-wine' && activeInstallation?.status === 'installed' && (
@@ -2726,6 +2882,122 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Saves & States - Show for RetroArch platforms */}
+          {mode === 'edit' && 
+           RETROARCH_PLATFORMS.includes(formData.platformId) && (
+            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+              <h3 className="text-lg font-semibold text-text border-b pb-2">💾 Saves & States</h3>
+              
+              {saveFiles.sram.length === 0 && saveFiles.states.length === 0 ? (
+                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-6 text-center">
+                  <p className="text-muted">No save files found for this game.</p>
+                  <p className="text-sm text-gray-500 mt-2">
+                    Save files and save states will appear here after you play the game.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Save States */}
+                  {saveFiles.states.length > 0 && (
+                    <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                      <h4 className="font-medium text-text mb-3 flex items-center gap-2">
+                        <span>📸</span> Save States ({saveFiles.states.length})
+                      </h4>
+                      <div className="space-y-2">
+                        {saveFiles.states.map((save) => (
+                          <div 
+                            key={save.filename}
+                            className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-text truncate">
+                                  {save.slot !== undefined ? `Slot ${save.slot}` : save.filename}
+                                </span>
+                                <span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
+                                  {(save.size / 1024).toFixed(1)} KB
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted mt-1">
+                                {formatRelativeTime(save.modified)} • {new Date(save.modified).toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="flex gap-2 ml-4">
+                              <button
+                                type="button"
+                                onClick={() => downloadSave(save.filename, 'state')}
+                                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                              >
+                                Download
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteSave(save.filename, 'state')}
+                                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SRAM Saves */}
+                  {saveFiles.sram.length > 0 && (
+                    <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                      <h4 className="font-medium text-text mb-3 flex items-center gap-2">
+                        <span>🎮</span> In-Game Saves ({saveFiles.sram.length})
+                      </h4>
+                      <p className="text-xs text-gray-500 mb-3">
+                        Battery/SRAM saves created by the game itself (memory card saves, etc.)
+                      </p>
+                      <div className="space-y-2">
+                        {saveFiles.sram.map((save) => (
+                          <div 
+                            key={save.filename}
+                            className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-text truncate">
+                                  {save.filename}
+                                </span>
+                                <span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
+                                  {(save.size / 1024).toFixed(1)} KB
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted mt-1">
+                                {formatRelativeTime(save.modified)} • {new Date(save.modified).toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="flex gap-2 ml-4">
+                              <button
+                                type="button"
+                                onClick={() => downloadSave(save.filename, 'sram')}
+                                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                              >
+                                Download
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteSave(save.filename, 'sram')}
+                                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

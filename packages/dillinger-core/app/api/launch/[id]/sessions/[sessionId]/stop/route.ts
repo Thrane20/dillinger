@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { JSONStorageService } from '@/lib/services/storage';
 import { DockerService } from '@/lib/services/docker-service';
-import type { GameSession } from '@dillinger/shared';
+import { collectSessionScreenshots } from '@/lib/services/session-screenshots';
+import type { Game, GameSession } from '@dillinger/shared';
 
 const storage = JSONStorageService.getInstance();
 const docker = DockerService.getInstance();
+
+async function findGame(id: string): Promise<Game | null> {
+  const directGame = await storage.readEntity<Game>('games', id);
+  if (directGame) {
+    return directGame;
+  }
+
+  const allGames = await storage.listEntities<Game>('games');
+  return allGames.find((g) => g.id === id || g.slug === id) || null;
+}
 
 // POST /api/launch/[id]/sessions/[sessionId]/stop - Stop the session container
 export async function POST(
@@ -41,6 +52,20 @@ export async function POST(
     session.updated = new Date().toISOString();
     if (session.performance) {
       session.performance.endTime = new Date().toISOString();
+    }
+
+    if (session.performance?.startTime && session.performance?.endTime) {
+      const game = await findGame(gameId);
+      if (game) {
+        const gameIdentifier = game.slug || game.id;
+        session.screenshots = await collectSessionScreenshots({
+          dillingerRoot: storage.getDillingerRoot(),
+          gameId: game.id,
+          gameIdentifier,
+          startTime: session.performance.startTime,
+          endTime: session.performance.endTime,
+        });
+      }
     }
     await storage.writeEntity('sessions', sessionId, session);
 

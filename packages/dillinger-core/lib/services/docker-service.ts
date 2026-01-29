@@ -692,6 +692,7 @@ export class DockerService {
     const retroarchCores: Record<string, string> = {
       'nes': 'nestopia',        // NES/Famicom
       'snes': 'snes9x',         // SNES/Super Famicom
+      'psx': 'beetle_psx_hw',   // PlayStation 1
       'mame': 'mame',           // Arcade (MAME)
     };
 
@@ -801,6 +802,21 @@ export class DockerService {
       } else {
         // Set RETROARCH_CORE env var for normal games
         environment['RETROARCH_CORE'] = core;
+
+        // Get platform settings for fullscreen preference
+        if (game.platformId === 'psx') {
+          try {
+            const settingsService = SettingsService.getInstance();
+            const allSettings = await settingsService.getAllSettings();
+            const psxSettings = (allSettings as any).platforms?.psx;
+            if (psxSettings?.fullscreen) {
+              environment['RETROARCH_FULLSCREEN'] = 'true';
+              logger.info(`  Fullscreen: enabled (from platform settings)`);
+            }
+          } catch (err) {
+            logger.warn(`Could not read PSX platform settings:`, err);
+          }
+        }
 
         if (!romPath) {
           throw new Error('No ROM file specified for RetroArch game');
@@ -1271,7 +1287,7 @@ export class DockerService {
       } else {
         logger.warn(`  ⚠ No install path configured for Wine game: ${gameIdentifier}`);
       }
-    } else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
+    } else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId] || retroarchCores[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
       // For emulator games (VICE Commodore, FS-UAE Amiga, MAME, or RetroArch), create a per-game home directory
       // This allows each game to have its own emulator config, saves, screenshots, etc.
       const dillingerRoot = this.storage.getDillingerRoot();
@@ -1297,6 +1313,11 @@ export class DockerService {
         // We copy instead of bind-mounting because the emulator home is mounted as a whole
         const pulseDir = path.join(containerAccessiblePath, '.config', 'pulse');
         await fs.ensureDir(pulseDir);
+
+        // Pre-create RetroArch screenshots directory (for emulator platforms)
+        const screenshotsDir = path.join(containerAccessiblePath, '.config', 'retroarch', 'screenshots');
+        await fs.ensureDir(screenshotsDir);
+        await chmod(screenshotsDir, 0o777);
         
         // Copy PulseAudio cookie if it exists (needed for audio in container)
         const userHome = process.env.HOME || '/home/node';
@@ -1476,7 +1497,7 @@ export class DockerService {
       throw new Error('Wine game has no installation path configured; please install the game first');
     }
     // For Commodore, Amiga, MAME, and RetroArch emulator games, mount the ROM file directory and per-game home
-    else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
+    else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId] || retroarchCores[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
       if (game.filePath && game.filePath !== 'MENU') {
         const romDir = path.dirname(game.filePath);
         binds.push(`${romDir}:/roms:ro`);
@@ -1506,6 +1527,59 @@ export class DockerService {
          const hostBiosPath = this.getHostPath(biosPath);
          binds.push(`${hostBiosPath}:/bios:ro`);
          logger.info(`  Mounting BIOS directory: ${hostBiosPath} -> /bios`);
+      }
+
+      // PSX BIOS: Since dillinger_root:/data is already mounted, BIOS files are available
+      // at /data/bios/psx inside the container. Pass this path via environment variable.
+      if (game.platformId === 'psx') {
+         const dillingerRoot = this.storage.getDillingerRoot();
+         const biosPath = path.join(dillingerRoot, 'bios', 'psx');
+         
+         // Ensure directory exists
+         try {
+           const fs = await import('fs-extra');
+           await fs.ensureDir(biosPath);
+         } catch (err) {
+           logger.warn(`Could not ensure PSX BIOS directory exists: ${biosPath}`, err);
+         }
+
+         // Tell RetroArch where to find BIOS files (path inside container via dillinger_root volume)
+         env.push(`RETROARCH_SYSTEM_DIR=/data/bios/psx`);
+         logger.info(`  PSX BIOS directory: /data/bios/psx (via dillinger_root volume)`);
+      }
+
+      // Mount per-game save directories for RetroArch
+      // This ensures each game has isolated saves that persist across launches
+      if (platform.configuration.containerImage?.includes('runner-retroarch') || retroarchCores[game.platformId || '']) {
+         const dillingerRoot = this.storage.getDillingerRoot();
+        const gameId = game.id || game.slug || 'unknown';
+        const gameIdentifier = game.slug || game.id || 'unknown';
+         const savesBasePath = path.join(dillingerRoot, 'saves', gameId);
+         const sramPath = path.join(savesBasePath, 'sram');
+         const statesPath = path.join(savesBasePath, 'states');
+        const screenshotsPath = path.join(dillingerRoot, 'emulator-homes', gameIdentifier, '.config', 'retroarch', 'screenshots');
+         
+         // Ensure directories exist with proper permissions
+         try {
+           const fs = await import('fs-extra');
+           await fs.ensureDir(sramPath);
+           await fs.ensureDir(statesPath);
+           await fs.ensureDir(screenshotsPath);
+           // Make writable by container user (uid 1000)
+           await fs.chmod(sramPath, 0o777);
+           await fs.chmod(statesPath, 0o777);
+           await fs.chmod(screenshotsPath, 0o777);
+         } catch (err) {
+           logger.warn(`Could not ensure save directories exist:`, err);
+         }
+
+         // Mount save directories (dillinger_root is already mounted at /data)
+         // RetroArch will use these paths for saves
+         env.push(`RETROARCH_SAVES_DIR=/data/saves/${gameId}/sram`);
+         env.push(`RETROARCH_STATES_DIR=/data/saves/${gameId}/states`);
+        env.push(`RETROARCH_SCREENSHOTS_DIR=/data/emulator-homes/${gameIdentifier}/.config/retroarch/screenshots`);
+         logger.info(`  Save directories: /data/saves/${gameId}/sram, /data/saves/${gameId}/states`);
+        logger.info(`  Screenshot directory: /data/emulator-homes/${gameIdentifier}/.config/retroarch/screenshots`);
       }
     } 
     // For other games, mount the game directory.

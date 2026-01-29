@@ -35,8 +35,8 @@ export const RUNNER_IMAGES: Record<string, {
   'retroarch': {
     repository: `${REGISTRY_BASE}/runner-retroarch`,
     name: 'RetroArch Runner',
-    description: 'Multi-system emulation including arcade (MAME)',
-    platforms: ['arcade', 'mame', 'nes', 'snes', 'genesis'],
+    description: 'Multi-system emulation including arcade (MAME), NES, SNES, PlayStation 1',
+    platforms: ['arcade', 'mame', 'nes', 'snes', 'genesis', 'psx'],
   },
   'fs-uae': {
     repository: `${REGISTRY_BASE}/runner-fs-uae`,

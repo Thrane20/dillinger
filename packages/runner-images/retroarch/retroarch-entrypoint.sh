@@ -3,17 +3,137 @@
 # Sources base runner setup and adds RetroArch-specific configuration
 set -e
 
+# Colors for output (also defined in base, but we need them before sourcing)
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  RetroArch Runner - Initializing...${NC}"
+echo -e "${BLUE}========================================${NC}"
+echo ""
+
+#######################################################
+# Optional: xrandr display resolution switching
+#######################################################
+
+# When XRANDR_MODE is set (e.g. "1920x1080"), attempt to change the host display
+# resolution before launching the game, then restore the original mode on exit.
+XRANDR_MODE="${XRANDR_MODE:-}"
+XRANDR_OUTPUT="${XRANDR_OUTPUT:-}"
+
+ORIG_XRANDR_OUTPUT=""
+ORIG_XRANDR_MODE=""
+CHILD_PID=""
+
+detect_xrandr_output() {
+    if [ -n "$XRANDR_OUTPUT" ]; then
+        echo "$XRANDR_OUTPUT"
+        return 0
+    fi
+    # Prefer primary output; otherwise take first connected output.
+    xrandr --query 2>/dev/null | awk '
+        / connected primary/ { print $1; exit }
+        / connected/ { print $1; exit }
+    '
+}
+
+detect_current_mode_for_output() {
+    local out="$1"
+    xrandr --query 2>/dev/null | awk -v out="$out" '
+        $1 == out { found=1; next }
+        found && $1 ~ /^[0-9]+x[0-9]+$/ && $0 ~ /\*/ { print $1; exit }
+        found && NF==0 { exit }
+    '
+}
+
+apply_xrandr_mode() {
+    if [ -z "$XRANDR_MODE" ]; then
+        return 0
+    fi
+    if ! command -v xrandr >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠ XRANDR_MODE requested but xrandr not installed${NC}"
+        return 0
+    fi
+    if [ -z "$DISPLAY" ]; then
+        echo -e "${YELLOW}⚠ XRANDR_MODE requested but DISPLAY is not set${NC}"
+        return 0
+    fi
+
+    echo -e "${BLUE}Attempting to set display resolution via xrandr...${NC}"
+    local out
+    out="$(detect_xrandr_output)"
+    if [ -z "$out" ]; then
+        echo -e "${YELLOW}⚠ XRANDR_MODE requested but no connected outputs were detected${NC}"
+        return 0
+    fi
+
+    local current
+    current="$(detect_current_mode_for_output "$out")"
+
+    ORIG_XRANDR_OUTPUT="$out"
+    ORIG_XRANDR_MODE="$current"
+
+    echo "  Output: $out"
+    echo "  Current: ${current:-<unknown>}"
+    echo "  Target:  $XRANDR_MODE"
+
+    if xrandr --output "$out" --mode "$XRANDR_MODE" 2>&1; then
+        echo -e "${GREEN}✓ Display resolution set to $XRANDR_MODE${NC}"
+    else
+        echo -e "${YELLOW}⚠ Failed to set resolution to $XRANDR_MODE${NC}"
+        ORIG_XRANDR_OUTPUT=""
+        ORIG_XRANDR_MODE=""
+    fi
+    echo ""
+}
+
+restore_xrandr_mode() {
+    if [ -z "$ORIG_XRANDR_OUTPUT" ] || [ -z "$ORIG_XRANDR_MODE" ]; then
+        return 0
+    fi
+    if ! command -v xrandr >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${BLUE}Restoring original display resolution...${NC}"
+    xrandr --output "$ORIG_XRANDR_OUTPUT" --mode "$ORIG_XRANDR_MODE" >/dev/null 2>&1 || true
+    echo -e "${GREEN}✓ Display resolution restored${NC}"
+
+    ORIG_XRANDR_OUTPUT=""
+    ORIG_XRANDR_MODE=""
+}
+
+on_term() {
+    echo -e "${YELLOW}Received termination signal; stopping game and restoring display...${NC}"
+    if [ -n "$CHILD_PID" ]; then
+        kill -TERM "$CHILD_PID" 2>/dev/null || true
+        sleep 1 || true
+        kill -KILL "$CHILD_PID" 2>/dev/null || true
+    fi
+    restore_xrandr_mode
+    exit 143
+}
+
+trap on_term TERM INT HUP QUIT
+trap restore_xrandr_mode EXIT
+
+#######################################################
 # Source base entrypoint functions
+#######################################################
+
 source /usr/local/bin/entrypoint.sh
 
-# Run base setup
+# Run base setup (user, GPU, display, audio)
 run_base_setup
 
 #######################################################
 # RetroArch-Specific Setup
 #######################################################
 
-log_section "Configuring RetroArch environment..."
+log_section "Configuring RetroArch environment"
 
 # Default paths (use home directory for config persistence)
 RETROARCH_CONFIG_DIR="/home/${UNAME}/.config/retroarch"
@@ -51,10 +171,11 @@ input_joypad_driver = "sdl2"
 menu_driver = "ozone"
 EOF
     chown "${UNAME}:${UNAME}" "$RETROARCH_CONFIG_FILE"
+    echo -e "${GREEN}✓ Default config created${NC}"
 fi
 
 # Enforce critical drivers to match known working config
-log_section "Enforcing RetroArch drivers..."
+log_section "Enforcing RetroArch drivers"
 set_config "input_driver" "sdl2" "$RETROARCH_CONFIG_FILE"
 # Use sdl2 joypad driver since udev daemon isn't running in containers
 # SDL2 can detect joysticks directly from /dev/input/js* without udev
@@ -62,11 +183,89 @@ set_config "input_joypad_driver" "sdl2" "$RETROARCH_CONFIG_FILE"
 set_config "video_driver" "gl" "$RETROARCH_CONFIG_FILE"
 set_config "audio_driver" "pulse" "$RETROARCH_CONFIG_FILE"
 
+# Fullscreen mode (set RETROARCH_FULLSCREEN=true to enable)
+FULLSCREEN="${RETROARCH_FULLSCREEN:-false}"
+if [ "$FULLSCREEN" = "true" ]; then
+    set_config "video_fullscreen" "true" "$RETROARCH_CONFIG_FILE"
+    echo "  Fullscreen: enabled"
+else
+    set_config "video_fullscreen" "false" "$RETROARCH_CONFIG_FILE"
+    echo "  Fullscreen: disabled (set RETROARCH_FULLSCREEN=true to enable)"
+fi
+
+# Enforce system directory for BIOS files
+# Use RETROARCH_SYSTEM_DIR env var if set (e.g., /data/bios/psx for PSX games)
+# Otherwise default to /system (for backwards compatibility)
+SYSTEM_DIR="${RETROARCH_SYSTEM_DIR:-/system}"
+set_config "system_directory" "$SYSTEM_DIR" "$RETROARCH_CONFIG_FILE"
+
+# Enforce save directories - use env vars if set for per-game isolation
+SAVES_DIR="${RETROARCH_SAVES_DIR:-/saves}"
+STATES_DIR="${RETROARCH_STATES_DIR:-/states}"
+set_config "savefile_directory" "$SAVES_DIR" "$RETROARCH_CONFIG_FILE"
+set_config "savestate_directory" "$STATES_DIR" "$RETROARCH_CONFIG_FILE"
+
+# Enforce screenshot directory - keep per-game screenshots in emulator home
+SCREENSHOTS_DIR="${RETROARCH_SCREENSHOTS_DIR:-/home/${UNAME}/.config/retroarch/screenshots}"
+mkdir -p "$SCREENSHOTS_DIR"
+chown -R "${UNAME}:${UNAME}" "$SCREENSHOTS_DIR"
+set_config "screenshot_directory" "$SCREENSHOTS_DIR" "$RETROARCH_CONFIG_FILE"
+set_config "screenshots_in_content_dir" "false" "$RETROARCH_CONFIG_FILE"
+
 # Configure joypad autoconfig directory (contains pre-made button mappings for common controllers)
 set_config "joypad_autoconfig_dir" "/usr/share/libretro/autoconfig" "$RETROARCH_CONFIG_FILE"
 set_config "input_autodetect_enable" "true" "$RETROARCH_CONFIG_FILE"
 
-# Configure Joystick if specified
+echo "  Video driver: gl"
+echo "  Audio driver: pulse"
+echo "  Input driver: sdl2"
+echo "  Joypad driver: sdl2"
+echo "  System directory: $SYSTEM_DIR"
+echo "  Saves directory: $SAVES_DIR"
+echo "  States directory: $STATES_DIR"
+echo "  Screenshots directory: $SCREENSHOTS_DIR"
+echo ""
+
+#######################################################
+# Graphics Stack Diagnostics (matching Wine runner)
+#######################################################
+
+log_section "Graphics Stack Diagnostics"
+
+# Check Vulkan availability (some cores use it)
+VULKAN_OK="false"
+if command -v vulkaninfo >/dev/null 2>&1; then
+    VULKAN_GPU=$(vulkaninfo --summary 2>/dev/null | grep -i "deviceName" | head -1 | cut -d'=' -f2 | xargs || echo "")
+    if [ -n "$VULKAN_GPU" ]; then
+        echo -e "${GREEN}✓ Vulkan detected: $VULKAN_GPU${NC}"
+        VULKAN_OK="true"
+    else
+        echo -e "${YELLOW}⚠ Vulkan not detected (vulkaninfo returned no GPU)${NC}"
+        echo "  This may happen if:"
+        echo "    - No GPU is passed to the container (--device=/dev/dri)"
+        echo "    - Vulkan drivers aren't installed for your GPU"
+        echo "    - Running in a VM without GPU passthrough"
+    fi
+else
+    echo -e "${YELLOW}⚠ vulkaninfo not available${NC}"
+fi
+
+# Check OpenGL
+GL_RENDERER=""
+if command -v glxinfo >/dev/null 2>&1; then
+    GL_RENDERER=$(glxinfo 2>/dev/null | grep "OpenGL renderer" | cut -d':' -f2 | xargs || echo "")
+fi
+if [ -n "$GL_RENDERER" ]; then
+    echo -e "  OpenGL: ${GREEN}$GL_RENDERER${NC}"
+else
+    echo "  OpenGL: (could not detect)"
+fi
+echo ""
+
+#######################################################
+# Joystick Configuration
+#######################################################
+
 if [ -n "$JOYSTICK_DEVICE_NAME" ]; then
     log_section "Configuring Joystick: $JOYSTICK_DEVICE_NAME"
     
@@ -98,21 +297,91 @@ if [ -n "$JOYSTICK_DEVICE_NAME" ]; then
     done < "$INPUT_DEVICES_FILE"
     
     if [ -n "$MATCHED_INDEX" ]; then
-        echo "  Found joystick at index $MATCHED_INDEX"
+        echo -e "  ${GREEN}✓ Found joystick at index $MATCHED_INDEX${NC}"
         set_config "input_player1_joypad_index" "$MATCHED_INDEX" "$RETROARCH_CONFIG_FILE"
     else
         log_warning "Could not find joystick index for '$TARGET_NAME'"
     fi
+    echo ""
 fi
 
-# Determine Core path
+#######################################################
+# MangoHUD Configuration (for performance overlay)
+#######################################################
+
+ENABLE_MANGOHUD="${ENABLE_MANGOHUD:-false}"
+if [ "$ENABLE_MANGOHUD" = "true" ]; then
+    if command -v mangohud >/dev/null 2>&1; then
+        echo -e "MangoHUD: ${GREEN}ENABLED${NC}"
+        # Configure MangoHUD for RetroArch
+        export MANGOHUD=1
+        export MANGOHUD_CONFIG="cpu_temp,gpu_temp,vram,ram,fps,frametime,frame_timing"
+    else
+        echo -e "${YELLOW}⚠ MangoHUD requested but not installed${NC}"
+        ENABLE_MANGOHUD="false"
+    fi
+else
+    echo "MangoHUD: disabled (set ENABLE_MANGOHUD=true to enable)"
+fi
+echo ""
+
+#######################################################
+# BIOS / System Files Check
+#######################################################
+
+log_section "Checking BIOS/System Directory"
+# Use RETROARCH_SYSTEM_DIR if set, otherwise check /system
+BIOS_CHECK_DIR="${RETROARCH_SYSTEM_DIR:-/system}"
+if [ -d "$BIOS_CHECK_DIR" ]; then
+    BIOS_COUNT=$(find "$BIOS_CHECK_DIR" -type f 2>/dev/null | wc -l)
+    if [ "$BIOS_COUNT" -gt 0 ]; then
+        echo -e "  ${GREEN}✓ $BIOS_CHECK_DIR has $BIOS_COUNT file(s)${NC}"
+        echo "  Contents:"
+        ls -la "$BIOS_CHECK_DIR" 2>/dev/null | head -20 | while read line; do
+            echo "    $line"
+        done
+    else
+        echo -e "  ${YELLOW}⚠ $BIOS_CHECK_DIR directory is empty${NC}"
+    fi
+else
+    echo -e "  ${YELLOW}⚠ $BIOS_CHECK_DIR directory not found${NC}"
+    echo "  BIOS files may not be available for cores that require them"
+fi
+echo ""
+
+#######################################################
+# Core Selection
+#######################################################
+
 CORE_PATH=""
 if [ -n "$RETROARCH_CORE" ]; then
+    log_section "Resolving RetroArch core: $RETROARCH_CORE"
+    
+    # Handle common core aliases
+    CORE_NAME="$RETROARCH_CORE"
+    case "$RETROARCH_CORE" in
+        beetle_psx_hw|beetle-psx-hw|psx_hw)
+            CORE_NAME="mednafen_psx_hw"
+            ;;
+        beetle_psx|beetle-psx|psx)
+            CORE_NAME="mednafen_psx"
+            ;;
+    esac
+    
     # Check common locations
-    if [ -f "/usr/lib/libretro/${RETROARCH_CORE}_libretro.so" ]; then
+    if [ -f "/usr/lib/libretro/${CORE_NAME}_libretro.so" ]; then
+        CORE_PATH="/usr/lib/libretro/${CORE_NAME}_libretro.so"
+    elif [ -f "/usr/lib/libretro/${RETROARCH_CORE}_libretro.so" ]; then
         CORE_PATH="/usr/lib/libretro/${RETROARCH_CORE}_libretro.so"
     elif [ -f "/usr/lib/libretro/${RETROARCH_CORE}.so" ]; then
         CORE_PATH="/usr/lib/libretro/${RETROARCH_CORE}.so"
+    fi
+    
+    if [ -n "$CORE_PATH" ]; then
+        echo -e "  ${GREEN}✓ Found: $CORE_PATH${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ Core not found in /usr/lib/libretro/${NC}"
+        echo "  Tried: ${CORE_NAME}_libretro.so, ${RETROARCH_CORE}_libretro.so"
     fi
 fi
 
@@ -125,6 +394,13 @@ if [ -z "$CORE_PATH" ] && [ "$#" -gt 0 ]; then
 fi
 
 echo "  Core: ${CORE_PATH:-<menu mode>}"
+echo ""
+
+#######################################################
+# Apply xrandr mode if requested
+#######################################################
+
+apply_xrandr_mode
 
 #######################################################
 # Launch RetroArch
@@ -145,7 +421,43 @@ if [ "$#" -gt 0 ]; then
     ARGS+=("$@")
 fi
 
-echo -e "${BLUE}Command: $CMD ${ARGS[*]}${NC}"
-echo ""
+# Wrap with MangoHUD if enabled
+if [ "$ENABLE_MANGOHUD" = "true" ]; then
+    echo -e "${BLUE}Executing with MangoHUD: mangohud $CMD ${ARGS[*]}${NC}"
+    echo ""
+    
+    # Launch in background to capture PID for signal handling
+    gosu "${UNAME}" mangohud "$CMD" "${ARGS[@]}" &
+    CHILD_PID=$!
+else
+    echo -e "${BLUE}Executing: $CMD ${ARGS[*]}${NC}"
+    echo ""
+    
+    gosu "${UNAME}" "$CMD" "${ARGS[@]}" &
+    CHILD_PID=$!
+fi
 
-exec gosu "${UNAME}" "$CMD" "${ARGS[@]}"
+echo -e "${BLUE}Process started with PID: $CHILD_PID${NC}"
+echo -e "${BLUE}Waiting for process to complete...${NC}"
+
+# Wait for process and capture exit code
+wait $CHILD_PID
+EXIT_CODE=$?
+
+echo ""
+echo -e "${BLUE}RetroArch exited with code: $EXIT_CODE${NC}"
+
+# Restore display if changed
+restore_xrandr_mode
+
+# Handle KEEP_ALIVE mode for debugging
+KEEP_ALIVE="${KEEP_ALIVE:-false}"
+if [ "$KEEP_ALIVE" = "true" ]; then
+    echo ""
+    echo -e "${YELLOW}KEEP_ALIVE is enabled - container will stay running${NC}"
+    echo -e "${YELLOW}You can exec into it for debugging: docker exec -it <container> /bin/bash${NC}"
+    echo ""
+    tail -f /dev/null
+fi
+
+exit $EXIT_CODE

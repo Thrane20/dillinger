@@ -5,6 +5,7 @@ import * as path from 'path';
 import type { Game } from '@dillinger/shared';
 
 const storage = JSONStorageService.getInstance();
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 /**
  * Helper to find a game and its storage filename
@@ -23,6 +24,65 @@ async function findGameAndFileKey(id: string): Promise<{ game: Game | null; file
   }
   
   return { game: foundGame, fileKey: foundGame.id };
+}
+
+function encodePathSegments(relativePath: string): string {
+  return relativePath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+async function collectScreenshots(
+  baseDir: string,
+  emulatorHomeDir: string,
+  results: Array<{ filename: string; path: string; size: number; modified: string; modifiedTimestamp: number }>,
+  seen: Set<string>,
+  gameId: string
+): Promise<void> {
+  if (!await fs.pathExists(baseDir)) {
+    return;
+  }
+
+  const entries = await fs.readdir(baseDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(baseDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await collectScreenshots(fullPath, emulatorHomeDir, results, seen, gameId);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!IMAGE_EXTENSIONS.has(ext)) {
+      continue;
+    }
+
+    const relativePath = path
+      .relative(emulatorHomeDir, fullPath)
+      .split(path.sep)
+      .join('/');
+
+    if (relativePath.startsWith('..') || seen.has(relativePath)) {
+      continue;
+    }
+
+    const stats = await fs.stat(fullPath);
+    seen.add(relativePath);
+
+    results.push({
+      filename: relativePath,
+      path: `/api/games/${gameId}/screenshots/${encodePathSegments(relativePath)}`,
+      size: stats.size,
+      modified: stats.mtime.toISOString(),
+      modifiedTimestamp: stats.mtime.getTime(),
+    });
+  }
 }
 
 // GET /api/games/[id]/screenshots - Get list of screenshots for a game
@@ -64,25 +124,13 @@ export async function GET(
         },
       });
     }
-    
-    // Read all PNG files from the directory
-    const files = await fs.readdir(emulatorHomeDir);
-    const screenshots = [];
-    
-    for (const file of files) {
-      if (file.toLowerCase().endsWith('.png')) {
-        const filePath = path.join(emulatorHomeDir, file);
-        const stats = await fs.stat(filePath);
-        
-        screenshots.push({
-          filename: file,
-          path: `/api/games/${id}/screenshots/${encodeURIComponent(file)}`,
-          size: stats.size,
-          modified: stats.mtime.toISOString(),
-          modifiedTimestamp: stats.mtime.getTime(),
-        });
-      }
-    }
+
+    const screenshots: Array<{ filename: string; path: string; size: number; modified: string; modifiedTimestamp: number }> = [];
+    const seen = new Set<string>();
+    const retroarchScreenshotsDir = path.join(emulatorHomeDir, '.config', 'retroarch', 'screenshots');
+
+    await collectScreenshots(retroarchScreenshotsDir, emulatorHomeDir, screenshots, seen, id);
+    await collectScreenshots(emulatorHomeDir, emulatorHomeDir, screenshots, seen, id);
     
     // Sort by modified date (newest first)
     screenshots.sort((a, b) => b.modifiedTimestamp - a.modifiedTimestamp);

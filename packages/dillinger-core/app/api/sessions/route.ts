@@ -1,9 +1,109 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
+import { JSONStorageService } from '@/lib/services/storage';
 
-const SESSIONS_DIR = path.join(process.cwd(), 'data/storage/sessions');
-const GAMES_DIR = path.join(process.cwd(), 'data/storage/games');
+const storage = JSONStorageService.getInstance();
+const SESSIONS_DIR = path.join(storage.getStoragePath(), 'sessions');
+const GAMES_DIR = path.join(storage.getStoragePath(), 'games');
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+
+const screenshotsCache = new Map<string, string[]>();
+
+const encodePathSegments = (relativePath: string): string =>
+  relativePath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function collectScreenshotPaths(
+  baseDir: string,
+  emulatorHomeDir: string,
+  results: Set<string>
+): Promise<void> {
+  if (!await pathExists(baseDir)) {
+    return;
+  }
+
+  const entries = await fs.readdir(baseDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(baseDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await collectScreenshotPaths(fullPath, emulatorHomeDir, results);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!IMAGE_EXTENSIONS.has(ext)) {
+      continue;
+    }
+
+    const relativePath = path
+      .relative(emulatorHomeDir, fullPath)
+      .split(path.sep)
+      .join('/');
+
+    if (!relativePath.startsWith('..')) {
+      results.add(relativePath);
+    }
+  }
+}
+
+async function getGameScreenshots(gameId: string): Promise<string[]> {
+  if (screenshotsCache.has(gameId)) {
+    return screenshotsCache.get(gameId) || [];
+  }
+
+  const emulatorHomeDir = path.join(storage.getDillingerRoot(), 'emulator-homes', gameId);
+  const retroarchScreenshotsDir = path.join(emulatorHomeDir, '.config', 'retroarch', 'screenshots');
+
+  const screenshotPaths = new Set<string>();
+
+  if (await pathExists(emulatorHomeDir)) {
+    await collectScreenshotPaths(retroarchScreenshotsDir, emulatorHomeDir, screenshotPaths);
+    await collectScreenshotPaths(emulatorHomeDir, emulatorHomeDir, screenshotPaths);
+  }
+
+  const urls = Array.from(screenshotPaths)
+    .map((relativePath) => `/api/games/${gameId}/screenshots/${encodePathSegments(relativePath)}`);
+
+  screenshotsCache.set(gameId, urls);
+  return urls;
+}
+
+function safeJsonParse(raw: string, fileName: string): SessionData | null {
+  try {
+    return JSON.parse(raw) as SessionData;
+  } catch (error) {
+    const firstBrace = raw.indexOf('{');
+    const lastBrace = raw.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const trimmed = raw.slice(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(trimmed) as SessionData;
+      } catch {
+        console.error(`Failed to parse session file ${fileName} after trim.`);
+      }
+    }
+    console.error(`Failed to parse session file ${fileName}:`, error);
+    return null;
+  }
+}
 
 interface SessionData {
   id: string;
@@ -21,7 +121,25 @@ interface SessionData {
 export async function GET(_request: NextRequest) {
   try {
     // Read all session files
-    const sessionFiles = await fs.readdir(SESSIONS_DIR).catch(() => []);
+    const dirEntries = await fs.readdir(SESSIONS_DIR, { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
+    const sessionFiles: string[] = [];
+
+    for (const entry of dirEntries) {
+      if (entry.isFile()) {
+        if (entry.name.endsWith('.json') && entry.name !== 'index.json') {
+          sessionFiles.push(entry.name);
+        }
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        const subdir = path.join(SESSIONS_DIR, entry.name);
+        const subFiles = await fs.readdir(subdir).catch(() => [] as string[]);
+        subFiles
+          .filter((file) => file.endsWith('.json') && file !== 'index.json')
+          .forEach((file) => sessionFiles.push(path.join(entry.name, file)));
+      }
+    }
     
     const sessions = await Promise.all(
       sessionFiles
@@ -29,7 +147,11 @@ export async function GET(_request: NextRequest) {
         .map(async (file) => {
           try {
             const sessionPath = path.join(SESSIONS_DIR, file);
-            const sessionData = JSON.parse(await fs.readFile(sessionPath, 'utf-8')) as SessionData;
+            const raw = await fs.readFile(sessionPath, 'utf-8');
+            const sessionData = safeJsonParse(raw, file);
+            if (!sessionData) {
+              return null;
+            }
             
             // Calculate duration from performance data
             let duration = 0;
@@ -67,6 +189,10 @@ export async function GET(_request: NextRequest) {
               status = 'crashed';
             }
             
+            const screenshots = sessionData.screenshots && sessionData.screenshots.length > 0
+              ? sessionData.screenshots
+              : await getGameScreenshots(sessionData.gameId);
+
             return {
               id: sessionData.id,
               gameId: sessionData.gameId,
@@ -77,7 +203,7 @@ export async function GET(_request: NextRequest) {
               duration,
               status,
               platform: sessionData.platformId,
-              screenshots: sessionData.screenshots || [],
+              screenshots,
             };
           } catch (err) {
             console.error(`Failed to parse session file ${file}:`, err);

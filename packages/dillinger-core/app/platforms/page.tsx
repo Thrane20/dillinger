@@ -103,6 +103,7 @@ const PLATFORM_SECTIONS = [
   { id: 'wine', label: 'Wine (Windows)', icon: '🍷' },
   { id: 'nes', label: 'NES', icon: '🎮' },
   { id: 'snes', label: 'Super Nintendo', icon: '🕹️' },
+  { id: 'psx', label: 'PlayStation 1', icon: '🎮' },
   { id: 'arcade', label: 'Arcade / MAME', icon: '👾' },
   { id: 'c64', label: 'C64 / Commodore', icon: '💾' },
   { id: 'amiga', label: 'Amiga', icon: '🖱️' },
@@ -129,6 +130,14 @@ interface C64Settings {
   warpMode: boolean;
 }
 
+interface PsxSettings {
+  core: 'beetle_psx_hw' | 'beetle_psx' | 'pcsx_rearmed';
+  region: 'auto' | 'ntsc' | 'pal';
+  internalResolution: '1x' | '2x' | '4x' | '8x';
+  pgxp: boolean;
+  fullscreen: boolean;
+}
+
 interface WineSettings {
   architecture: 'win64' | 'win32';
   renderer: 'vulkan' | 'opengl';
@@ -137,6 +146,7 @@ interface WineSettings {
 interface PlatformSettings {
   nes: NesSettings;
   snes: SnesSettings;
+  psx: PsxSettings;
   arcade: ArcadeSettings;
   c64: C64Settings;
   wine: WineSettings;
@@ -146,6 +156,7 @@ interface PlatformSettings {
 const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   nes: { core: 'nestopia', region: 'auto' },
   snes: { core: 'snes9x', region: 'auto', superfxOverclock: false },
+  psx: { core: 'beetle_psx_hw', region: 'auto', internalResolution: '2x', pgxp: true, fullscreen: false },
   arcade: { videoMode: 'opengl' },
   c64: { trueDriveEmulation: true, warpMode: false },
   wine: { architecture: 'win64', renderer: 'vulkan' },
@@ -161,6 +172,7 @@ export default function PlatformsPage() {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const psxFileInputRef = useRef<HTMLInputElement>(null);
   
   // Runner state
   const [runners, setRunners] = useState<RunnerStatus[]>([]);
@@ -301,6 +313,8 @@ export default function PlatformsPage() {
       loadBiosFiles('amiga');
     } else if (activeSection === 'c64') {
       loadBiosFiles('c64');
+    } else if (activeSection === 'psx') {
+      loadBiosFiles('psx');
     }
   }, [activeSection]);
 
@@ -518,7 +532,10 @@ export default function PlatformsPage() {
 
       setMessage({ type: 'success', text: 'Files uploaded successfully' });
       loadBiosFiles(platformId);
-      if (fileInputRef.current) {
+      // Clear the appropriate file input based on platform
+      if (platformId === 'psx' && psxFileInputRef.current) {
+        psxFileInputRef.current.value = '';
+      } else if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     } catch (error) {
@@ -1658,6 +1675,202 @@ export default function PlatformsPage() {
     );
   };
 
+  const renderPsxSection = () => {
+    const retroarchRunner = runners.find(r => r.id === 'retroarch');
+    
+    return (
+      <div 
+        id="psx"
+        ref={(el) => { sectionRefs.current['psx'] = el; }}
+        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+      >
+        <div>
+          <h2 className="text-2xl font-semibold">PlayStation 1 (PSX)</h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
+            Sony PlayStation 1 emulation via Beetle PSX HW core in RetroArch.
+          </p>
+        </div>
+
+        {renderRunnerStatus(retroarchRunner, 'RetroArch Runner')}
+
+        {retroarchRunner?.installed && (
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+            <h3 className="text-lg font-medium mb-4">PlayStation 1 Settings</h3>
+            <div className="grid gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Core
+                </label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.psx.core}
+                  onChange={(e) => updatePlatformSetting('psx', 'core', e.target.value as PsxSettings['core'])}
+                >
+                  <option value="beetle_psx_hw">Beetle PSX HW (recommended)</option>
+                  <option value="beetle_psx">Beetle PSX (software renderer)</option>
+                  <option value="pcsx_rearmed">PCSX ReARMed (performance)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Beetle PSX HW uses GPU acceleration for enhanced graphics</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Region
+                </label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.psx.region}
+                  onChange={(e) => updatePlatformSetting('psx', 'region', e.target.value as PsxSettings['region'])}
+                >
+                  <option value="auto">Auto-detect</option>
+                  <option value="ntsc">NTSC (USA/Japan)</option>
+                  <option value="pal">PAL (Europe)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Internal Resolution
+                </label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={platformSettings.psx.internalResolution}
+                  onChange={(e) => updatePlatformSetting('psx', 'internalResolution', e.target.value as PsxSettings['internalResolution'])}
+                >
+                  <option value="1x">1x (native 320x240)</option>
+                  <option value="2x">2x (640x480)</option>
+                  <option value="4x">4x (1280x960)</option>
+                  <option value="8x">8x (2560x1920)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Higher resolutions improve 3D graphics quality</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="font-medium text-gray-700 dark:text-gray-300">PGXP (Geometry Correction)</label>
+                  <p className="text-sm text-gray-500">Reduces polygon jitter and improves 3D precision</p>
+                </div>
+                <input 
+                  type="checkbox" 
+                  className="w-5 h-5 rounded border-gray-300"
+                  checked={platformSettings.psx.pgxp}
+                  onChange={(e) => updatePlatformSetting('psx', 'pgxp', e.target.checked)}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="font-medium text-gray-700 dark:text-gray-300">Start in Fullscreen</label>
+                  <p className="text-sm text-gray-500">Launch RetroArch in fullscreen mode (press F to toggle)</p>
+                </div>
+                <input 
+                  type="checkbox" 
+                  className="w-5 h-5 rounded border-gray-300"
+                  checked={platformSettings.psx.fullscreen}
+                  onChange={(e) => updatePlatformSetting('psx', 'fullscreen', e.target.checked)}
+                />
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <SaveIndicator show={!!savedSections['psx']} message={savedSections['psx'] || ''} />
+              <button
+                onClick={() => savePlatformSettings('psx')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Save PlayStation 1 Settings
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* BIOS Upload Section */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h3 className="text-lg font-medium mb-4">PlayStation 1 BIOS Files</h3>
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-6">
+            <div className="flex items-start gap-3">
+              <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+              <div>
+                <h4 className="font-medium text-yellow-800 dark:text-yellow-200">BIOS Required</h4>
+                <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                  PlayStation 1 emulation requires BIOS files for best compatibility:
+                </p>
+                <ul className="text-sm text-yellow-700 dark:text-yellow-300 mt-2 list-disc list-inside">
+                  <li><code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">scph5500.bin</code> (Japan)</li>
+                  <li><code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">scph5501.bin</code> (USA)</li>
+                  <li><code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">scph5502.bin</code> (Europe)</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-8">
+            <label className="block text-sm font-medium mb-2">Upload BIOS Files</label>
+            <div className="flex items-center gap-4">
+              <input
+                type="file"
+                multiple
+                accept=".bin"
+                ref={psxFileInputRef}
+                onChange={(e) => handleUpload(e, 'psx')}
+                disabled={uploading}
+                className="block w-full text-sm text-gray-500
+                  file:mr-4 file:py-2 file:px-4
+                  file:rounded-full file:border-0
+                  file:text-sm file:font-semibold
+                  file:bg-blue-50 file:text-blue-700
+                  hover:file:bg-blue-100
+                  dark:file:bg-blue-900 dark:file:text-blue-200
+                "
+              />
+              {uploading && <span className="text-sm text-gray-500">Uploading...</span>}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-md font-medium mb-3">Uploaded BIOS Files</h4>
+            {files.length === 0 ? (
+              <p className="text-gray-500 italic">No BIOS files uploaded yet.</p>
+            ) : (
+              <div className="border rounded-lg overflow-hidden dark:border-gray-700">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-900">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Filename</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Size</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Modified</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {files.map((file) => (
+                      <tr key={file.name}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">{file.name}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{(file.size / 1024).toFixed(1)} KB</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{new Date(file.modified).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <InformationCircleIcon className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <h4 className="font-medium text-blue-800 dark:text-blue-200">Supported Formats</h4>
+              <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                .cue/.bin, .iso, .chd (recommended), .pbp, .m3u (multi-disc), .zip, .7z
+              </p>
+              <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                CHD format is recommended for compressed disc images. Use .m3u files for multi-disc games.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-full">
       {/* Sidebar Navigation */}
@@ -1714,6 +1927,7 @@ export default function PlatformsPage() {
                 {renderWineSection()}
                 {renderNesSection()}
                 {renderSnesSection()}
+                {renderPsxSection()}
                 {renderArcadeSection()}
                 {renderC64Section()}
                 {renderAmigaSection()}

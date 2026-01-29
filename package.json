@@ -15,6 +15,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
     "setup": "pnpm install && pnpm run build:shared && pnpm run type-check",
+    
     "build:shared": "pnpm --filter=@dillinger/shared run build",
     "docker:build": "cd packages/runner-images && ./build.sh",
     "docker:build:all": "cd packages/runner-images && ./build.sh --all",

@@ -1,0 +1,30 @@
+{
+  "$schema": "../../schema/platform-v1.0.json",
+  "schemaVersion": "1.0",
+  "id": "psx",
+  "name": "PlayStation 1",
+  "type": "emulator",
+  "description": "Sony PlayStation 1 (PSX/PS1) games via RetroArch using the Beetle PSX HW core. Supports disc images and compressed formats. Requires BIOS files for full compatibility.",
+  "configuration": {
+    "containerImage": "ghcr.io/thrane20/dillinger/runner-retroarch",
+    "supportedExtensions": [".cue", ".bin", ".iso", ".chd", ".pbp", ".m3u", ".toc", ".ccd", ".exe", ".zip", ".7z"],
+    "defaultSettings": {
+      "emulator": {
+        "core": "beetle_psx_hw"
+      },
+      "environment": {
+        "DISPLAY": ":0"
+      }
+    }
+  },
+  "validation": {
+    "fileValidation": [".cue", ".bin", ".iso", ".chd", ".pbp", ".m3u", ".toc", ".ccd", ".exe", ".zip", ".7z"]
+  },
+  "displayStreaming": {
+    "method": "x11"
+  },
+  "notes": "PlayStation 1 emulation requires BIOS files (scph5500.bin, scph5501.bin, scph5502.bin) placed in the system directory. CHD format is recommended for compressed disc images. Multi-disc games should use .m3u playlist files.",
+  "isActive": true,
+  "created": "2026-01-26T00:00:00Z",
+  "updated": "2026-01-26T00:00:00Z"
+}

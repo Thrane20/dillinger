@@ -25,6 +25,7 @@ export default function SessionsPage() {
   const [sessions, setSessions] = useState<GameSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sessionScreenshotIndex, setSessionScreenshotIndex] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchSessions();
@@ -77,6 +78,20 @@ export default function SessionsPage() {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
+    });
+  }
+
+  function getSessionScreenshotIndex(sessionId: string, total: number): number {
+    const index = sessionScreenshotIndex[sessionId] ?? 0;
+    return total > 0 ? Math.min(index, total - 1) : 0;
+  }
+
+  function updateSessionScreenshotIndex(sessionId: string, total: number, delta: number) {
+    if (total <= 0) return;
+    setSessionScreenshotIndex((prev) => {
+      const current = prev[sessionId] ?? 0;
+      const next = (current + delta + total) % total;
+      return { ...prev, [sessionId]: next };
     });
   }
 
@@ -283,16 +298,33 @@ export default function SessionsPage() {
                                 {/* Screenshots Section */}
                                 <div className="mt-3">
                                   {session.screenshots && session.screenshots.length > 0 ? (
-                                    <div className="flex gap-2 overflow-x-auto pb-2">
-                                      {session.screenshots.map((screenshot, idx) => (
-                                        <div key={idx} className="flex-shrink-0">
-                                          <img
-                                            src={screenshot}
-                                            alt={`Screenshot ${idx + 1}`}
-                                            className="h-16 w-24 object-cover rounded border border-border hover:scale-105 transition-transform cursor-pointer"
-                                          />
-                                        </div>
-                                      ))}
+                                    <div className="relative max-w-md rounded-lg overflow-hidden border border-border bg-black">
+                                      <img
+                                        src={session.screenshots[getSessionScreenshotIndex(session.id, session.screenshots.length)]}
+                                        alt={`Screenshot ${getSessionScreenshotIndex(session.id, session.screenshots.length) + 1}`}
+                                        className="w-full h-32 object-cover"
+                                      />
+                                      {session.screenshots.length > 1 && (
+                                        <>
+                                          <button
+                                            onClick={() => updateSessionScreenshotIndex(session.id, session.screenshots.length, -1)}
+                                            className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white"
+                                            title="Previous"
+                                          >
+                                            ‹
+                                          </button>
+                                          <button
+                                            onClick={() => updateSessionScreenshotIndex(session.id, session.screenshots.length, 1)}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white"
+                                            title="Next"
+                                          >
+                                            ›
+                                          </button>
+                                        </>
+                                      )}
+                                      <div className="absolute bottom-1 right-2 px-2 py-0.5 text-xs bg-black/60 text-white rounded">
+                                        {getSessionScreenshotIndex(session.id, session.screenshots.length) + 1} / {session.screenshots.length}
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="text-xs text-muted italic bg-gray-50 dark:bg-gray-800 rounded px-3 py-2 inline-block">

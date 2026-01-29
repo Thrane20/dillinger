@@ -15,8 +15,14 @@ LABEL version="2.0.0"
 
 RUN <<_INSTALL_NATIVE
 set -e
+echo "**** Refreshing pacman mirrors ****"
+if command -v reflector >/dev/null 2>&1; then
+    reflector --verbose --latest 10 --protocol https --sort rate --fastest 5 --save /etc/pacman.d/mirrorlist || true
+fi
+pacman -Syy --noconfirm
+
 echo "**** Installing native Linux gaming libraries ****"
-pacman -S --noconfirm --needed \
+if ! pacman -S --noconfirm --needed \
     sdl2 \
     sdl2_image \
     sdl2_mixer \
@@ -33,7 +39,31 @@ pacman -S --noconfirm --needed \
     libpng \
     libjpeg-turbo \
     zlib \
-    ncurses
+    ncurses; then
+    echo "**** Package install failed; refreshing mirrors and retrying ****"
+    if command -v reflector >/dev/null 2>&1; then
+        reflector --verbose --latest 20 --protocol https --sort rate --fastest 10 --save /etc/pacman.d/mirrorlist || true
+    fi
+    pacman -Syy --noconfirm
+    pacman -S --noconfirm --needed \
+        sdl2 \
+        sdl2_image \
+        sdl2_mixer \
+        sdl2_ttf \
+        sdl2_net \
+        openal \
+        libvorbis \
+        libtheora \
+        libogg \
+        flac \
+        libsndfile \
+        glew \
+        curl \
+        libpng \
+        libjpeg-turbo \
+        zlib \
+        ncurses
+fi
 
 echo "**** Install 32-bit libraries for 32-bit games ****"
 OPTIONAL_32BIT_PKGS=(

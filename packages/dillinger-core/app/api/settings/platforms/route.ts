@@ -31,12 +31,21 @@ export interface WineSettings {
   renderer: 'vulkan' | 'opengl';
 }
 
+export interface PsxSettings {
+  core: 'beetle_psx_hw';
+  region: 'auto' | 'ntsc-u' | 'ntsc-j' | 'pal';
+  internalResolution: '1x' | '2x' | '4x' | '8x';
+  pgxp: boolean;
+  fullscreen: boolean;
+}
+
 export interface PlatformSettings {
   nes?: NesSettings;
   snes?: SnesSettings;
   arcade?: ArcadeSettings;
   c64?: C64Settings;
   wine?: WineSettings;
+  psx?: PsxSettings;
 }
 
 // Required version for full settings object
@@ -46,6 +55,7 @@ interface RequiredPlatformSettings {
   arcade: ArcadeSettings;
   c64: C64Settings;
   wine: WineSettings;
+  psx: PsxSettings;
 }
 
 // Default settings
@@ -69,6 +79,13 @@ const DEFAULT_SETTINGS: RequiredPlatformSettings = {
   wine: {
     architecture: 'win64',
     renderer: 'vulkan',
+  },
+  psx: {
+    core: 'beetle_psx_hw',
+    region: 'auto',
+    internalResolution: '2x',
+    pgxp: true,
+    fullscreen: false,
   },
 };
 
@@ -116,6 +133,13 @@ export async function GET() {
         architecture: platformSettings.wine?.architecture ?? DEFAULT_SETTINGS.wine.architecture,
         renderer: platformSettings.wine?.renderer ?? DEFAULT_SETTINGS.wine.renderer,
       },
+      psx: {
+        core: platformSettings.psx?.core ?? DEFAULT_SETTINGS.psx.core,
+        region: platformSettings.psx?.region ?? DEFAULT_SETTINGS.psx.region,
+        internalResolution: platformSettings.psx?.internalResolution ?? DEFAULT_SETTINGS.psx.internalResolution,
+        pgxp: platformSettings.psx?.pgxp ?? DEFAULT_SETTINGS.psx.pgxp,
+        fullscreen: platformSettings.psx?.fullscreen ?? DEFAULT_SETTINGS.psx.fullscreen,
+      },
     };
     
     return NextResponse.json({
@@ -145,7 +169,7 @@ export async function PUT(request: NextRequest) {
     }
     
     // Validate platformId
-    const validPlatforms = ['nes', 'snes', 'arcade', 'c64', 'wine'];
+    const validPlatforms = ['nes', 'snes', 'arcade', 'c64', 'wine', 'psx'];
     if (!validPlatforms.includes(platformId)) {
       return NextResponse.json(
         { success: false, error: `Invalid platform: ${platformId}` },

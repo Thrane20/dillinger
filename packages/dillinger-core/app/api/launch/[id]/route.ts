@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { JSONStorageService } from '@/lib/services/storage';
 import { DockerService } from '@/lib/services/docker-service';
 import { GameSessionsService } from '@/lib/services/game-sessions';
+import { collectSessionScreenshots } from '@/lib/services/session-screenshots';
 import { logger } from '@/lib/services/logger';
 import type { Game, Platform, GameSession } from '@dillinger/shared';
 import {
@@ -216,9 +217,20 @@ export async function POST(
             if (currentSession) {
               currentSession.status = exitCode === 0 ? 'stopped' : 'error';
               currentSession.updated = new Date().toISOString();
-              
+
               if (currentSession.performance) {
                 currentSession.performance.endTime = new Date().toISOString();
+              }
+
+              if (currentSession.performance?.startTime && currentSession.performance?.endTime) {
+                const gameIdentifier = game.slug || game.id;
+                currentSession.screenshots = await collectSessionScreenshots({
+                  dillingerRoot: storage.getDillingerRoot(),
+                  gameId: game.id,
+                  gameIdentifier,
+                  startTime: currentSession.performance.startTime,
+                  endTime: currentSession.performance.endTime,
+                });
               }
               
               if (exitCode !== 0) {

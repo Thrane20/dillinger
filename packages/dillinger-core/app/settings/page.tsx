@@ -892,18 +892,25 @@ export default function SettingsPage() {
 
             <div className="space-y-6">
               {/* Platform Selector */}
-              <div className="flex space-x-2 border-b border-gray-200 dark:border-gray-700 pb-4">
-                {['arcade', 'console', 'computer'].map((platform) => (
+              <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-4">
+                {[
+                  { id: 'arcade', label: 'Arcade' },
+                  { id: 'nes', label: 'NES' },
+                  { id: 'snes', label: 'SNES' },
+                  { id: 'psx', label: 'PlayStation 1' },
+                  { id: 'console', label: 'Console' },
+                  { id: 'computer', label: 'Computer' },
+                ].map((platform) => (
                   <button
-                    key={platform}
-                    onClick={() => setSelectedJoystickPlatform(platform)}
-                    className={`px-4 py-2 rounded-lg capitalize ${
-                      selectedJoystickPlatform === platform
+                    key={platform.id}
+                    onClick={() => setSelectedJoystickPlatform(platform.id)}
+                    className={`px-4 py-2 rounded-lg ${
+                      selectedJoystickPlatform === platform.id
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
                     }`}
                   >
-                    {platform}
+                    {platform.label}
                   </button>
                 ))}
               </div>

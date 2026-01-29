@@ -18,6 +18,7 @@ LABEL version="2.0.0"
 # libretro-mame: MAME core for arcade games
 # libretro-nestopia: NES emulator core
 # libretro-snes9x: SNES emulator core
+# libretro-beetle-psx-hw: PlayStation 1 core (hardware accelerated with Vulkan/OpenGL)
 # libretro-core-info: Core information files
 # retroarch-assets-*: UI assets
 # icu: Required for internationalization support (fixes libicui18n.so error)
@@ -31,6 +32,7 @@ RUN echo "Refreshing package database..." && \
     libretro-mame \
     libretro-nestopia \
     libretro-snes9x \
+    libretro-beetle-psx-hw \
     libretro-core-info \
     retroarch-assets-xmb \
     retroarch-assets-ozone \
@@ -68,4 +70,9 @@ COPY retroarch-entrypoint.sh /usr/local/bin/retroarch-entrypoint.sh
 RUN chmod +x /usr/local/bin/retroarch-entrypoint.sh
 
 WORKDIR /home/gameuser
+
+# Health check - verify RetroArch is available
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD retroarch --version || exit 1
+
 ENTRYPOINT ["/usr/local/bin/retroarch-entrypoint.sh"]

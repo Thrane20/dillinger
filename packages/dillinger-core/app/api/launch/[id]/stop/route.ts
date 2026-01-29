@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { JSONStorageService } from '@/lib/services/storage';
 import { DockerService } from '@/lib/services/docker-service';
+import { collectSessionScreenshots } from '@/lib/services/session-screenshots';
 import type { Game, GameSession } from '@dillinger/shared';
 
 const storage = JSONStorageService.getInstance();
@@ -77,13 +78,23 @@ export async function POST(
          new Date(session.performance.startTime).getTime()) / 1000
       );
       session.updated = new Date().toISOString();
+
+      const { game: currentGame, fileKey } = await findGameAndFileKey(gameId);
+      if (currentGame && session.performance.startTime && session.performance.endTime) {
+        const gameIdentifier = currentGame.slug || currentGame.id;
+        session.screenshots = await collectSessionScreenshots({
+          dillingerRoot: storage.getDillingerRoot(),
+          gameId: currentGame.id,
+          gameIdentifier,
+          startTime: session.performance.startTime,
+          endTime: session.performance.endTime,
+        });
+      }
       await storage.writeEntity('sessions', sessionId, session);
 
       // Update game's total play time
       const durationHours = session.performance.duration / 3600;
-      
-      const { game: currentGame, fileKey } = await findGameAndFileKey(gameId);
-      
+
       if (currentGame && fileKey) {
         const updatedGame = {
           ...currentGame,

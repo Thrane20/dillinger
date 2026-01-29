@@ -309,6 +309,7 @@ export interface GameSession extends VersionedData {
   platformId: string; // Reference to Platform entity
   status: SessionStatus; // Session state
   containerId?: string; // Docker container ID when active
+  screenshots?: string[]; // Screenshot URLs captured during this session
   display: {
     method: string; // Display streaming method
     port?: number; // VNC/streaming port
