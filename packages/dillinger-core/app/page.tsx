@@ -876,7 +876,15 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
         }
       } else {
         const errorData = await response.json();
-        setError(errorData.error || 'Failed to launch game');
+        if (mode === 'streaming' && errorData.validation?.issues?.length) {
+          const issues = errorData.validation.issues
+            .map((issue: { message?: string }) => issue.message)
+            .filter(Boolean)
+            .join('; ');
+          setError(`Streaming graph validation failed: ${issues}`);
+        } else {
+          setError(errorData.error || 'Failed to launch game');
+        }
       }
     } catch (err) {
       setError(
@@ -1043,28 +1051,40 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
         <div className="flex-1 overflow-y-auto p-4">
           {/* Error Alert */}
           {error && (
-          <div className="alert-error">
-            <div className="flex items-start gap-3">
-              <svg
-                className="h-5 w-5 text-danger"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <div>
-                <h3 className="text-sm font-semibold text-danger-foreground">
-                  Error
-                </h3>
-                <p className="mt-2 text-sm text-muted">{error}</p>
+            <div className="alert-error">
+              <div className="flex items-start gap-3">
+                <svg
+                  className="h-5 w-5 text-danger"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <div>
+                  <h3 className="text-sm font-semibold text-danger-foreground">
+                    Error
+                  </h3>
+                  <p className="mt-2 text-sm text-muted">{error}</p>
+                  {error.startsWith('Streaming graph validation failed') && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => router.push('/settings#streaming')}
+                        className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80"
+                      >
+                        Open streaming settings
+                        <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
         {filteredGames.length === 0 && games.length > 0 ? (
           <div className="card">
@@ -1957,6 +1977,12 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
           }}
           onLaunchDebug={() => {
             launchGame(selectedGameForModal.id, 'local', undefined, {
+              keepContainer: true,
+              keepAlive: true,
+            });
+          }}
+          onLaunchDebugStreaming={() => {
+            launchGame(selectedGameForModal.id, 'streaming', undefined, {
               keepContainer: true,
               keepAlive: true,
             });

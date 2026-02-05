@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon, PlusIcon, TrashIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
-import type { GamePlatformConfig } from '@dillinger/shared';
+import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import type { GamePlatformConfig, StreamingGraphPreset } from '@dillinger/shared';
 import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
@@ -96,6 +96,9 @@ interface GameFormData {
     mangohud?: {
       enabled?: boolean;
     };
+    streaming?: {
+      presetId?: string;
+    };
   };
   // Store the full original game data to preserve scraper metadata
   _originalGame?: any;
@@ -172,10 +175,13 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [showLogsDialog, setShowLogsDialog] = useState(false);
   const [showWineMonitorModal, setShowWineMonitorModal] = useState(false);
   const [showAddPlatform, setShowAddPlatform] = useState(false);
+
+  // Streaming graph presets
+  const [streamingPresets, setStreamingPresets] = useState<StreamingGraphPreset[]>([]);
+  const [streamingDefaultPresetId, setStreamingDefaultPresetId] = useState('');
   
   // Section navigation state for sidebar shortcuts
   const [activeSection, setActiveSection] = useState<string>('basic');
-  const [installConfigCollapsed, setInstallConfigCollapsed] = useState(false);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   
   const [formData, setFormData] = useState<GameFormData>({
@@ -210,6 +216,9 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         environment: {},
         workingDirectory: '',
       },
+      streaming: {
+        presetId: '',
+      },
     },
   });
 
@@ -220,7 +229,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   // Convenience accessors for the currently selected platform config
   const activePlatformConfig = formData.platforms.find(p => p.platformId === formData.platformId);
   const activeInstallation = activePlatformConfig?.installation || formData._originalGame?.installation;
-  const activeLutrisInstallers = activePlatformConfig?.lutrisInstallers || [];
 
   // Section definitions for sidebar navigation (Wine games only)
   const WINE_SECTIONS = [
@@ -304,6 +312,26 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       }
     };
     loadVolumeDefaults();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadStreamingPresets = async () => {
+      try {
+        const response = await fetch('/api/streaming/graph/presets');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!isMounted) return;
+        setStreamingPresets(data.presets || []);
+        setStreamingDefaultPresetId(data.defaultPresetId || '');
+      } catch {
+        // non-fatal
+      }
+    };
+    loadStreamingPresets();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Auto-open Wine Installation Monitor when installation is in progress
@@ -402,6 +430,9 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   },
                   mangohud: {
                     enabled: activeSettings?.mangohud?.enabled || false,
+                  },
+                  streaming: {
+                    presetId: activeSettings?.streaming?.presetId || '',
                   },
                 },
                 _originalGame: game, // Store full original data
@@ -825,6 +856,18 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
           gamescope: {
             ...prev.settings?.gamescope,
             [gamescopeKey]: value,
+          },
+        },
+      }));
+    } else if (name.startsWith('settings.streaming.')) {
+      const streamingKey = name.split('.')[2];
+      setFormData((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          streaming: {
+            ...prev.settings?.streaming,
+            [streamingKey]: value,
           },
         },
       }));
@@ -2516,6 +2559,34 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               </div>
             </div>
           )}{/* End Display Compositor section */}
+
+          {/* Streaming Graph Preset */}
+          <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+            <h3 className="text-lg font-semibold text-text border-b pb-2">Streaming Graph</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Choose a streaming graph preset for this game. Leave as default to use the global preset.
+            </p>
+
+            <div>
+              <label htmlFor="settings.streaming.presetId" className="block text-sm font-medium text-muted mb-2">
+                Graph Preset
+              </label>
+              <select
+                id="settings.streaming.presetId"
+                name="settings.streaming.presetId"
+                value={formData.settings?.streaming?.presetId || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+              >
+                <option value="">Use default preset ({streamingDefaultPresetId || 'unset'})</option>
+                {streamingPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}{preset.isFactory ? ' (Factory)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
           {/* Game Information Section */}
           <div 

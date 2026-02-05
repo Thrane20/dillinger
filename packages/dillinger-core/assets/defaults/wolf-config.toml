@@ -1,0 +1,40 @@
+# Wolf Moonlight Streaming Configuration Template
+# This file is used as a template by Dillinger runners when starting Wolf
+# See: https://games-on-whales.github.io/wolf/
+#
+# The entrypoint.sh script will generate the actual config.toml based on this
+# template, substituting environment variables like $GAME_TITLE and $WOLF_UUID.
+#
+# Paired clients are persisted across sessions via the volume mount.
+
+# Server identification
+hostname = "Dillinger"
+
+# Enable HEVC (H.265) encoding for better quality at lower bitrates
+support_hevc = true
+
+# Configuration version (Wolf internal)
+config_version = 2
+
+# Unique server identifier - generated on first run
+# uuid = "auto-generated"
+
+# Paired Moonlight clients
+# This section is automatically populated when clients pair via PIN
+# Format:
+# [[paired_clients]]
+# client_cert = "..."
+# app_state_folder = "/etc/wolf/..."
+paired_clients = []
+
+# Default application profile
+# The entrypoint script will generate the [[apps]] section dynamically
+# based on the game being launched.
+#
+# Example generated app:
+# [[apps]]
+# title = "Game Name"
+# start_virtual_compositor = true
+#
+# For direct game launching (embedded Wolf mode), the runner IS the app,
+# so we don't need Docker runner configuration in the config file.

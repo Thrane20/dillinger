@@ -2,7 +2,7 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import type { ScraperSettings } from '@dillinger/shared';
+import type { ScraperSettings, StreamingSettings } from '@dillinger/shared';
 
 // Use the same DILLINGER_ROOT logic as storage service
 // This MUST point to the dillinger_root Docker volume mount point
@@ -53,9 +53,7 @@ export interface AppSettings {
   gog?: GOGSettings;
   downloads?: DownloadSettings;
   joysticks?: JoystickSettings;
-  // Future settings can be added here:
-  // streaming?: StreamingSettings;
-  // library?: LibrarySettings;
+  streaming?: StreamingSettings;
 }
 
 export class SettingsService {
@@ -206,5 +204,37 @@ export class SettingsService {
   async getAllSettings(): Promise<AppSettings> {
     await this.ensureInitialized();
     return { ...this.settings };
+  }
+
+  // ============================================================================
+  // Streaming Settings
+  // ============================================================================
+
+  async getStreamingSettings(): Promise<StreamingSettings> {
+    await this.ensureInitialized();
+    // Return stored settings merged with defaults
+    const defaults: StreamingSettings = {
+      gpuType: 'auto',
+      codec: 'h264',
+      quality: 'high',
+      idleTimeoutMinutes: 15,
+      waylandSocketPath: '/run/dillinger/wayland-dillinger',
+      defaultProfileId: '1080p60',
+      autoStart: true,
+      streamingGraphPath: '/data/storage/streaming-graph.json',
+    };
+    return {
+      ...defaults,
+      ...this.settings.streaming,
+    };
+  }
+
+  async updateStreamingSettings(settings: Partial<StreamingSettings>): Promise<void> {
+    await this.ensureInitialized();
+    this.settings.streaming = {
+      ...this.settings.streaming,
+      ...settings,
+    } as StreamingSettings;
+    await this.save();
   }
 }

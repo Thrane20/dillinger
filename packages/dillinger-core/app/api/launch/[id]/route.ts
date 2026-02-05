@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { JSONStorageService } from '@/lib/services/storage';
 import { DockerService } from '@/lib/services/docker-service';
+import { StreamingGraphService } from '@/lib/services/streaming-graph';
+import { validateGraphStore } from '@/lib/services/streaming-graph-validator';
 import { GameSessionsService } from '@/lib/services/game-sessions';
 import { collectSessionScreenshots } from '@/lib/services/session-screenshots';
 import { logger } from '@/lib/services/logger';
@@ -15,6 +17,7 @@ import {
 const storage = JSONStorageService.getInstance();
 const docker = DockerService.getInstance();
 const gameSessions = GameSessionsService.getInstance();
+const graphService = StreamingGraphService.getInstance();
 
 /**
  * Helper to find a game and its storage filename
@@ -133,6 +136,21 @@ export async function POST(
       platformName: platform.name,
       mode,
     });
+
+    // Block streaming launch if streaming graph validation fails
+    if (mode === 'streaming') {
+      const graphStore = await graphService.getGraphStore();
+      const validation = validateGraphStore(graphStore);
+      if (validation.status === 'blocking') {
+        return NextResponse.json(
+          {
+            error: 'Streaming graph validation failed',
+            validation,
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     // Create a new session
     const sessionId = uuidv4();

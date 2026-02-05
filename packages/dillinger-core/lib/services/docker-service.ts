@@ -630,6 +630,91 @@ export class DockerService {
   }
 
   /**
+   * Kill any existing streaming containers.
+   * Only one streaming session is allowed at a time to avoid port conflicts.
+   * Called before launching a new streaming session.
+   */
+  async killExistingStreamingContainers(): Promise<void> {
+    try {
+      logger.info('Checking for existing streaming containers...');
+      
+      const containers = await docker.listContainers({
+        all: true,
+        filters: {
+          label: ['dillinger.streaming=true']
+        }
+      });
+      
+      if (containers.length === 0) {
+        logger.info('No existing streaming containers found');
+        return;
+      }
+      
+      logger.info(`Found ${containers.length} existing streaming container(s), stopping...`);
+      
+      for (const containerInfo of containers) {
+        const container = docker.getContainer(containerInfo.Id);
+        const name = containerInfo.Names?.[0]?.replace(/^\//, '') || containerInfo.Id;
+        
+        try {
+          // Check if container is running
+          if (containerInfo.State === 'running') {
+            logger.info(`  Stopping streaming container: ${name}`);
+            await container.stop({ t: 5 }); // 5 second timeout
+          }
+          
+          // Remove the container
+          logger.info(`  Removing streaming container: ${name}`);
+          await container.remove({ force: true });
+          
+          logger.info(`  ✓ Removed: ${name}`);
+        } catch (err: any) {
+          // Container may have already been removed
+          if (err.statusCode !== 404) {
+            logger.warn(`  Failed to remove container ${name}: ${err.message}`);
+          }
+        }
+      }
+      
+      logger.info('✓ Existing streaming containers cleaned up');
+    } catch (error) {
+      logger.error('Error killing existing streaming containers:', error);
+      // Don't throw - we still want to try launching the new container
+    }
+  }
+
+  /**
+   * Get information about the currently active streaming session
+   */
+  async getActiveStreamingSession(): Promise<{ containerId: string; gameName: string; startedAt: string } | null> {
+    try {
+      const containers = await docker.listContainers({
+        filters: {
+          label: ['dillinger.streaming=true'],
+          status: ['running']
+        }
+      });
+      
+      if (containers.length === 0) {
+        return null;
+      }
+      
+      const containerInfo = containers[0];
+      const container = docker.getContainer(containerInfo.Id);
+      const inspect = await container.inspect();
+      
+      return {
+        containerId: containerInfo.Id,
+        gameName: inspect.Config.Labels?.['dillinger.game.title'] || 'Unknown',
+        startedAt: inspect.State.StartedAt
+      };
+    } catch (error) {
+      logger.error('Error getting active streaming session:', error);
+      return null;
+    }
+  }
+
+  /**
    * Launch a game in a Docker container
    */
   async launchGame(options: GameLaunchOptions): Promise<ContainerInfo> {
@@ -637,6 +722,17 @@ export class DockerService {
 
     // Ensure host path detection
     await this.detectHostPath();
+
+    // Check if streaming is enabled (from game settings or mode override)
+    const moonlightConfig = game.settings?.moonlight;
+    const isStreamingMode = mode === 'streaming' || moonlightConfig?.enabled;
+    
+    // If streaming mode, kill any existing streaming containers first
+    // Only one streaming session allowed at a time to avoid port conflicts
+    if (isStreamingMode) {
+      logger.info('Streaming mode enabled - checking for existing streams...');
+      await this.killExistingStreamingContainers();
+    }
 
     const gameDirectory = game.installation?.installPath || game.filePath;
     
@@ -965,6 +1061,27 @@ export class DockerService {
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
 
+    // Apply streaming graph preset selection
+    if (isStreamingMode) {
+      try {
+        const presetFromGame = game.settings?.streaming?.presetId;
+        if (presetFromGame) {
+          env.push(`STREAMING_PRESET_ID=${presetFromGame}`);
+          logger.info(`  Streaming graph preset (game override): ${presetFromGame}`);
+        } else {
+          const { StreamingGraphService } = await import('./streaming-graph');
+          const graphService = StreamingGraphService.getInstance();
+          const graphStore = await graphService.getGraphStore();
+          if (graphStore.defaultPresetId) {
+            env.push(`STREAMING_PRESET_ID=${graphStore.defaultPresetId}`);
+            logger.info(`  Streaming graph preset (default): ${graphStore.defaultPresetId}`);
+          }
+        }
+      } catch (err) {
+        logger.warn('Failed to resolve streaming graph preset:', err);
+      }
+    }
+
     // Debug: Log environment variables being passed
     logger.info('Environment variables for container:', {
       environmentObj: environment,
@@ -1134,7 +1251,7 @@ export class DockerService {
     }
 
     // Add Moonlight streaming configuration if enabled
-    const moonlightConfig = game.settings?.moonlight;
+    // Note: moonlightConfig is already defined at the top of launchGame()
     if (moonlightConfig?.enabled) {
       env.push('ENABLE_MOONLIGHT=true');
       
@@ -1621,6 +1738,12 @@ export class DockerService {
         name: `dillinger-session-${sessionId}`,
         Env: env,
         WorkingDir: containerWorkingDir,
+        Labels: {
+          'dillinger.session': sessionId,
+          'dillinger.game.id': game.id,
+          'dillinger.game.title': game.title || 'Unknown',
+          'dillinger.streaming': isStreamingMode ? 'true' : 'false',
+        },
         HostConfig: {
           AutoRemove: autoRemove,
           Binds: binds,
@@ -1640,8 +1763,51 @@ export class DockerService {
         logger.info('  Keep container enabled: container will not be auto-removed');
       }
       
-      // Expose Moonlight ports if streaming is enabled
-      if (moonlightConfig?.enabled) {
+      // Configure streaming mode (Wolf/Moonlight)
+      if (isStreamingMode) {
+        logger.info('  Configuring container for streaming mode...');
+        
+        // Switch to host networking for Moonlight protocol
+        containerConfig.HostConfig.NetworkMode = 'host';
+        logger.info('    Network mode: host');
+        
+        // Add Wolf-required devices for virtual input
+        const streamingDevices = [
+          { PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' },
+          { PathOnHost: '/dev/uhid', PathInContainer: '/dev/uhid', CgroupPermissions: 'rwm' },
+        ];
+        containerConfig.HostConfig.Devices = [
+          ...(containerConfig.HostConfig.Devices || []),
+          ...streamingDevices
+        ];
+        logger.info('    Added devices: /dev/uinput, /dev/uhid');
+        
+        // Add cgroup rule for input devices (major 13)
+        containerConfig.HostConfig.DeviceCgroupRules = [
+          ...(containerConfig.HostConfig.DeviceCgroupRules || []),
+          'c 13:* rmw'
+        ];
+        logger.info('    Added cgroup rule: c 13:* rmw (input devices)');
+        
+        // Mount udev for device events
+        binds.push('/run/udev:/run/udev:rw');
+        logger.info('    Mounted: /run/udev:/run/udev:rw');
+        
+        // Wolf config: Mount a subdirectory of dillinger_root for persistent pairing
+        // Note: dillinger_root:/data is already mounted, so Wolf config goes to /data/wolf
+        // The entrypoint will set WOLF_CFG_FOLDER=/data/wolf
+        env.push('WOLF_CFG_FOLDER=/data/wolf');
+        logger.info('    Wolf config folder: /data/wolf (inside dillinger_root volume)');
+        
+        // Pass game title to entrypoint for Wolf config generation
+        env.push(`GAME_TITLE=${game.title || 'Dillinger Game'}`);
+        
+        // Note: When using host networking, we don't need port bindings
+        // All ports are directly accessible on the host
+        logger.info('    Streaming configured - connect with Moonlight client');
+      } 
+      // Non-streaming mode: expose Moonlight ports if explicitly configured
+      else if (moonlightConfig?.enabled) {
         containerConfig.ExposedPorts = {
           '47984/tcp': {}, // HTTPS
           '47989/tcp': {}, // HTTP
@@ -3533,6 +3699,278 @@ export class DockerService {
       };
     } catch (error) {
       logger.error('Failed to cleanup orphaned volumes:', error);
+      throw error;
+    }
+  }
+
+  // ===== STREAMING SIDECAR MANAGEMENT =====
+
+  /**
+   * Container name for the streaming sidecar
+   */
+  private readonly SIDECAR_CONTAINER_NAME = 'dillinger-streamer';
+
+  /**
+   * Ensures the streaming sidecar container is running.
+   * If not running, starts it with the specified configuration.
+   * If running with different config, restarts it.
+   * 
+   * @param profileId - The Sway profile ID to use for streaming
+   * @param mode - The sidecar mode: 'game', 'test-stream', or 'test-x11'
+   * @param testOptions - Options for test modes (pattern, etc.)
+   * @returns Container information
+   */
+  async ensureStreamerSidecar(
+    profileId: string,
+    mode: 'game' | 'test-stream' | 'test-x11' = 'game',
+    testOptions?: { pattern?: string }
+  ): Promise<{ containerId: string; status: string; wayland: string; pulse: string; wolfPin?: string }> {
+    const settings = SettingsService.getInstance();
+    const streamingSettings = await settings.getStreamingSettings();
+
+    // Check if sidecar is already running
+    const existing = await this.getStreamerSidecarStatus();
+    
+    if (existing && existing.status === 'running') {
+      // Check if config matches
+      const labels = existing.labels || {};
+      const currentProfileId = labels['dillinger.streaming.profileId'];
+      const currentMode = labels['dillinger.streaming.mode'];
+      
+      if (currentProfileId === profileId && currentMode === mode) {
+        logger.info(`Streaming sidecar already running with correct config`);
+        return {
+          containerId: existing.containerId,
+          status: 'running',
+          wayland: '/run/dillinger/wayland-dillinger',
+          pulse: '/run/dillinger/pulse-socket',
+          wolfPin: existing.labels?.['dillinger.streaming.wolfPin'],
+        };
+      }
+      
+      // Config changed - restart the sidecar
+      logger.info(`Streaming sidecar config changed, restarting...`);
+      await this.stopStreamerSidecar();
+    }
+
+    // Get Sway profile configuration
+    const { SwayConfigService } = await import('./sway-config');
+    const swayConfigService = SwayConfigService.getInstance();
+    const profile = await swayConfigService.getProfile(profileId);
+    
+    if (!profile) {
+      throw new Error(`Streaming profile not found: ${profileId}`);
+    }
+
+    // Generate a Wolf pairing PIN (4-digit)
+    const wolfPin = Math.floor(1000 + Math.random() * 9000).toString();
+
+    // Determine GPU type
+    const gpuType = streamingSettings.gpuType;
+    
+    // Get the image version from environment or fallback
+    const imageTag = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '0.3.0';
+    const image = `ghcr.io/thrane20/dillinger/streaming-sidecar:${imageTag}`;
+    
+    logger.info(`Starting streaming sidecar: profile=${profileId}, mode=${mode}, gpu=${gpuType}`);
+
+    // Build environment variables
+    const env: string[] = [
+      `SIDECAR_MODE=${mode}`,
+      `GPU_TYPE=${gpuType}`,
+      `STREAMING_CODEC=${streamingSettings.codec}`,
+      `STREAMING_QUALITY=${streamingSettings.quality}`,
+      `IDLE_TIMEOUT=${streamingSettings.idleTimeoutMinutes * 60}`, // Convert to seconds
+      `WOLF_PIN=${wolfPin}`,
+      `SWAY_WIDTH=${profile.width}`,
+      `SWAY_HEIGHT=${profile.height}`,
+      `SWAY_REFRESH_RATE=${profile.refreshRate}`,
+      `PUID=${process.getuid?.() || 1000}`,
+      `PGID=${process.getgid?.() || 1000}`,
+    ];
+
+    // Add test mode options
+    if (mode === 'test-stream' || mode === 'test-x11') {
+      env.push(`TEST_PATTERN=${testOptions?.pattern || 'smpte'}`);
+    }
+
+    // Add custom Sway config if provided
+    if (profile.customConfig) {
+      env.push(`SWAY_CUSTOM_CONFIG=${Buffer.from(profile.customConfig).toString('base64')}`);
+    }
+
+    // Build device mappings based on GPU type
+    const devices: Docker.DeviceMapping[] = [];
+    
+    if (gpuType === 'amd' || gpuType === 'auto') {
+      // AMD VA-API devices
+      devices.push(
+        { PathOnHost: '/dev/dri/card0', PathInContainer: '/dev/dri/card0', CgroupPermissions: 'rwm' },
+        { PathOnHost: '/dev/dri/renderD128', PathInContainer: '/dev/dri/renderD128', CgroupPermissions: 'rwm' },
+      );
+    }
+    
+    // For NVIDIA, we'd use nvidia-container-runtime instead of devices
+    const runtime = gpuType === 'nvidia' ? 'nvidia' : undefined;
+
+    // Container configuration
+    const containerConfig: Docker.ContainerCreateOptions = {
+      name: this.SIDECAR_CONTAINER_NAME,
+      Image: image,
+      Env: env,
+      Labels: {
+        'dillinger.managed': 'true',
+        'dillinger.streaming.sidecar': 'true',
+        'dillinger.streaming.profileId': profileId,
+        'dillinger.streaming.mode': mode,
+        'dillinger.streaming.wolfPin': wolfPin,
+      },
+      ExposedPorts: {
+        '47984/tcp': {},
+        '47984/udp': {},
+        '47989/tcp': {},
+        '47989/udp': {},
+        '47999/tcp': {},
+        '47999/udp': {},
+        '48010/tcp': {},
+        '48010/udp': {},
+        '9999/tcp': {},
+      },
+      HostConfig: {
+        NetworkMode: 'host', // Use host networking for Wolf discovery
+        Devices: devices,
+        CapAdd: ['SYS_NICE'], // For Sway/Wayland
+        Binds: [
+          'dillinger_streaming_wayland:/run/dillinger:rw',
+          'dillinger_streaming_pulse:/run/pulse:rw',
+          // Wolf state directory
+          'dillinger_wolf_state:/wolf:rw',
+        ],
+        Tmpfs: {
+          '/tmp': 'exec,nosuid,nodev',
+        },
+        ...(runtime ? { Runtime: runtime } : {}),
+      } as any,
+    };
+
+    // For test-x11 mode, we need to pass through the host display
+    if (mode === 'test-x11') {
+      containerConfig.Env?.push(`DISPLAY=${process.env.DISPLAY || ':0'}`);
+      containerConfig.HostConfig!.Binds!.push('/tmp/.X11-unix:/tmp/.X11-unix:ro');
+    }
+
+    try {
+      // Pull image if not present
+      const images = await docker.listImages({ filters: { reference: [image] } });
+      if (images.length === 0) {
+        logger.info(`Pulling streaming sidecar image: ${image}`);
+        await new Promise<void>((resolve, reject) => {
+          docker.pull(image, (err: Error | null, stream: NodeJS.ReadableStream) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            docker.modem.followProgress(stream, (pullErr: Error | null) => {
+              if (pullErr) {
+                reject(pullErr);
+              } else {
+                resolve();
+              }
+            });
+          });
+        });
+      }
+
+      // Create and start the container
+      const container = await docker.createContainer(containerConfig);
+      await container.start();
+
+      logger.info(`Streaming sidecar started: ${container.id.substring(0, 12)}`);
+
+      // Wait a moment for services to initialize
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      return {
+        containerId: container.id,
+        status: 'running',
+        wayland: '/run/dillinger/wayland-dillinger',
+        pulse: '/run/dillinger/pulse-socket',
+        wolfPin,
+      };
+    } catch (error) {
+      logger.error('Failed to start streaming sidecar:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the current status of the streaming sidecar
+   */
+  async getStreamerSidecarStatus(): Promise<{
+    containerId: string;
+    status: string;
+    labels?: Record<string, string>;
+    startedAt?: string;
+  } | null> {
+    try {
+      const containers = await docker.listContainers({
+        all: true,
+        filters: {
+          name: [this.SIDECAR_CONTAINER_NAME],
+        },
+      });
+
+      if (containers.length === 0) {
+        return null;
+      }
+
+      const containerInfo = containers[0];
+      return {
+        containerId: containerInfo.Id,
+        status: containerInfo.State,
+        labels: containerInfo.Labels,
+        startedAt: containerInfo.Created ? new Date(containerInfo.Created * 1000).toISOString() : undefined,
+      };
+    } catch (error) {
+      logger.error('Failed to get streaming sidecar status:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Stop the streaming sidecar container
+   */
+  async stopStreamerSidecar(): Promise<void> {
+    try {
+      const containers = await docker.listContainers({
+        all: true,
+        filters: {
+          name: [this.SIDECAR_CONTAINER_NAME],
+        },
+      });
+
+      if (containers.length === 0) {
+        logger.info('Streaming sidecar not running');
+        return;
+      }
+
+      const container = docker.getContainer(containers[0].Id);
+      
+      // Stop gracefully with timeout
+      try {
+        await container.stop({ t: 10 });
+      } catch (stopErr: any) {
+        if (stopErr.statusCode !== 304) { // 304 = container already stopped
+          throw stopErr;
+        }
+      }
+      
+      // Remove the container
+      await container.remove({ force: true });
+      
+      logger.info('Streaming sidecar stopped and removed');
+    } catch (error) {
+      logger.error('Failed to stop streaming sidecar:', error);
       throw error;
     }
   }

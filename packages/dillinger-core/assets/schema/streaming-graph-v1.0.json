@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dillinger.dev/schemas/v1.0/streaming-graph.json",
+  "title": "Streaming Graph",
+  "description": "Schema for Dillinger streaming graph store",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version of this graph store"
+    },
+    "nodeSchemaVersions": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "defaultPresetId": { "type": "string" },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "lastRunAt": { "type": "string" },
+        "status": { "type": "string" },
+        "issues": { "type": "array" }
+      }
+    },
+    "presets": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  },
+  "required": ["presets", "defaultPresetId"]
+}

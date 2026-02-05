@@ -3,6 +3,7 @@ import './globals.css';
 import ThemeToggle from './components/ThemeToggle';
 import LeftSidebar from './components/LeftSidebar';
 import RightSidebar from './components/RightSidebar';
+import ClientProviders from './components/ClientProviders';
 
 export const metadata: Metadata = {
   title: 'Dillinger - Game Library Manager',
@@ -24,6 +25,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased bg-background text-text transition-colors duration-300">
+        <ClientProviders>
         <div className="min-h-screen flex flex-col bg-background/90">
           <header className="sticky top-0 z-20 bg-surface/80 border-b border-border/60 backdrop-blur-xl shadow-soft">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -140,6 +142,7 @@ export default function RootLayout({
             </div>
           </footer>
         </div>
+        </ClientProviders>
       </body>
     </html>
   );

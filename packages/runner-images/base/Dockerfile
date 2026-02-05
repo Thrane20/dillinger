@@ -275,11 +275,38 @@ pacman -S --noconfirm --needed \
     curl \
     libdrm \
     pciutils \
-    libunwind
+    libunwind \
+    boost-libs
 
 echo "**** Cleanup ****"
 pacman -Scc --noconfirm
 _INSTALL_MOONLIGHT
+
+#######################################################
+# Stage 6b: Copy Wolf binary and libraries from GOW image
+#######################################################
+
+# Copy pre-built Wolf binaries from the official Games on Whales image
+# This enables Moonlight streaming for any runner that inherits from this base
+COPY --from=ghcr.io/games-on-whales/wolf:stable /wolf/wolf /wolf/wolf
+COPY --from=ghcr.io/games-on-whales/wolf:stable /wolf/fake-udev /wolf/fake-udev
+
+# Copy Wolf's custom GStreamer libraries that it was built against
+# Wolf requires liblibgstwaylanddisplay.so and custom GStreamer builds
+COPY --from=ghcr.io/games-on-whales/wolf:stable /usr/local/lib/liblibgstwaylanddisplay.so* /usr/local/lib/
+COPY --from=ghcr.io/games-on-whales/wolf:stable /usr/local/lib/x86_64-linux-gnu/ /usr/local/lib/x86_64-linux-gnu/
+
+# Copy ICU libraries (Wolf was built against Debian's ICU 74, Arch has ICU 78)
+COPY --from=ghcr.io/games-on-whales/wolf:stable /usr/lib/x86_64-linux-gnu/libicu*.so.74* /usr/local/lib/
+
+# Create Wolf configuration directory and set permissions
+# Also set up library paths for Wolf's custom libraries
+RUN chmod +x /wolf/wolf /wolf/fake-udev && \
+    mkdir -p /etc/wolf/cfg && \
+    chown -R 1000:1000 /etc/wolf && \
+    echo "/usr/local/lib" >> /etc/ld.so.conf.d/wolf.conf && \
+    echo "/usr/local/lib/x86_64-linux-gnu" >> /etc/ld.so.conf.d/wolf.conf && \
+    ldconfig
 
 #######################################################
 # Stage 7: Setup GStreamer for streaming
@@ -287,6 +314,9 @@ _INSTALL_MOONLIGHT
 
 RUN <<_INSTALL_GSTREAMER
 set -e
+echo "**** Refresh package database (fix stale mirrors) ****"
+pacman -Sy --noconfirm
+
 echo "**** Install GStreamer for video/audio streaming ****"
 pacman -S --noconfirm --needed \
     gstreamer \
@@ -296,7 +326,8 @@ pacman -S --noconfirm --needed \
     gst-plugins-ugly \
     gst-libav \
     gst-plugin-pipewire \
-    gst-plugin-va
+    gst-plugin-va \
+    x265
 
 echo "**** Cleanup ****"
 pacman -Scc --noconfirm

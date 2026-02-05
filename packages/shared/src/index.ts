@@ -5,6 +5,8 @@ export * from './types/scraper.js';
 export * from './types/volume.js';
 export * from './types/websocket.js';
 export * from './types/schema-version.js';
+export * from './types/streaming.js';
+export * from './types/streaming-graph.js';
 
 // Export runner types (previously @dillinger/runner-types)
 export * from './runner/api.js';

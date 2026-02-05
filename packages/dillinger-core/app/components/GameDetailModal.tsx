@@ -48,6 +48,7 @@ interface GameDetailModalProps {
   onClose: () => void;
   onLaunch: (mode: 'local' | 'streaming') => void;
   onLaunchDebug: () => void;
+  onLaunchDebugStreaming: () => void;
   onStop: () => void;
   onDelete: () => void;
   getPlatformName: (id: string) => string;
@@ -63,6 +64,7 @@ export default function GameDetailModal({
   onClose,
   onLaunch,
   onLaunchDebug,
+  onLaunchDebugStreaming,
   onStop,
   onDelete,
   getPlatformName,
@@ -265,6 +267,17 @@ export default function GameDetailModal({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   </svg>
                   Stream
+                </button>
+                <button
+                  onClick={onLaunchDebugStreaming}
+                  disabled={isLaunching}
+                  className="bg-purple-500 hover:bg-purple-600 text-white rounded-lg px-6 py-3 transition-colors font-medium disabled:opacity-60 inline-flex items-center gap-2"
+                  title="Debug stream (keep container after exit)"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  Debug Stream
                 </button>
                 <button
                   onClick={onLaunchDebug}

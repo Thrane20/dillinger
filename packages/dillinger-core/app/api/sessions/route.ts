@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
+import type { Dirent } from 'fs';
 import path from 'path';
 import { JSONStorageService } from '@/lib/services/storage';
 
@@ -121,7 +122,7 @@ interface SessionData {
 export async function GET(_request: NextRequest) {
   try {
     // Read all session files
-    const dirEntries = await fs.readdir(SESSIONS_DIR, { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
+    const dirEntries = await fs.readdir(SESSIONS_DIR, { withFileTypes: true }).catch(() => [] as Dirent[]);
     const sessionFiles: string[] = [];
 
     for (const entry of dirEntries) {

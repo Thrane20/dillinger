@@ -403,10 +403,8 @@ echo ""
 apply_xrandr_mode
 
 #######################################################
-# Launch RetroArch
+# Build Launch Command
 #######################################################
-
-log_header "Launching RetroArch"
 
 # Build command
 CMD="retroarch"
@@ -420,6 +418,93 @@ fi
 if [ "$#" -gt 0 ]; then
     ARGS+=("$@")
 fi
+
+#######################################################
+# Moonlight Streaming Mode
+#######################################################
+
+# When ENABLE_MOONLIGHT is true, we let Wolf handle the game launch
+# Wolf will create a virtual compositor and run the game with proper display
+if [ "$ENABLE_MOONLIGHT" = "true" ]; then
+    log_header "Moonlight Streaming Mode"
+    echo ""
+    log_section "Wolf will launch the game when a Moonlight client connects."
+    echo ""
+    echo "  To connect:"
+    echo "  1. Open Moonlight on your device"
+    echo "  2. Add this server's IP address"
+    echo "  3. Pair with the PIN shown in Wolf logs"
+    echo "  4. Select '$GAME_TITLE' from the app list"
+    echo ""
+    
+    # Build the full command string for Wolf's run_cmd
+    # Wolf will execute this when a client selects the app
+    FULL_CMD="$CMD ${ARGS[*]}"
+    if [ "$ENABLE_MANGOHUD" = "true" ]; then
+        FULL_CMD="mangohud $FULL_CMD"
+    fi
+    
+    # Export the command for Wolf to use
+    export WOLF_RUN_CMD="gosu ${UNAME} $FULL_CMD"
+    
+    echo "  Game command: $FULL_CMD"
+    echo ""
+    
+    # Now start Wolf server with the correct run command
+    # setup_moonlight() prepared the config, start_wolf_server() updates it and starts Wolf
+    start_wolf_server
+    
+    # Wait for Wolf process - need to read PID and use a polling loop
+    # because 'wait' only works for direct child processes
+    if [ -f /tmp/wolf.pid ]; then
+        WOLF_PID=$(cat /tmp/wolf.pid)
+        log_section "Waiting for Wolf server (PID: $WOLF_PID)..."
+        echo "  Press Ctrl+C to stop"
+        echo ""
+        
+        # Trap signals to clean up Wolf when container is stopped
+        trap "echo 'Shutting down Wolf...'; kill $WOLF_PID 2>/dev/null; exit 0" SIGTERM SIGINT
+        
+        # Poll until Wolf exits - this keeps the container alive
+        while kill -0 "$WOLF_PID" 2>/dev/null; do
+            sleep 1
+        done
+        
+        # Get exit code if possible
+        wait $WOLF_PID 2>/dev/null
+        EXIT_CODE=$?
+    else
+        log_error "Wolf PID file not found - streaming may not be available"
+        # Fall back to waiting indefinitely so container doesn't exit
+        log_warning "Container will stay running. Press Ctrl+C to stop."
+        trap "exit 0" SIGTERM SIGINT
+        while true; do
+            sleep 10
+        done
+        EXIT_CODE=1
+    fi
+    
+    echo ""
+    log_section "Wolf server stopped"
+    
+    # Handle KEEP_ALIVE mode for debugging
+    KEEP_ALIVE="${KEEP_ALIVE:-false}"
+    if [ "$KEEP_ALIVE" = "true" ]; then
+        echo ""
+        echo -e "${YELLOW}KEEP_ALIVE is enabled - container will stay running${NC}"
+        echo -e "${YELLOW}You can exec into it for debugging: docker exec -it <container> /bin/bash${NC}"
+        echo ""
+        tail -f /dev/null
+    fi
+    
+    exit $EXIT_CODE
+fi
+
+#######################################################
+# Launch RetroArch (Non-Streaming Mode)
+#######################################################
+
+log_header "Launching RetroArch"
 
 # Wrap with MangoHUD if enabled
 if [ "$ENABLE_MANGOHUD" = "true" ]; then

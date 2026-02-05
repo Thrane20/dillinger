@@ -52,6 +52,7 @@ usage() {
     printf "    vice                    Build only the vice runner image\n"
     printf "    fs-uae                  Build only the fs-uae runner image\n"
     printf "    retroarch               Build only the retroarch runner image\n"
+    printf "    streaming-sidecar       Build only the streaming sidecar image\n"
     printf "\n"
     printf "\033[1;33mEXAMPLES:\033[0m\n"
     printf "    %s                      # Build all images\n" "$0"
@@ -74,6 +75,7 @@ usage() {
     printf "    4. vice (depends on base)\n"
     printf "    5. fs-uae (depends on base)\n"
     printf "    6. retroarch (depends on base)\n"
+    printf "    7. streaming-sidecar (depends on base)\n"
     printf "\n"
     exit 0
 }
@@ -102,12 +104,20 @@ get_tag() {
         linux-native)
             version="${DILLINGER_RUNNER_LINUX_NATIVE_VERSION:-latest}"
             ;;
+        streaming-sidecar)
+            version="${DILLINGER_STREAMING_SIDECAR_VERSION:-latest}"
+            ;;
         *)
             version="latest"
             ;;
     esac
     
-    echo "${IMAGE_PREFIX}-${name}:${version}"
+    # Streaming sidecar uses a different prefix (not a runner)
+    if [ "$name" = "streaming-sidecar" ]; then
+        echo "ghcr.io/thrane20/dillinger/${name}:${version}"
+    else
+        echo "${IMAGE_PREFIX}-${name}:${version}"
+    fi
 }
 
 # Function to build an image
@@ -205,7 +215,7 @@ while [[ $# -gt 0 ]]; do
             # Build all images (default behavior)
             shift
             ;;
-        base|linux-native|wine|vice|fs-uae|retroarch)
+        base|linux-native|wine|vice|fs-uae|retroarch|streaming-sidecar)
             IMAGES+=("$1")
             shift
             ;;
@@ -251,7 +261,7 @@ fi
 printf "\n"
 
 # Check for dependency issues
-if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae" || should_build "retroarch"; then
+if should_build "linux-native" || should_build "wine" || should_build "vice" || should_build "fs-uae" || should_build "retroarch" || should_build "streaming-sidecar"; then
     if ! should_build "base" && ! docker images | grep -q "${IMAGE_PREFIX}-base"; then
         printf "\033[1;33mWarning: Dependent images require base image, but base not found.\033[0m\n"
         printf "\033[1;33mAdding base to build queue...\033[0m\n"
@@ -301,6 +311,11 @@ if [ "$PARALLEL" = true ]; then
 
     if should_build "retroarch"; then
         build_image "RetroArch Runner" "retroarch" "$(get_tag retroarch)" &
+        PIDS+=($!)
+    fi
+
+    if should_build "streaming-sidecar"; then
+        build_image "Streaming Sidecar" "streaming-sidecar" "$(get_tag streaming-sidecar)" &
         PIDS+=($!)
     fi
     
@@ -353,6 +368,13 @@ else
             exit 1
         fi
     fi
+
+    if should_build "streaming-sidecar"; then
+        if ! build_image "Streaming Sidecar" "streaming-sidecar" "$(get_tag streaming-sidecar)"; then
+            BUILD_FAILED=true
+            exit 1
+        fi
+    fi
 fi
 
 # Summary
@@ -369,6 +391,7 @@ if [ "$BUILD_FAILED" = false ]; then
     should_build "vice" && printf "  - $(get_tag vice)\n"
     should_build "fs-uae" && printf "  - $(get_tag fs-uae)\n"
     should_build "retroarch" && printf "  - $(get_tag retroarch)\n"
+    should_build "streaming-sidecar" && printf "  - $(get_tag streaming-sidecar)\n"
     printf "\n"
     printf "\033[1;33mAvailable images:\033[0m\n"
     docker images | grep -E "(dillinger/runner-|ghcr.io.*runner-)" | awk '{printf "  - %-50s %10s %15s\n", $1":"$2, $6" "$7, $NF}'

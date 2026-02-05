@@ -154,6 +154,10 @@ export interface GamePlatformConfig {
       codec?: 'h264' | 'h265' | 'av1'; // Video codec
       audioCodec?: 'opus' | 'aac'; // Audio codec
     };
+    streaming?: {
+      profileId?: string; // Sway profile ID for streaming (uses default if not set)
+      presetId?: string; // Streaming graph preset ID (uses default if not set)
+    };
   };
   installation?: {
     status?: 'not_installed' | 'installing' | 'installed' | 'failed'; // Installation state
