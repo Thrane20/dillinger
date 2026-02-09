@@ -4,3 +4,6 @@
 [submodule "third_party/wolf"]
 	path = third_party/wolf
 	url = https://github.com/Thrane20/wolf
+[submodule "third_party/gst-wayland-display"]
+	path = third_party/gst-wayland-display
+	url = https://github.com/thrane20/gst-wayland-display
