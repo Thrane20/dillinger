@@ -1,0 +1,127 @@
+# Wolf Streaming Server Configuration
+# Static config - baked into Dillinger streaming-sidecar image
+# Only modified at runtime: uuid and paired_clients
+
+config_version = 4
+uuid = "REPLACE_AT_RUNTIME"
+hostname = "Dillinger"
+support_hevc = true
+
+paired_clients = []
+
+# =============================================================================
+# GStreamer Video Pipeline
+# =============================================================================
+[gstreamer.video]
+default_source = """
+interpipesrc listen-to={session_id}_video is-live=true stream-sync=restart-ts max-buffers=1 block=false\
+"""
+
+default_sink = """
+rtpmoonlightpay_video name=moonlight_pay payload_size={payload_size} fec_percentage={fec_percentage} min_required_fec_packets={min_required_fec_packets} !
+udpsink bind-port={host_port} host={client_ip} port={client_port} sync=true\
+"""
+
+# VA-API encoder (AMD/Intel) - GStreamer 1.22+
+[[gstreamer.video.h264_encoders]]
+plugin_name = "va"
+check_elements = ["vah264enc"]
+video_params = """
+queue leaky=downstream max-size-buffers=1 !
+videoconvertscale !
+video/x-raw, width={width}, height={height}, format=NV12, chroma-site={color_range}, colorimetry={color_space}\
+"""
+encoder_pipeline = """
+vah264enc rate-control=cbr bitrate={bitrate} ref-frames=1 !
+h264parse !
+video/x-h264, profile=high, stream-format=byte-stream\
+"""
+
+# VA-API encoder (legacy fallback)
+[[gstreamer.video.h264_encoders]]
+plugin_name = "vaapi"
+check_elements = ["vaapih264enc"]
+video_params = """
+queue leaky=downstream max-size-buffers=1 !
+videoconvertscale !
+video/x-raw, width={width}, height={height}, format=NV12, chroma-site={color_range}, colorimetry={color_space}\
+"""
+encoder_pipeline = """
+vaapih264enc rate-control=cbr bitrate={bitrate} !
+h264parse !
+video/x-h264, profile=high, stream-format=byte-stream\
+"""
+
+# NVIDIA NVENC encoder
+[[gstreamer.video.h264_encoders]]
+plugin_name = "nvcodec"
+check_elements = ["nvh264enc"]
+video_params = """
+queue leaky=downstream max-size-buffers=1 !
+videoconvertscale !
+video/x-raw, width={width}, height={height}, format=NV12, chroma-site={color_range}, colorimetry={color_space}\
+"""
+encoder_pipeline = """
+nvh264enc preset=low-latency-hq rc-mode=cbr bitrate={bitrate} gop-size=30 !
+h264parse !
+video/x-h264, profile=high, stream-format=byte-stream\
+"""
+
+# x264 software encoder (fallback)
+[[gstreamer.video.h264_encoders]]
+plugin_name = "x264"
+check_elements = ["x264enc"]
+video_params = """
+queue leaky=downstream max-size-buffers=1 !
+videoconvertscale !
+video/x-raw, width={width}, height={height}, format=I420, chroma-site={color_range}, colorimetry={color_space}\
+"""
+encoder_pipeline = """
+x264enc tune=zerolatency bitrate={bitrate} speed-preset=superfast threads=4 bframes=0 b-adapt=false !
+h264parse !
+video/x-h264, profile=high, stream-format=byte-stream\
+"""
+
+# =============================================================================
+# GStreamer Audio Pipeline
+# =============================================================================
+[gstreamer.audio]
+default_source = """
+interpipesrc listen-to={session_id}_audio is-live=true stream-sync=restart-ts max-bytes=0 max-buffers=3 block=false\
+"""
+
+default_audio_params = "queue max-size-buffers=3 leaky=downstream ! audiorate ! audioconvert"
+
+default_opus_encoder = """
+opusenc bitrate={bitrate} bitrate-type=cbr frame-size={packet_duration} bandwidth=fullband audio-type=restricted-lowdelay max-payload-size=1400\
+"""
+
+default_sink = """
+rtpmoonlightpay_audio name=moonlight_pay packet_duration={packet_duration} encrypt={encrypt} aes_key="{aes_key}" aes_iv="{aes_iv}" !
+udpsink bind-port={host_port} host={client_ip} port={client_port} sync=true\
+"""
+
+# =============================================================================
+# Dillinger Profile - Streams Sway compositor output
+# =============================================================================
+[[profiles]]
+id = "dillinger"
+name = "Dillinger"
+
+    [[profiles.apps]]
+    title = "Dillinger"
+    start_virtual_compositor = false
+    start_audio_server = false
+
+    # Minimal runner - keeps session alive while Dillinger manages games
+    [profiles.apps.runner]
+    type = "process"
+    run_cmd = "sh -c 'while true; do sleep 60; done'"
+
+    # Capture video from Sway compositor
+    [profiles.apps.video]
+    source = "waylanddisplaysrc"
+
+    # Capture audio from PulseAudio
+    [profiles.apps.audio]
+    source = "pulsesrc server=unix:/run/dillinger/pulse-socket"

@@ -1,13 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
+import http from 'node:http';
+import https from 'node:https';
+import fs from 'node:fs';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { logger } from '@/lib/services/logger';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-// Wolf config path - this is mounted from the host volume
-const WOLF_CONFIG_PATH = '/data/wolf/config.toml';
+function getDefaultGateway(): string | null {
+  try {
+    const data = fs.readFileSync('/proc/net/route', 'utf-8');
+    const lines = data.trim().split('\n');
+    for (const line of lines.slice(1)) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 3) continue;
+      const destination = parts[1];
+      const gatewayHex = parts[2];
+      if (destination !== '00000000') continue;
+      const num = parseInt(gatewayHex, 16);
+      const bytes = [
+        num & 0xff,
+        (num >> 8) & 0xff,
+        (num >> 16) & 0xff,
+        (num >> 24) & 0xff,
+      ];
+      return bytes.join('.');
+    }
+  } catch (error) {
+    logger.debug('Failed to read default gateway:', error);
+  }
+  return null;
+}
+
+function getHostCandidates(): string[] {
+  const candidates: string[] = [];
+  const envGateway = process.env.DILLINGER_HOST_GATEWAY || process.env.HOST_GATEWAY;
+  if (envGateway) candidates.push(envGateway);
+  const gateway = getDefaultGateway();
+  if (gateway) candidates.push(gateway);
+  return candidates;
+}
+
+function buildSunshineBases(): string[] {
+  const bases = new Set<string>();
+  if (process.env.SUNSHINE_API_BASE) bases.add(process.env.SUNSHINE_API_BASE);
+
+  const hosts = ['localhost', 'host.docker.internal', ...getHostCandidates()];
+  for (const host of hosts) {
+    bases.add(`https://${host}:47990`);
+    bases.add(`http://${host}:47990`);
+  }
+
+  return Array.from(bases);
+}
+
+function buildHealthBases(): string[] {
+  const bases = new Set<string>();
+  if (process.env.SUNSHINE_HEALTH_BASE) bases.add(process.env.SUNSHINE_HEALTH_BASE);
+
+  const hosts = ['localhost', 'host.docker.internal', ...getHostCandidates()];
+  for (const host of hosts) {
+    bases.add(`http://${host}:9999`);
+  }
+
+  return Array.from(bases);
+}
 
 /**
  * GET /api/streaming/pair
@@ -15,39 +73,23 @@ const WOLF_CONFIG_PATH = '/data/wolf/config.toml';
  */
 export async function GET() {
   try {
-    // Read the Wolf config to get paired clients
-    if (!existsSync(WOLF_CONFIG_PATH)) {
-      return NextResponse.json({
-        paired: false,
-        clients: [],
-        message: 'No Wolf configuration found. Start a streaming session first.',
-        instructions: [
-          '1. Enable streaming in a game\'s settings (Moonlight > Enabled)',
-          '2. Launch the game - the streaming sidecar will start automatically',
-          '3. Open Moonlight client and connect to this host\'s IP',
-          '4. Enter the PIN shown in the Moonlight client',
-        ],
-      });
-    }
-    
-    const configContent = readFileSync(WOLF_CONFIG_PATH, 'utf-8');
-    
-    // Parse paired clients from TOML (simple extraction)
-    const pairedClientsMatch = configContent.match(/\[\[paired_clients\]\]/g);
-    const clientCount = pairedClientsMatch ? pairedClientsMatch.length : 0;
-    
+    const status = await fetchFromBases(buildHealthBases(), '/status', 1500);
+
+    const clients = Array.isArray(status?.clients) ? status.clients : [];
+    const clientCount = clients.length;
+
     return NextResponse.json({
       paired: clientCount > 0,
       clientCount,
-      configPath: WOLF_CONFIG_PATH,
-      message: clientCount > 0 
+      clients,
+      message: clientCount > 0
         ? `${clientCount} Moonlight client(s) paired`
         : 'No clients paired yet',
       instructions: clientCount === 0 ? [
         '1. Start a game with streaming enabled',
         '2. Open Moonlight client on another device',
         '3. Add this host\'s IP address',
-        '4. Click to pair and enter the PIN when prompted',
+        '4. Open Sunshine web UI at http://<host>:47990 to approve pairing',
       ] : [
         'Your Moonlight clients are paired and ready to connect.',
         'Start a game with streaming enabled to begin playing.',
@@ -65,11 +107,11 @@ export async function GET() {
 /**
  * POST /api/streaming/pair
  * Handle pairing request with PIN verification
- * 
+ *
  * Actions:
- * - pair: Submit PIN to Wolf to complete pairing
- * - status: Check if Wolf is ready for pairing
- * - clear: Remove all paired clients
+ * - pair: Submit PIN to Sunshine (best-effort)
+ * - status: Check if sidecar is ready for pairing
+ * - clear: Clear paired clients (not supported via API)
  */
 export async function POST(request: NextRequest) {
   try {
@@ -77,12 +119,12 @@ export async function POST(request: NextRequest) {
     const { action } = body;
     
     if (action === 'pair') {
-      // Submit PIN to Wolf to complete pairing
-      const { pair_secret, pin } = body;
+      // Submit PIN to Sunshine to complete pairing
+      const { pin } = body;
       
-      if (!pair_secret || !pin) {
+      if (!pin) {
         return NextResponse.json(
-          { success: false, error: 'Missing pair_secret or pin' },
+          { success: false, error: 'Missing pin' },
           { status: 400 }
         );
       }
@@ -95,13 +137,11 @@ export async function POST(request: NextRequest) {
         );
       }
       
-      logger.info(`Attempting to pair client with secret: ${pair_secret.substring(0, 8)}...`);
-      
-      // Submit pairing to Wolf
-      const result = await submitPairingPin(pair_secret, pin);
+      logger.info(`Attempting Sunshine pairing with pin: ${pin}`);
+      const result = await submitPairingPin(pin);
       
       if (result.success) {
-        logger.info('Client paired successfully');
+        logger.info('Sunshine pairing successful');
         return NextResponse.json({ success: true, message: 'Pairing successful!' });
       } else {
         logger.warn('Pairing failed:', result.error);
@@ -113,10 +153,9 @@ export async function POST(request: NextRequest) {
     }
     
     if (action === 'status') {
-      // Check if streaming sidecar/Wolf is running and accepting pairing requests
-      const container = await findStreamingContainer();
-      
-      if (!container) {
+      const ready = await fetchReadyFromBases(buildHealthBases(), '/readyz', 1500);
+
+      if (!ready) {
         return NextResponse.json({
           ready: false,
           message: 'No streaming session active. Start a game with streaming enabled first.',
@@ -126,40 +165,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         ready: true,
         message: 'Streaming sidecar is running and ready for pairing',
-        pairingUrl: 'Connect Moonlight client to this host IP on port 47989',
+        pairingUrl: 'Open Sunshine web UI at http://<host>:47990 to approve pairing',
         instructions: [
           '1. Open Moonlight on your device',
           '2. Click "Add Host" or the + button',
           '3. Enter this server\'s IP address',
           '4. When prompted, enter the PIN shown in Moonlight',
-          '5. Once paired, you can stream games!',
+          '5. Approve pairing in Sunshine web UI',
         ],
       });
     }
     
     if (action === 'clear') {
-      // Clear all paired clients (useful for troubleshooting)
-      if (existsSync(WOLF_CONFIG_PATH)) {
-        let configContent = readFileSync(WOLF_CONFIG_PATH, 'utf-8');
-        
-        // Remove all paired_clients sections
-        // This is a simple approach - in production use a TOML library
-        configContent = configContent.replace(/\[\[paired_clients\]\][\s\S]*?(?=\[\[|\[(?!\[)|$)/g, '');
-        configContent = configContent.replace(/paired_clients\s*=\s*\[\]/g, 'paired_clients = []');
-        
-        writeFileSync(WOLF_CONFIG_PATH, configContent);
-        
-        logger.info('Cleared all paired Moonlight clients');
-        
-        return NextResponse.json({
-          success: true,
-          message: 'All paired clients have been cleared. You will need to pair again.',
-        });
-      }
-      
       return NextResponse.json({
-        success: true,
-        message: 'No configuration to clear',
+        success: false,
+        message: 'Clearing paired clients is not supported via API. Use Sunshine web UI.',
       });
     }
     
@@ -179,95 +199,186 @@ export async function POST(request: NextRequest) {
 /**
  * Find a running streaming container (sidecar or legacy session)
  */
-async function findStreamingContainer(): Promise<string | null> {
+async function submitPairingPin(pin: string): Promise<{ success: boolean; error?: string }> {
+  const endpoints = ['/api/pin'];
+  let lastError: string | undefined;
+  const creds = await getSunshineCredentials();
+  const headers: Record<string, string> = {};
+  if (creds?.username && creds?.password) {
+    const token = Buffer.from(`${creds.username}:${creds.password}`).toString('base64');
+    headers.Authorization = `Basic ${token}`;
+  }
+
+  for (const base of buildSunshineBases()) {
+    for (const endpoint of endpoints) {
+      try {
+        const response = await requestJson(
+          `${base}${endpoint}`,
+          'POST',
+          { pin, name: 'Dillinger' },
+          5000,
+          headers
+        );
+        if (response.ok) {
+          const data = response.json ?? {};
+          const success =
+            data.success === true ||
+            data.ok === true ||
+            data.status === true ||
+            data.status === 'ok' ||
+            data.paired === true ||
+            Object.keys(data).length === 0;
+          if (success) {
+            return { success: true };
+          }
+        }
+        lastError = `Sunshine ${base}${endpoint} responded ${response.status}`;
+        if (response.bodyText) {
+          lastError += `: ${response.bodyText.slice(0, 200)}`;
+        }
+      } catch (error) {
+        logger.debug('Sunshine pairing attempt failed:', error);
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        if (!lastError && !message.includes('ENOTFOUND')) {
+          lastError = message;
+        }
+      }
+    }
+  }
+
+  return { success: false, error: lastError || 'Pairing failed. Use Sunshine web UI to approve pairing.' };
+}
+
+async function getSunshineCredentials(): Promise<{ username: string; password: string } | null> {
+  const envUser = process.env.SUNSHINE_USERNAME;
+  const envPass = process.env.SUNSHINE_PASSWORD;
+  if (envUser && envPass) {
+    return { username: envUser, password: envPass };
+  }
+
+  const containerId = await findTestContainerId();
+  if (!containerId) return null;
+
   try {
-    // Check for streaming-sidecar containers first
-    const { stdout: sidecarOutput } = await execAsync(
-      `docker ps --filter "ancestor=ghcr.io/thrane20/dillinger/streaming-sidecar" --format "{{.ID}}" 2>/dev/null | head -1`
+    const { stdout } = await execAsync(
+      `docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' ${containerId}`
     );
-    if (sidecarOutput.trim()) return sidecarOutput.trim();
+    const lines = stdout.split('\n');
+    const username = getEnvValue(lines, 'SUNSHINE_USERNAME');
+    const password = getEnvValue(lines, 'SUNSHINE_PASSWORD');
+    if (username && password) {
+      return { username, password };
+    }
+  } catch (error) {
+    logger.debug('Failed to read Sunshine credentials from container:', error);
+  }
 
-    // Check by name pattern
-    const { stdout: namedOutput } = await execAsync(
-      `docker ps --filter "name=streaming-sidecar" --format "{{.ID}}" 2>/dev/null | head -1`
+  return null;
+}
+
+function getEnvValue(lines: string[], key: string): string | null {
+  const line = lines.find((entry) => entry.startsWith(`${key}=`));
+  return line ? line.slice(key.length + 1) : null;
+}
+
+async function findTestContainerId(): Promise<string | null> {
+  try {
+    const { stdout } = await execAsync(
+      `docker ps --filter "name=dillinger-streaming-test" --format "{{.ID}}" 2>/dev/null | head -1`
     );
-    if (namedOutput.trim()) return namedOutput.trim();
-
-    // Check legacy session containers
-    const { stdout: sessionOutput } = await execAsync(
-      `docker ps --filter "name=dillinger-session" --format "{{.ID}}" 2>/dev/null | head -1`
-    );
-    if (sessionOutput.trim()) return sessionOutput.trim();
-
-    return null;
-  } catch {
+    const id = stdout.trim();
+    return id || null;
+  } catch (error) {
+    logger.debug('Failed to find test container:', error);
     return null;
   }
 }
 
-/**
- * Submit the pairing PIN to Wolf
- */
-async function submitPairingPin(pairSecret: string, pin: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    // Method 1: Try Wolf's HTTP API directly (works with --network=host or port mapping)
+async function fetchFromBases(bases: string[], path: string, timeoutMs: number) {
+  for (const base of bases) {
     try {
-      const response = await fetch('http://localhost:47989/api/v1/pair/client', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pair_secret: pairSecret,
-          pin: pin,
-        }),
-        signal: AbortSignal.timeout(5000),
-      });
-      
+      const response = await requestJson(`${base}${path}`, 'GET', undefined, timeoutMs);
       if (response.ok) {
-        const data = await response.json();
-        return { success: data.success === true };
+        return response.json ?? null;
       }
     } catch (error) {
-      logger.debug('HTTP pairing failed, trying via container:', error);
+      logger.debug('Health status fetch failed:', error);
     }
-    
-    // Method 2: Try via docker exec to Wolf's Unix socket
-    return await submitPairingViaContainer(pairSecret, pin);
-  } catch (error) {
-    logger.error('All pairing methods failed:', error);
-    return { success: false, error: 'Failed to communicate with Wolf server' };
   }
+  return null;
 }
 
-/**
- * Submit pairing via Wolf's Unix socket (through docker exec)
- */
-async function submitPairingViaContainer(pairSecret: string, pin: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const containerId = await findStreamingContainer();
-    
-    if (!containerId) {
-      return { success: false, error: 'No streaming container found' };
+async function fetchReadyFromBases(bases: string[], path: string, timeoutMs: number) {
+  for (const base of bases) {
+    try {
+      const response = await requestJson(`${base}${path}`, 'GET', undefined, timeoutMs);
+      if (response.ok) {
+        return true;
+      }
+    } catch (error) {
+      logger.debug('Health readiness fetch failed:', error);
     }
-    
-    // Call the pairing API via curl inside the container
-    const jsonBody = JSON.stringify({ pair_secret: pairSecret, pin: pin }).replace(/"/g, '\\"');
-    const curlCmd = `curl -s --unix-socket /tmp/wolf.sock -X POST -H "Content-Type: application/json" -d "${jsonBody}" http://localhost/api/v1/pair/client`;
-    
-    const { stdout, stderr } = await execAsync(`docker exec ${containerId} sh -c '${curlCmd}'`);
-    
-    if (stderr) {
-      logger.debug('Curl stderr:', stderr);
-    }
-    
-    if (stdout.trim()) {
-      const result = JSON.parse(stdout);
-      return { success: result.success === true, error: result.error };
-    }
-    
-    return { success: false, error: 'No response from Wolf' };
-  } catch (error) {
-    logger.error('Failed to submit pairing via container:', error);
-    return { success: false, error: 'Failed to communicate with Wolf server' };
   }
+  return false;
+}
+
+async function requestJson(
+  url: string,
+  method: 'GET' | 'POST',
+  body: Record<string, unknown> | undefined,
+  timeoutMs: number,
+  headers: Record<string, string> = {}
+): Promise<{ ok: boolean; status: number; json?: Record<string, unknown>; bodyText?: string }>
+{
+  const parsedUrl = new URL(url);
+  const isHttps = parsedUrl.protocol === 'https:';
+  const transport = isHttps ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : undefined;
+    const req = transport.request(
+      {
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port,
+        path: parsedUrl.pathname + parsedUrl.search,
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+        },
+        ...(isHttps ? { rejectUnauthorized: false } : {}),
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on('end', () => {
+          const bodyText = Buffer.concat(chunks).toString('utf-8');
+          let json: Record<string, unknown> | undefined;
+          if (bodyText) {
+            try {
+              json = JSON.parse(bodyText) as Record<string, unknown>;
+            } catch {
+              json = undefined;
+            }
+          }
+          const status = res.statusCode || 0;
+          resolve({ ok: status >= 200 && status < 300, status, json, bodyText });
+        });
+      }
+    );
+
+    req.on('error', (err) => reject(err));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error('Request timed out'));
+    });
+
+    if (payload) {
+      req.write(payload);
+    }
+
+    req.end();
+  });
 }
 

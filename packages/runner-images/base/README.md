@@ -21,10 +21,6 @@ Base Docker image providing shared infrastructure for all Dillinger game runners
   - Multiple upscaling filters (FSR, NIS, etc.)
   - Frame rate limiting
 
-### Streaming
-- **Moonlight/Wolf**: Game streaming over the network using the Moonlight protocol
-- **GStreamer**: Video/audio encoding and streaming pipeline
-- **Low Latency**: Optimized for minimal latency streaming
 
 ## Usage
 
@@ -85,12 +81,6 @@ CMD ["/usr/local/bin/game-entrypoint.sh"]
 - `GAMESCOPE_FULLSCREEN`: Fullscreen mode (true/false, default: false)
 - `GAMESCOPE_UPSCALER`: Upscaling filter (auto/fsr/nis/linear, default: auto)
 
-### Moonlight Streaming
-- `ENABLE_MOONLIGHT`: Enable Moonlight streaming server (true/false, default: false)
-- `WOLF_CFG_FOLDER`: Wolf configuration directory (default: /etc/wolf/cfg)
-- `WOLF_LOG_LEVEL`: Log level (DEBUG/INFO/WARN/ERROR, default: INFO)
-- `WOLF_RENDER_NODE`: GPU render node (default: /dev/dri/renderD128)
-
 ## Volumes
 
 - `/game`: Game files and executables
@@ -99,16 +89,6 @@ CMD ["/usr/local/bin/game-entrypoint.sh"]
 - `/wineprefix`: Wine prefix for Windows games (Wine runners)
 - `/installers`: Game installers
 - `/run/user/gameuser`: XDG runtime directory
-
-## Exposed Ports
-
-### Moonlight/Wolf Streaming
-- `47984/tcp`: HTTPS
-- `47989/tcp`: HTTP
-- `47999/udp`: Control
-- `48010/tcp`: RTSP
-- `48100/udp`: Video
-- `48200/udp`: Audio
 
 ## GPU Access
 

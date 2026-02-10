@@ -212,6 +212,7 @@ export default function SettingsPage() {
   const [streamingQuality, setStreamingQuality] = useState<'low' | 'medium' | 'high' | 'ultra'>('high');
   const [streamingIdleTimeout, setStreamingIdleTimeout] = useState(15);
   const [streamingDefaultProfileId, setStreamingDefaultProfileId] = useState('1080p60');
+  const [streamingMode, setStreamingMode] = useState<'profiles' | 'graph'>('profiles');
   const [swayProfiles, setSwayProfiles] = useState<SwayProfile[]>([]);
   const [graphStore, setGraphStore] = useState<StreamingGraphStore | null>(null);
   const [graphPresets, setGraphPresets] = useState<StreamingGraphPreset[]>([]);
@@ -223,9 +224,7 @@ export default function SettingsPage() {
   const [graphEditorError, setGraphEditorError] = useState<string | null>(null);
   const [graphEditorTab, setGraphEditorTab] = useState<'canvas' | 'json'>('canvas');
   const [graphEditorGraph, setGraphEditorGraph] = useState<StreamingGraphDefinition | null>(null);
-  const [graphEditorNodes, setGraphEditorNodes, onGraphNodesChange] = useNodesState<
-    Node<GraphNodeData>
-  >([]);
+  const [graphEditorNodes, setGraphEditorNodes, onGraphNodesChange] = useNodesState<GraphNodeData>([]);
   const [graphEditorEdges, setGraphEditorEdges, onGraphEdgesChange] = useEdgesState<Edge>([]);
   const [graphEditorSelectedNodeId, setGraphEditorSelectedNodeId] = useState<string | null>(null);
   const [graphEditorFlowInstance, setGraphEditorFlowInstance] = useState<
@@ -251,8 +250,16 @@ export default function SettingsPage() {
   const [testPattern, setTestPattern] = useState<TestPattern>('smpte');
   const [testProfileId, setTestProfileId] = useState('1080p60');
   const [testLoading, setTestLoading] = useState(false);
+  const [pairingPin, setPairingPin] = useState('');
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingMessage, setPairingMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [pairingStatus, setPairingStatus] = useState<{ ready: boolean; message?: string } | null>(null);
+  const [pairingStatusLoading, setPairingStatusLoading] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editingProfile, setEditingProfile] = useState<SwayProfile | null>(null);
+  const streamingSettingsLoadedRef = useRef(false);
+  const streamingSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [streamingAutoSaveStatus, setStreamingAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [profileFormData, setProfileFormData] = useState({
     id: '',
     name: '',
@@ -505,7 +512,14 @@ export default function SettingsPage() {
   // ============================================================================
 
   const graphNodeTypes = useMemo(() => ({ graphNode: GraphNodeCard }), []);
-  const nodeDefaultsByType = useMemo(
+  
+  type NodeDefaults = {
+    inputs: GraphPortDefinition[];
+    outputs: GraphPortDefinition[];
+    attributes: Record<string, unknown>;
+  };
+  
+  const nodeDefaultsByType = useMemo<Record<string, NodeDefaults>>(
     () => ({
       SessionRoot: {
         inputs: [],
@@ -672,19 +686,25 @@ export default function SettingsPage() {
     []
   );
 
-  const buildFlowFromGraph = (graph: StreamingGraphDefinition) => {
-    const nodes = graph.nodes.map((node, index) => {
+  const buildFlowFromGraph = (graph: StreamingGraphDefinition): { nodes: Node<GraphNodeData>[]; edges: Edge[] } => {
+    const nodes: Node<GraphNodeData>[] = graph.nodes.map((node, index) => {
       const defaults = nodeDefaultsByType[node.type] || nodeDefaultsByType.CustomNode;
-      const mergedAttributes = {
+      const mergedAttributes: Record<string, unknown> = {
         ...(defaults?.attributes ?? {}),
         ...(node.attributes ?? {}),
       };
-      const attributes = node.attributes ?? {};
       const position =
         (mergedAttributes as { position?: { x: number; y: number } }).position ?? {
           x: (index % 4) * 220,
           y: Math.floor(index / 4) * 140,
         };
+      
+      const inputs: GraphPortDefinition[] = node.inputs && node.inputs.length > 0 
+        ? node.inputs 
+        : (defaults?.inputs ?? []);
+      const outputs: GraphPortDefinition[] = node.outputs && node.outputs.length > 0 
+        ? node.outputs 
+        : (defaults?.outputs ?? []);
 
       return {
         id: node.id,
@@ -693,11 +713,11 @@ export default function SettingsPage() {
           label: node.displayName,
           type: node.type,
           attributes: mergedAttributes,
-          inputs: node.inputs && node.inputs.length > 0 ? node.inputs : defaults?.inputs ?? [],
-          outputs: node.outputs && node.outputs.length > 0 ? node.outputs : defaults?.outputs ?? [],
+          inputs,
+          outputs,
         },
         position,
-      } satisfies Node<GraphNodeData>;
+      };
     });
 
     const edges = graph.edges.map((edge) => ({
@@ -765,6 +785,7 @@ export default function SettingsPage() {
       if (settingsResponse.ok) {
         const data = await settingsResponse.json();
         if (data.settings) {
+          setStreamingMode(data.settings.streamingMode || 'profiles');
           setStreamingGpuType(data.settings.gpuType || 'auto');
           setStreamingCodec(data.settings.codec || 'h264');
           setStreamingQuality(data.settings.quality || 'high');
@@ -801,6 +822,8 @@ export default function SettingsPage() {
           setGraphValidation(data.store.validation || null);
         }
       }
+
+      streamingSettingsLoadedRef.current = true;
     } catch (error) {
       console.error('Failed to load streaming settings:', error);
     }
@@ -810,11 +833,13 @@ export default function SettingsPage() {
     try {
       setSaving(true);
       setMessage(null);
+      setStreamingAutoSaveStatus('saving');
 
       const response = await fetch(`${API_BASE_URL}/api/settings/streaming`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          streamingMode,
           gpuType: streamingGpuType,
           codec: streamingCodec,
           quality: streamingQuality,
@@ -825,13 +850,40 @@ export default function SettingsPage() {
 
       if (!response.ok) throw new Error('Failed to save streaming settings');
       showSaveIndicator('streaming', 'Streaming settings saved!');
+      setStreamingAutoSaveStatus('saved');
+      setTimeout(() => setStreamingAutoSaveStatus('idle'), 2000);
     } catch (error) {
       console.error('Failed to save streaming settings:', error);
       setMessage({ type: 'error', text: 'Failed to save streaming settings' });
+      setStreamingAutoSaveStatus('error');
+      setTimeout(() => setStreamingAutoSaveStatus('idle'), 3000);
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!streamingSettingsLoadedRef.current) return;
+    if (streamingSaveTimeoutRef.current) {
+      clearTimeout(streamingSaveTimeoutRef.current);
+    }
+    streamingSaveTimeoutRef.current = setTimeout(() => {
+      saveStreamingSettings();
+    }, 500);
+
+    return () => {
+      if (streamingSaveTimeoutRef.current) {
+        clearTimeout(streamingSaveTimeoutRef.current);
+      }
+    };
+  }, [
+    streamingMode,
+    streamingGpuType,
+    streamingCodec,
+    streamingQuality,
+    streamingIdleTimeout,
+    streamingDefaultProfileId,
+  ]);
 
   const saveStreamingGraphDefaults = async (presetId?: string) => {
     if (!graphStore) return;
@@ -1366,6 +1418,66 @@ export default function SettingsPage() {
     }
   };
 
+  const submitPairingPin = async () => {
+    const normalizedPin = pairingPin.replace(/\D/g, '').slice(0, 4);
+    if (normalizedPin.length !== 4) {
+      setPairingMessage({ type: 'error', text: 'PIN must be 4 digits.' });
+      return;
+    }
+
+    try {
+      setPairingLoading(true);
+      setPairingMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pair', pin: normalizedPin }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Pairing failed');
+      }
+
+      setPairingMessage({ type: 'success', text: 'Pairing successful! You can connect in Moonlight now.' });
+      setPairingPin('');
+      setPairingStatus({ ready: true, message: 'Moonlight client paired and ready to connect.' });
+    } catch (error) {
+      setPairingMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Pairing failed',
+      });
+    } finally {
+      setPairingLoading(false);
+    }
+  };
+
+  const refreshPairingStatus = async () => {
+    try {
+      setPairingStatusLoading(true);
+      const response = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'status' }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to check pairing status');
+      }
+
+      setPairingStatus({ ready: !!data.ready, message: data.message });
+    } catch (error) {
+      setPairingStatus({
+        ready: false,
+        message: error instanceof Error ? error.message : 'Failed to check pairing status',
+      });
+    } finally {
+      setPairingStatusLoading(false);
+    }
+  };
+
   const createSwayProfile = async () => {
     try {
       setSaving(true);
@@ -1420,52 +1532,6 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: 'Failed to update profile' });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const deleteSwayProfile = async (profileId: string) => {
-    if (!confirm('Are you sure you want to delete this profile?')) return;
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/settings/sway-configs/${profileId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.message || 'Failed to delete profile');
-      }
-
-      await loadStreamingSettings();
-      showSaveIndicator('streaming', 'Profile deleted!');
-    } catch (error) {
-      console.error('Failed to delete profile:', error);
-      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to delete profile' });
-    }
-  };
-
-  const cloneSwayProfile = async (profileId: string) => {
-    const newId = prompt('Enter ID for the cloned profile (e.g., my-custom-profile):');
-    if (!newId) return;
-    const newName = prompt('Enter name for the cloned profile:');
-    if (!newName) return;
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/settings/sway-configs/${profileId}/clone`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newId, newName }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.message || 'Failed to clone profile');
-      }
-
-      await loadStreamingSettings();
-      showSaveIndicator('streaming', 'Profile cloned!');
-    } catch (error) {
-      console.error('Failed to clone profile:', error);
-      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to clone profile' });
     }
   };
 
@@ -2203,9 +2269,52 @@ export default function SettingsPage() {
               Configure the Dillinger streaming sidecar for Moonlight game streaming. Games can be streamed to any Moonlight-compatible client.
             </p>
 
+            <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Streaming Control Mode</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Choose between basic profiles or the graph-based pipeline.
+                  </p>
+                </div>
+                <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setStreamingMode('profiles')}
+                    className={`px-4 py-2 text-xs font-semibold ${
+                      streamingMode === 'profiles'
+                        ? 'bg-gray-900 text-white'
+                        : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    Profiles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStreamingMode('graph')}
+                    className={`px-4 py-2 text-xs font-semibold ${
+                      streamingMode === 'graph'
+                        ? 'bg-gray-900 text-white'
+                        : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    Graphs
+                  </button>
+                </div>
+              </div>
+              {streamingAutoSaveStatus !== 'idle' && (
+                <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                  {streamingAutoSaveStatus === 'saving' && 'Saving streaming settings...'}
+                  {streamingAutoSaveStatus === 'saved' && 'Streaming settings saved.'}
+                  {streamingAutoSaveStatus === 'error' && 'Failed to save streaming settings.'}
+                </div>
+              )}
+            </div>
+
             <div className="space-y-6">
               {/* GPU and Encoder Settings */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {streamingMode === 'profiles' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="streamingGpuType" className="block text-sm font-medium mb-2">
                     GPU for Encoding
@@ -2273,109 +2382,56 @@ export default function SettingsPage() {
                   </p>
                 </div>
               </div>
+              )}
 
               {/* Default Profile */}
-              <div>
-                <label htmlFor="streamingDefaultProfile" className="block text-sm font-medium mb-2">
-                  Default Streaming Profile
-                </label>
-                <select
-                  id="streamingDefaultProfile"
-                  value={streamingDefaultProfileId}
-                  onChange={(e) => setStreamingDefaultProfileId(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
-                >
-                  {swayProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name} ({profile.width}×{profile.height} @ {profile.refreshRate}Hz)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                onClick={saveStreamingSettings}
-                disabled={saving}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-              >
-                {saving ? 'Saving...' : 'Save Streaming Settings'}
-              </button>
-
-              {/* Streaming Profiles Section */}
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-medium">Streaming Profiles</h3>
-                  <button
-                    onClick={() => openProfileModal()}
-                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors"
-                  >
-                    + New Profile
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                  Profiles define resolution and refresh rate for streaming. Games can use a specific profile or the default.
-                </p>
-
-                <div className="space-y-2">
-                  {swayProfiles.map((profile) => (
-                    <div
-                      key={profile.id}
-                      className={`flex items-center justify-between p-3 rounded-lg border ${
-                        streamingDefaultProfileId === profile.id
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                          : 'border-gray-200 dark:border-gray-700'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="radio"
-                          name="defaultProfile"
-                          checked={streamingDefaultProfileId === profile.id}
-                          onChange={() => setStreamingDefaultProfileId(profile.id)}
-                          className="h-4 w-4 text-blue-600"
-                        />
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-gray-100">
-                            {profile.name}
-                            {profile.isDefault && (
-                              <span className="ml-2 text-xs bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded">System</span>
-                            )}
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {profile.width}×{profile.height} @ {profile.refreshRate}Hz
-                            {profile.description && ` • ${profile.description}`}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => openProfileModal(profile)}
-                          className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded transition-colors"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => cloneSwayProfile(profile.id)}
-                          className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded transition-colors"
-                        >
-                          Clone
-                        </button>
-                        {!profile.isDefault && (
-                          <button
-                            onClick={() => deleteSwayProfile(profile.id)}
-                            className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 rounded transition-colors"
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </div>
+              {streamingMode === 'profiles' && (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <label htmlFor="streamingDefaultProfile" className="block text-sm font-medium">
+                      Default Streaming Profile
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => openProfileModal()}
+                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg transition-colors"
+                      >
+                        + New Profile
+                      </button>
+                      <button
+                        onClick={() => {
+                          const profile = swayProfiles.find((item) => item.id === streamingDefaultProfileId);
+                          if (profile) {
+                            openProfileModal(profile);
+                          }
+                        }}
+                        disabled={!swayProfiles.find((item) => item.id === streamingDefaultProfileId)}
+                        className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        Edit Profile
+                      </button>
                     </div>
-                  ))}
+                  </div>
+                  <div className="mt-3">
+                    <select
+                      id="streamingDefaultProfile"
+                      value={streamingDefaultProfileId}
+                      onChange={(e) => setStreamingDefaultProfileId(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                    >
+                      {swayProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name} ({profile.width}×{profile.height} @ {profile.refreshRate}Hz)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Streaming Graph Presets */}
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+              {streamingMode === 'graph' && (
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                   <h3 className="text-lg font-medium">Streaming Graph Presets</h3>
                   <div className="flex items-center gap-2">
@@ -2384,12 +2440,6 @@ export default function SettingsPage() {
                       className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white text-sm rounded-lg transition-colors"
                     >
                       Open Graph Editor
-                    </button>
-                    <button
-                      onClick={() => openGraphEditor()}
-                      className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors"
-                    >
-                      + New Preset
                     </button>
                     {graphValidation && (
                       <span
@@ -2418,7 +2468,11 @@ export default function SettingsPage() {
                     <select
                       id="graphDefaultPreset"
                       value={graphDefaultPresetId}
-                      onChange={(e) => setGraphDefaultPresetId(e.target.value)}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        setGraphDefaultPresetId(nextValue);
+                        saveStreamingGraphDefaults(nextValue);
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
                     >
                       {graphPresets.length === 0 && (
@@ -2432,22 +2486,6 @@ export default function SettingsPage() {
                     </select>
                   </div>
 
-                  <div className="flex flex-col justify-end gap-2">
-                    <button
-                      onClick={saveStreamingGraphDefaults}
-                      disabled={saving || !graphStore}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                    >
-                      {saving ? 'Saving...' : 'Save Graph Defaults'}
-                    </button>
-                    <button
-                      onClick={validateStreamingGraph}
-                      disabled={saving || !graphStore}
-                      className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                    >
-                      {saving ? 'Validating...' : 'Run Graph Validation'}
-                    </button>
-                  </div>
                 </div>
 
                 {graphValidation?.lastRunAt && (
@@ -2456,9 +2494,11 @@ export default function SettingsPage() {
                   </p>
                 )}
               </div>
+              )}
 
               {/* Test Streaming Section */}
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+              {streamingMode === 'profiles' && (
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                 <h3 className="text-lg font-medium mb-4">Test Streaming</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
                   Verify your streaming setup with a test pattern before launching games.
@@ -2553,7 +2593,57 @@ export default function SettingsPage() {
                     </>
                   )}
                 </div>
+
+                <div className="mt-5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Moonlight Pairing PIN</h4>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Enter the 4-digit PIN shown in Moonlight to approve pairing without opening Sunshine.
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        Devcontainer note: pairing checks use host networking (host.docker.internal).
+                      </p>
+                    </div>
+                    <button
+                      onClick={refreshPairingStatus}
+                      disabled={pairingStatusLoading}
+                      className="text-xs px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
+                    >
+                      {pairingStatusLoading ? 'Checking...' : 'Check Ready'}
+                    </button>
+                  </div>
+                  {pairingStatus && (
+                    <div className={`mb-3 text-xs ${pairingStatus.ready ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                      {pairingStatus.message || (pairingStatus.ready ? 'Sidecar is ready for pairing.' : 'Sidecar is not ready for pairing.')}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      placeholder="1234"
+                      value={pairingPin}
+                      onChange={(e) => setPairingPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      className="w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={submitPairingPin}
+                      disabled={pairingLoading || pairingPin.length !== 4}
+                      className="bg-gray-900 hover:bg-gray-800 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
+                    >
+                      {pairingLoading ? 'Pairing...' : 'Pair Now'}
+                    </button>
+                  </div>
+                  {pairingMessage && (
+                    <div className={`mt-3 rounded-md px-3 py-2 text-sm ${pairingMessage.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-200' : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-200'}`} role="status" aria-live="polite">
+                      {pairingMessage.text}
+                    </div>
+                  )}
+                </div>
               </div>
+              )}
             </div>
           </div>
 
@@ -2671,15 +2761,24 @@ export default function SettingsPage() {
 
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-xs text-gray-500 dark:text-gray-400">
-                          Reset to factory defaults
+                          Graph actions
                         </span>
-                        <button
-                          onClick={resetStreamingGraphDefaults}
-                          disabled={saving}
-                          className="px-3 py-1.5 text-xs bg-red-600 hover:bg-red-700 text-white rounded"
-                        >
-                          {saving ? 'Resetting...' : 'Reset Graph'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={validateStreamingGraph}
+                            disabled={saving || !graphStore}
+                            className="px-3 py-1.5 text-xs bg-gray-900 hover:bg-gray-800 text-white rounded"
+                          >
+                            {saving ? 'Validating...' : 'Run Validation'}
+                          </button>
+                          <button
+                            onClick={resetStreamingGraphDefaults}
+                            disabled={saving}
+                            className="px-3 py-1.5 text-xs bg-red-600 hover:bg-red-700 text-white rounded"
+                          >
+                            {saving ? 'Resetting...' : 'Reset Graph'}
+                          </button>
+                        </div>
                       </div>
 
                       {graphEditorError && (
@@ -2689,7 +2788,7 @@ export default function SettingsPage() {
                       )}
 
                       <div className={
-                        `grid grid-cols-1 md:grid-cols-2 gap-4 ${!hasActiveGraphPreset && graphEditorMode !== 'create' ? 'opacity-50 pointer-events-none' : ''}`
+                        `grid grid-cols-1 md:grid-cols-2 gap-4 ${!hasActiveGraphPreset ? 'opacity-50 pointer-events-none' : ''}`
                       }>
                         <div>
                           <label className="block text-xs font-semibold mb-1">Preset ID</label>
@@ -2715,7 +2814,7 @@ export default function SettingsPage() {
                       </div>
 
                       <div className={
-                        `mt-4 ${!hasActiveGraphPreset && graphEditorMode !== 'create' ? 'opacity-50 pointer-events-none' : ''}`
+                        `mt-4 ${!hasActiveGraphPreset ? 'opacity-50 pointer-events-none' : ''}`
                       }>
                         <label className="block text-xs font-semibold mb-1">Description</label>
                         <input
@@ -2728,7 +2827,7 @@ export default function SettingsPage() {
                       </div>
 
                       <div className={
-                        `mt-4 flex items-center justify-between gap-3 ${!hasActiveGraphPreset && graphEditorMode !== 'create' ? 'opacity-50 pointer-events-none' : ''}`
+                        `mt-4 flex items-center justify-between gap-3 ${!hasActiveGraphPreset ? 'opacity-50 pointer-events-none' : ''}`
                       }>
                         <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
                           <button
@@ -2762,7 +2861,7 @@ export default function SettingsPage() {
                       </div>
 
                       <div className={
-                        `mt-4 flex items-center justify-end gap-3 ${!hasActiveGraphPreset && graphEditorMode !== 'create' ? 'opacity-50 pointer-events-none' : ''}`
+                        `mt-4 flex items-center justify-end gap-3 ${!hasActiveGraphPreset ? 'opacity-50 pointer-events-none' : ''}`
                       }>
                         <button
                           onClick={() => setShowGraphEditor(false)}

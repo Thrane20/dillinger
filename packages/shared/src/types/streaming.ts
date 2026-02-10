@@ -26,6 +26,32 @@ export type TestPattern = 'smpte' | 'bar' | 'checkerboard' | 'ball' | 'snow';
 export type SidecarMode = 'game' | 'test-stream' | 'test-x11';
 
 /**
+ * Job specification passed to the streaming sidecar
+ */
+export interface JobSpec {
+  gameCommand: string[];
+  resolution: { width: number; height: number };
+  fps: number;
+  bitrate: number | StreamingQuality;
+  encoder: 'vaapi' | 'nvenc' | 'amf' | 'software' | 'auto';
+  audio: { enabled: boolean };
+  env: Record<string, string>;
+  mounts: Array<{ source: string; target: string; readonly?: boolean }>;
+  network: { ports: number[] };
+  input: { enableController: boolean; enableMouse: boolean; enableKeyboard: boolean };
+}
+
+/**
+ * Sunshine client info returned by the sidecar
+ */
+export interface SunshineClientInfo {
+  id?: string;
+  name?: string;
+  ip?: string;
+  status?: string;
+}
+
+/**
  * A Sway compositor profile for streaming
  */
 export interface SwayProfile {
@@ -64,6 +90,9 @@ export interface SwayProfile {
  * Streaming settings stored in application settings
  */
 export interface StreamingSettings {
+  /** Which streaming control mode to use */
+  streamingMode: 'profiles' | 'graph';
+
   /** GPU type for hardware encoding */
   gpuType: StreamingGpuType;
   
@@ -96,6 +125,7 @@ export interface StreamingSettings {
  * Default streaming settings
  */
 export const DEFAULT_STREAMING_SETTINGS: StreamingSettings = {
+  streamingMode: 'profiles',
   gpuType: 'auto',
   codec: 'h264',
   quality: 'high',
@@ -177,15 +207,18 @@ export interface SidecarStatus {
   
   /** GPU type being used */
   gpuType?: StreamingGpuType;
+
+  /** Whether Sunshine is running */
+  sunshineRunning?: boolean;
   
   /** Container start time */
   startedAt?: string;
   
   /** Number of connected Wayland clients */
   clientCount?: number;
-  
-  /** Number of paired Moonlight clients */
-  pairedClients?: number;
+
+  /** Sunshine paired clients */
+  clients?: SunshineClientInfo[];
 }
 
 /**

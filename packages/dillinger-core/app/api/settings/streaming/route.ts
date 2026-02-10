@@ -24,6 +24,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const updates: Partial<StreamingSettings> = {};
 
+    if (body.streamingMode !== undefined) {
+      if (!['profiles', 'graph'].includes(body.streamingMode)) {
+        return NextResponse.json(
+          { success: false, message: "Invalid streamingMode (expected 'profiles' | 'graph')" },
+          { status: 400 }
+        );
+      }
+      updates.streamingMode = body.streamingMode;
+    }
+
     // Validate and extract fields
     if (body.gpuType !== undefined) {
       if (!['auto', 'amd', 'nvidia'].includes(body.gpuType)) {

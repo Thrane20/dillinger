@@ -1190,26 +1190,14 @@ if [ "$USE_GAMESCOPE" = "true" ]; then
         
         # Build gamescope command
         GAMESCOPE_CMD="gamescope"
-        
-        # Check if Moonlight streaming is enabled - use headless mode
-        ENABLE_MOONLIGHT="${ENABLE_MOONLIGHT:-false}"
-        if [ "$ENABLE_MOONLIGHT" = "true" ]; then
-            echo -e "${BLUE}  Moonlight streaming detected - using headless mode${NC}"
-            # Headless mode: render without creating a window
-            # Perfect for streaming scenarios where frames are captured by Wolf/Moonlight
-            GAMESCOPE_CMD="$GAMESCOPE_CMD --headless"
-            GAMESCOPE_CMD="$GAMESCOPE_CMD --xwayland-count 1"
-            
-            # Use backend that works best for capture
-            GAMESCOPE_CMD="$GAMESCOPE_CMD --backend drm"
-            
-            # Prefer hardware encoding path
-            if [ -n "$WOLF_RENDER_NODE" ]; then
-                GAMESCOPE_CMD="$GAMESCOPE_CMD --drm-device $WOLF_RENDER_NODE"
-            fi
+
+        # Prefer Wayland backend if available, otherwise fall back to X11
+        if [ -n "$WAYLAND_DISPLAY" ]; then
+            echo -e "${GREEN}✓ Wayland display $WAYLAND_DISPLAY detected${NC}"
+            GAMESCOPE_CMD="$GAMESCOPE_CMD --backend wayland --xwayland-count 1"
+            export GAMESCOPE_WAYLAND_DISPLAY="gamescope-0"
         else
             # Standard nested X11 mode for local display
-            # Check if we have X11 display access first
             if [ -n "$DISPLAY" ] && xdpyinfo >/dev/null 2>&1; then
                 echo -e "${GREEN}✓ X11 display $DISPLAY accessible${NC}"
                 # Use SDL backend which handles X11 better in nested mode
@@ -1241,24 +1229,26 @@ if [ "$USE_GAMESCOPE" = "true" ]; then
         fi
         
         # Fullscreen/windowed mode (only relevant for non-headless)
-        if [ "$ENABLE_MOONLIGHT" != "true" ]; then
-            if [ "$GAMESCOPE_FULLSCREEN" = "true" ]; then
-                GAMESCOPE_CMD="$GAMESCOPE_CMD -f"
-            else
-                # Use borderless windowed mode for better compatibility
-                GAMESCOPE_CMD="$GAMESCOPE_CMD -b"
-            fi
-            
-            # Force grab cursor for better game control (local mode)
-            GAMESCOPE_CMD="$GAMESCOPE_CMD --force-grab-cursor"
+        if [ "$GAMESCOPE_FULLSCREEN" = "true" ]; then
+            GAMESCOPE_CMD="$GAMESCOPE_CMD -f"
+        else
+            # Use borderless windowed mode for better compatibility
+            GAMESCOPE_CMD="$GAMESCOPE_CMD -b"
         fi
+        
+        # Force grab cursor for better game control
+        GAMESCOPE_CMD="$GAMESCOPE_CMD --force-grab-cursor"
         
         # Upscaler
         if [ "$GAMESCOPE_UPSCALER" != "auto" ]; then
             GAMESCOPE_CMD="$GAMESCOPE_CMD -U $GAMESCOPE_UPSCALER"
         fi
         
-        echo "  Gamescope mode: $([ "$ENABLE_MOONLIGHT" = "true" ] && echo "headless (streaming)" || echo "nested X11 (local)")"
+        if [ -n "$WAYLAND_DISPLAY" ]; then
+            echo "  Gamescope mode: wayland"
+        else
+            echo "  Gamescope mode: nested X11"
+        fi
         echo "  Gamescope resolution: ${GAMESCOPE_WIDTH}x${GAMESCOPE_HEIGHT}@${GAMESCOPE_REFRESH}Hz"
         if [ -n "$GAMESCOPE_INPUT_WIDTH" ] && [ -n "$GAMESCOPE_INPUT_HEIGHT" ]; then
             echo "  Gamescope input: ${GAMESCOPE_INPUT_WIDTH}x${GAMESCOPE_INPUT_HEIGHT}"

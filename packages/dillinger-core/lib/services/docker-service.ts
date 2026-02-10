@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import path from 'path';
-import { existsSync, statSync, readFileSync } from 'fs';
+import { randomBytes } from 'crypto';
+import { existsSync, statSync, readFileSync, readdirSync } from 'fs';
 import type { Game, Platform } from '@dillinger/shared';
 import { JSONStorageService } from './storage';
 import { SettingsService } from './settings';
@@ -12,7 +13,7 @@ export interface GameLaunchOptions {
   game: Game;
   platform: Platform;
   sessionId: string;
-  mode?: 'local' | 'streaming'; // Launch mode: local (host display) or streaming (Moonlight/Wolf)
+  mode?: 'local' | 'streaming'; // Launch mode: local (host display) or streaming (Sunshine)
   keepContainer?: boolean; // If true, do not auto-remove container (debugging)
   keepAlive?: boolean; // If true, keep runner alive after failure (debugging)
 }
@@ -1057,7 +1058,6 @@ export class DockerService {
       `GAME_ID=${game.id}`,
       `SESSION_ID=${sessionId}`,
       `SAVES_PATH=/data/saves/${game.id}`, // Game-specific saves directory in dillinger_root
-      `ENABLE_MOONLIGHT=${mode === 'streaming' ? 'true' : 'false'}`, // Enable Moonlight/Wolf streaming mode
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
 
@@ -1250,39 +1250,21 @@ export class DockerService {
       logger.info(`  MangoHUD overlay enabled`);
     }
 
-    // Add Moonlight streaming configuration if enabled
+    // Streaming configuration (Sunshine sidecar)
     // Note: moonlightConfig is already defined at the top of launchGame()
     if (moonlightConfig?.enabled) {
-      env.push('ENABLE_MOONLIGHT=true');
-      
-      // Set quality preset or custom bitrate
+      logger.info('  Streaming enabled for this game (Sunshine sidecar)');
       if (moonlightConfig.bitrate) {
-        env.push(`MOONLIGHT_BITRATE=${moonlightConfig.bitrate * 1000}`); // Convert Mbps to Kbps
-      } else {
-        const qualityPreset = moonlightConfig.quality || 'high';
-        env.push(`MOONLIGHT_QUALITY=${qualityPreset}`);
+        logger.info(`  Requested bitrate: ${moonlightConfig.bitrate}Mbps`);
       }
-      
       if (moonlightConfig.framerate) {
-        env.push(`MOONLIGHT_FPS=${moonlightConfig.framerate}`);
+        logger.info(`  Requested FPS: ${moonlightConfig.framerate}`);
       }
-      
       if (moonlightConfig.resolution) {
-        env.push(`MOONLIGHT_RESOLUTION=${moonlightConfig.resolution}`);
+        logger.info(`  Requested resolution: ${moonlightConfig.resolution}`);
       }
-      
       if (moonlightConfig.codec) {
-        env.push(`MOONLIGHT_CODEC=${moonlightConfig.codec}`);
-      }
-      
-      if (moonlightConfig.audioCodec) {
-        env.push(`MOONLIGHT_AUDIO_CODEC=${moonlightConfig.audioCodec}`);
-      }
-      
-      logger.info(`  Moonlight streaming enabled`);
-      logger.info(`  Moonlight quality: ${moonlightConfig.quality || 'custom'}`);
-      if (moonlightConfig.bitrate) {
-        logger.info(`  Moonlight bitrate: ${moonlightConfig.bitrate}Mbps`);
+        logger.info(`  Requested codec: ${moonlightConfig.codec}`);
       }
     }
 
@@ -1763,71 +1745,21 @@ export class DockerService {
         logger.info('  Keep container enabled: container will not be auto-removed');
       }
       
-      // Configure streaming mode (Wolf/Moonlight)
+      // Configure streaming mode (Sunshine sidecar)
       if (isStreamingMode) {
-        logger.info('  Configuring container for streaming mode...');
-        
-        // Switch to host networking for Moonlight protocol
-        containerConfig.HostConfig.NetworkMode = 'host';
-        logger.info('    Network mode: host');
-        
-        // Add Wolf-required devices for virtual input
-        const streamingDevices = [
-          { PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' },
-          { PathOnHost: '/dev/uhid', PathInContainer: '/dev/uhid', CgroupPermissions: 'rwm' },
-        ];
-        containerConfig.HostConfig.Devices = [
-          ...(containerConfig.HostConfig.Devices || []),
-          ...streamingDevices
-        ];
-        logger.info('    Added devices: /dev/uinput, /dev/uhid');
-        
-        // Add cgroup rule for input devices (major 13)
-        containerConfig.HostConfig.DeviceCgroupRules = [
-          ...(containerConfig.HostConfig.DeviceCgroupRules || []),
-          'c 13:* rmw'
-        ];
-        logger.info('    Added cgroup rule: c 13:* rmw (input devices)');
-        
-        // Mount udev for device events
-        binds.push('/run/udev:/run/udev:rw');
-        logger.info('    Mounted: /run/udev:/run/udev:rw');
-        
-        // Wolf config: Mount a subdirectory of dillinger_root for persistent pairing
-        // Note: dillinger_root:/data is already mounted, so Wolf config goes to /data/wolf
-        // The entrypoint will set WOLF_CFG_FOLDER=/data/wolf
-        env.push('WOLF_CFG_FOLDER=/data/wolf');
-        logger.info('    Wolf config folder: /data/wolf (inside dillinger_root volume)');
-        
-        // Pass game title to entrypoint for Wolf config generation
-        env.push(`GAME_TITLE=${game.title || 'Dillinger Game'}`);
-        
-        // Note: When using host networking, we don't need port bindings
-        // All ports are directly accessible on the host
-        logger.info('    Streaming configured - connect with Moonlight client');
-      } 
-      // Non-streaming mode: expose Moonlight ports if explicitly configured
-      else if (moonlightConfig?.enabled) {
-        containerConfig.ExposedPorts = {
-          '47984/tcp': {}, // HTTPS
-          '47989/tcp': {}, // HTTP
-          '47999/udp': {}, // Control
-          '48010/tcp': {}, // RTSP
-          '48100/udp': {}, // Video
-          '48200/udp': {}, // Audio
-        };
-        
-        containerConfig.HostConfig.PortBindings = {
-          '47984/tcp': [{ HostPort: '47984' }],
-          '47989/tcp': [{ HostPort: '47989' }],
-          '47999/udp': [{ HostPort: '47999' }],
-          '48010/tcp': [{ HostPort: '48010' }],
-          '48100/udp': [{ HostPort: '48100' }],
-          '48200/udp': [{ HostPort: '48200' }],
-        };
-        
-        logger.info(`  Moonlight ports exposed: 47984, 47989, 47999, 48010, 48100, 48200`);
+        logger.info('  Configuring container for streaming sidecar...');
+
+        const settingsService = SettingsService.getInstance();
+        const streamingSettings = await settingsService.getStreamingSettings();
+        await this.ensureStreamerSidecar(streamingSettings.defaultProfileId, 'game');
+
+        // Mount shared Wayland socket from sidecar
+        binds.push('dillinger_streaming_wayland:/run/dillinger:rw');
+        env.push('XDG_RUNTIME_DIR=/run/dillinger');
+        env.push('WAYLAND_DISPLAY=wayland-dillinger');
+        logger.info('    Using sidecar Wayland socket: /run/dillinger/wayland-dillinger');
       }
+      
       
       // Pass the command array to the container
       // The entrypoint script will execute it with gosu
@@ -3724,7 +3656,7 @@ export class DockerService {
     profileId: string,
     mode: 'game' | 'test-stream' | 'test-x11' = 'game',
     testOptions?: { pattern?: string }
-  ): Promise<{ containerId: string; status: string; wayland: string; pulse: string; wolfPin?: string }> {
+  ): Promise<{ containerId: string; status: string; wayland: string; pulse: string }> {
     const settings = SettingsService.getInstance();
     const streamingSettings = await settings.getStreamingSettings();
 
@@ -3743,8 +3675,7 @@ export class DockerService {
           containerId: existing.containerId,
           status: 'running',
           wayland: '/run/dillinger/wayland-dillinger',
-          pulse: '/run/dillinger/pulse-socket',
-          wolfPin: existing.labels?.['dillinger.streaming.wolfPin'],
+          pulse: '/run/dillinger/pipewire-0',
         };
       }
       
@@ -3762,29 +3693,32 @@ export class DockerService {
       throw new Error(`Streaming profile not found: ${profileId}`);
     }
 
-    // Generate a Wolf pairing PIN (4-digit)
-    const wolfPin = Math.floor(1000 + Math.random() * 9000).toString();
+    const sunshinePassword = randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
 
     // Determine GPU type
     const gpuType = streamingSettings.gpuType;
     
     // Get the image version from environment or fallback
-    const imageTag = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '0.3.0';
+    const imageTag = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '1.0.0';
     const image = `ghcr.io/thrane20/dillinger/streaming-sidecar:${imageTag}`;
     
     logger.info(`Starting streaming sidecar: profile=${profileId}, mode=${mode}, gpu=${gpuType}`);
+    logger.info(`  Image: ${image}`);
+    logger.info(`  Resolution: ${profile.width}x${profile.height}@${profile.refreshRate}Hz`);
 
-    // Build environment variables
+    // Build environment variables (match entrypoint expectations)
     const env: string[] = [
       `SIDECAR_MODE=${mode}`,
       `GPU_TYPE=${gpuType}`,
-      `STREAMING_CODEC=${streamingSettings.codec}`,
-      `STREAMING_QUALITY=${streamingSettings.quality}`,
-      `IDLE_TIMEOUT=${streamingSettings.idleTimeoutMinutes * 60}`, // Convert to seconds
-      `WOLF_PIN=${wolfPin}`,
-      `SWAY_WIDTH=${profile.width}`,
-      `SWAY_HEIGHT=${profile.height}`,
-      `SWAY_REFRESH_RATE=${profile.refreshRate}`,
+      `SWAY_CONFIG_NAME=${profileId}`,
+      `RESOLUTION_WIDTH=${profile.width}`,
+      `RESOLUTION_HEIGHT=${profile.height}`,
+      `REFRESH_RATE=${profile.refreshRate}`,
+      `IDLE_TIMEOUT_MINUTES=${streamingSettings.idleTimeoutMinutes}`,
+      `ENABLE_GAMESCOPE=${mode === 'game' ? 'true' : 'false'}`,
+      `AUDIO_ENABLED=true`,
+      `SUNSHINE_USERNAME=dillinger`,
+      `SUNSHINE_PASSWORD=${sunshinePassword}`,
       `PUID=${process.getuid?.() || 1000}`,
       `PGID=${process.getgid?.() || 1000}`,
     ];
@@ -3799,17 +3733,46 @@ export class DockerService {
       env.push(`SWAY_CUSTOM_CONFIG=${Buffer.from(profile.customConfig).toString('base64')}`);
     }
 
-    // Build device mappings based on GPU type
+    // Build device mappings - detect available DRI devices dynamically
     const devices: Docker.DeviceMapping[] = [];
     
     if (gpuType === 'amd' || gpuType === 'auto') {
-      // AMD VA-API devices
-      devices.push(
-        { PathOnHost: '/dev/dri/card0', PathInContainer: '/dev/dri/card0', CgroupPermissions: 'rwm' },
-        { PathOnHost: '/dev/dri/renderD128', PathInContainer: '/dev/dri/renderD128', CgroupPermissions: 'rwm' },
-      );
+      // Scan /dev/dri for available devices (card0, card1, renderD128, etc.)
+      if (existsSync('/dev/dri')) {
+        const driDevices = readdirSync('/dev/dri');
+        for (const device of driDevices) {
+          const devicePath = `/dev/dri/${device}`;
+          devices.push({
+            PathOnHost: devicePath,
+            PathInContainer: devicePath,
+            CgroupPermissions: 'rwm',
+          });
+        }
+        logger.info(`  📺 Mapped ${devices.length} GPU devices: ${driDevices.join(', ')}`);
+      }
     }
     
+    // Add input devices for Sunshine uinput and controller support
+    if (existsSync('/dev/uinput')) {
+      devices.push({
+        PathOnHost: '/dev/uinput',
+        PathInContainer: '/dev/uinput',
+        CgroupPermissions: 'rwm',
+      });
+    }
+
+    if (existsSync('/dev/input')) {
+      const inputDevices = readdirSync('/dev/input');
+      for (const device of inputDevices) {
+        const devicePath = `/dev/input/${device}`;
+        devices.push({
+          PathOnHost: devicePath,
+          PathInContainer: devicePath,
+          CgroupPermissions: 'rwm',
+        });
+      }
+    }
+
     // For NVIDIA, we'd use nvidia-container-runtime instead of devices
     const runtime = gpuType === 'nvidia' ? 'nvidia' : undefined;
 
@@ -3823,13 +3786,14 @@ export class DockerService {
         'dillinger.streaming.sidecar': 'true',
         'dillinger.streaming.profileId': profileId,
         'dillinger.streaming.mode': mode,
-        'dillinger.streaming.wolfPin': wolfPin,
+        'dillinger.streaming.sunshineUser': 'dillinger',
       },
       ExposedPorts: {
         '47984/tcp': {},
         '47984/udp': {},
         '47989/tcp': {},
         '47989/udp': {},
+        '47990/tcp': {},
         '47999/tcp': {},
         '47999/udp': {},
         '48010/tcp': {},
@@ -3837,14 +3801,12 @@ export class DockerService {
         '9999/tcp': {},
       },
       HostConfig: {
-        NetworkMode: 'host', // Use host networking for Wolf discovery
+        NetworkMode: 'host', // Use host networking for Sunshine discovery
         Devices: devices,
-        CapAdd: ['SYS_NICE'], // For Sway/Wayland
+        CapAdd: ['SYS_ADMIN', 'SYS_PTRACE', 'SYS_NICE'],
         Binds: [
           'dillinger_streaming_wayland:/run/dillinger:rw',
-          'dillinger_streaming_pulse:/run/pulse:rw',
-          // Wolf state directory
-          'dillinger_wolf_state:/wolf:rw',
+          'dillinger_sunshine_state:/var/lib/sunshine:rw',
         ],
         Tmpfs: {
           '/tmp': 'exec,nosuid,nodev',
@@ -3894,8 +3856,7 @@ export class DockerService {
         containerId: container.id,
         status: 'running',
         wayland: '/run/dillinger/wayland-dillinger',
-        pulse: '/run/dillinger/pulse-socket',
-        wolfPin,
+        pulse: '/run/dillinger/pipewire-0',
       };
     } catch (error) {
       logger.error('Failed to start streaming sidecar:', error);

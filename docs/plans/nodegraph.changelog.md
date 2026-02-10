@@ -26,3 +26,4 @@
 - Added node deletion via right-click with guard for required nodes.
 - Added reset action to restore default streaming graph presets (moved into editor).
 - Disabled editor/canvas when no preset is selected to avoid confusion.
+- Added streaming mode switch to separate profiles vs graphs in settings.

@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { usePairing } from '../components/PairingProvider';
 
 interface PairedClient {
-  client_id: string;
-  app_state_folder?: string;
+  id?: string;
+  name?: string;
+  ip?: string;
+  status?: string;
 }
 
 export default function StreamingPage() {
@@ -37,7 +39,7 @@ export default function StreamingPage() {
     return (
       <div className="min-h-screen bg-gray-900 text-white p-8">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold mb-8">🎮 Moonlight Streaming</h1>
+          <h1 className="text-3xl font-bold mb-8">🎮 Sunshine Streaming</h1>
           <div className="animate-pulse">Loading streaming status...</div>
         </div>
       </div>
@@ -48,7 +50,7 @@ export default function StreamingPage() {
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">🎮 Moonlight Streaming</h1>
+          <h1 className="text-3xl font-bold">🎮 Sunshine Streaming</h1>
           <Link href="/" className="text-blue-400 hover:text-blue-300">
             ← Back to Games
           </Link>
@@ -81,26 +83,6 @@ export default function StreamingPage() {
           )}
         </div>
 
-        {/* Pending Pairing Notification */}
-        {status?.pendingPairings && status.pendingPairings.length > 0 && (
-          <div className="bg-yellow-900/50 border border-yellow-600 rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4 text-yellow-400">
-              🔐 Pending Pairing Request{status.pendingPairings.length > 1 ? 's' : ''}
-            </h2>
-            <p className="text-gray-300 mb-4">
-              A Moonlight client is trying to pair. A PIN entry dialog should appear automatically.
-              If you don&apos;t see it, check your notification settings.
-            </p>
-            {status.pendingPairings.map((request) => (
-              <div key={request.pair_secret} className="bg-gray-800 rounded-lg p-4 mb-2">
-                <p>
-                  <span className="text-gray-400">Client IP:</span>{' '}
-                  <span className="font-mono text-white">{request.client_ip}</span>
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
         {/* Paired Clients */}
         <div className="bg-gray-800 rounded-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
@@ -108,9 +90,11 @@ export default function StreamingPage() {
             {status?.pairedClients && status.pairedClients.length > 0 && (
               <button
                 onClick={handleClearClients}
-                className="text-sm text-red-400 hover:text-red-300"
+                className="text-sm text-red-400/70 cursor-not-allowed"
+                title="Clear clients from Sunshine web UI"
+                disabled
               >
-                Clear All
+                Clear All (use Sunshine UI)
               </button>
             )}
           </div>
@@ -123,10 +107,12 @@ export default function StreamingPage() {
           
           {status?.pairedClients && status.pairedClients.length > 0 ? (
             <ul className="space-y-2">
-              {status.pairedClients.map((client: PairedClient) => (
-                <li key={client.client_id} className="flex items-center gap-2 text-gray-300">
+              {status.pairedClients.map((client: PairedClient, index: number) => (
+                <li key={`${client.id || client.name || client.ip || 'client'}-${index}`} className="flex items-center gap-2 text-gray-300">
                   <span className="text-green-400">✓</span>
-                  <span className="font-mono text-sm">{client.client_id.substring(0, 16)}...</span>
+                  <span className="font-mono text-sm">
+                    {client.name || client.id || client.ip || 'Unknown client'}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -143,8 +129,8 @@ export default function StreamingPage() {
             <li>Launch the game - the streaming sidecar will start automatically</li>
             <li>Open <a href="https://moonlight-stream.org/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Moonlight</a> on your client device (PC, phone, tablet, TV)</li>
             <li>Add this server&apos;s IP address in Moonlight</li>
-            <li>When Moonlight shows a PIN, a dialog will appear automatically</li>
-            <li>Enter the PIN to pair, then select the game to start streaming!</li>
+            <li>When Moonlight shows a PIN, open Sunshine web UI at <span className="font-mono">http://&lt;host&gt;:47990</span></li>
+            <li>Approve the pairing, then select the game to start streaming!</li>
           </ol>
           
           <div className="mt-6 p-4 bg-gray-700 rounded">
@@ -152,6 +138,7 @@ export default function StreamingPage() {
             <ul className="text-sm text-gray-400 space-y-1">
               <li><span className="font-mono">47984</span> - HTTPS (pairing)</li>
               <li><span className="font-mono">47989</span> - HTTP (discovery)</li>
+              <li><span className="font-mono">47990</span> - Sunshine web UI</li>
               <li><span className="font-mono">47999</span> - Control</li>
               <li><span className="font-mono">48010</span> - RTSP (streaming)</li>
             </ul>

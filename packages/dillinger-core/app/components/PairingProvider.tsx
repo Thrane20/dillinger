@@ -9,8 +9,10 @@ interface PairingRequest {
 }
 
 interface PairedClient {
-  client_id: string;
-  app_state_folder?: string;
+  id?: string;
+  name?: string;
+  ip?: string;
+  status?: string;
 }
 
 interface StreamingStatus {
@@ -18,6 +20,7 @@ interface StreamingStatus {
   wolfRunning: boolean;
   pendingPairings: PairingRequest[];
   pairedClients: PairedClient[];
+  sunshineRunning?: boolean;
   containerId?: string;
   error?: string;
 }
@@ -52,7 +55,7 @@ interface PairingProviderProps {
 }
 
 /**
- * Provider component that handles Moonlight pairing globally
+ * Provider component that handles Sunshine/Moonlight pairing globally
  * 
  * Features:
  * - Polls streaming status API for pending pairing requests

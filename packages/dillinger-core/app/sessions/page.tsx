@@ -307,14 +307,14 @@ export default function SessionsPage() {
                                       {session.screenshots.length > 1 && (
                                         <>
                                           <button
-                                            onClick={() => updateSessionScreenshotIndex(session.id, session.screenshots!.length, -1)}
+                                            onClick={() => updateSessionScreenshotIndex(session.id, session.screenshots?.length ?? 0, -1)}
                                             className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white"
                                             title="Previous"
                                           >
                                             ‹
                                           </button>
                                           <button
-                                            onClick={() => updateSessionScreenshotIndex(session.id, session.screenshots!.length, 1)}
+                                            onClick={() => updateSessionScreenshotIndex(session.id, session.screenshots?.length ?? 0, 1)}
                                             className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white"
                                             title="Next"
                                           >

@@ -114,7 +114,7 @@ function runDeviceChecks(): Record<string, 'ok' | 'missing' | 'error'> {
   const checks: Record<string, 'ok' | 'missing' | 'error'> = {
     drm: fs.existsSync('/dev/dri') ? 'ok' : 'missing',
     uinput: fs.existsSync('/dev/uinput') ? 'ok' : 'missing',
-    pulse: fs.existsSync('/run/dillinger/pulse-socket') ? 'ok' : 'missing',
+    pipewire: fs.existsSync('/run/dillinger/pipewire-0') ? 'ok' : 'missing',
   };
   return checks;
 }

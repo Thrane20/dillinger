@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
-import type { Dirent } from 'fs';
+import { Dirent } from 'fs';
 import path from 'path';
 import { JSONStorageService } from '@/lib/services/storage';
 

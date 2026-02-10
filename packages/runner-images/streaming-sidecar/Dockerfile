@@ -1,95 +1,92 @@
-# Dillinger Streaming Sidecar
-# Based directly on Wolf image to ensure full GStreamer compatibility
-# Adds Sway compositor for headless Wayland
-#
-# Build: docker build -t ghcr.io/thrane20/dillinger/streaming-sidecar:0.3.1 .
+FROM archlinux:latest
 
-# Start from the official Wolf image - includes all GStreamer dependencies
-FROM ghcr.io/games-on-whales/wolf:stable
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
-LABEL maintainer="Dillinger Project"
-LABEL description="Streaming sidecar with Sway compositor and Wolf server"
-LABEL org.opencontainers.image.source="https://github.com/thrane20/dillinger"
+# Base tools and chaotic-aur bootstrap for Sunshine
+RUN set -e && \
+    pacman -Sy --noconfirm archlinux-keyring && \
+    pacman-key --init && \
+    pacman-key --populate archlinux && \
+    pacman -Syu --noconfirm --needed ca-certificates curl gnupg && \
+    curl -L -o /tmp/chaotic-keyring.pkg.tar.zst https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst && \
+    curl -L -o /tmp/chaotic-mirrorlist.pkg.tar.zst https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst && \
+    pacman -U --noconfirm /tmp/chaotic-keyring.pkg.tar.zst /tmp/chaotic-mirrorlist.pkg.tar.zst && \
+    rm -f /tmp/chaotic-keyring.pkg.tar.zst /tmp/chaotic-mirrorlist.pkg.tar.zst && \
+    echo "[chaotic-aur]" >> /etc/pacman.conf && \
+    echo "Include = /etc/pacman.d/chaotic-mirrorlist" >> /etc/pacman.conf
 
-# Avoid interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
+RUN set -e && \
+    pacman -Syu --noconfirm --needed \
+      sway \
+      swaybg \
+      seatd \
+      gamescope \
+      wayland \
+      xorg-xwayland \
+      mesa \
+      vulkan-radeon \
+      vulkan-icd-loader \
+      libinput \
+      libevdev \
+      pipewire \
+      wireplumber \
+      pipewire-pulse \
+      nodejs \
+      gettext \
+            procps-ng && \
+    pacman -Scc --noconfirm
 
-# Ubuntu 24.10 (Oracular) may have moved to old-releases
-# Update sources.list to use old-releases mirror if needed
-RUN sed -i 's|archive.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true && \
-    sed -i 's|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true && \
-    find /etc/apt/sources.list.d -name "*.list" -exec sed -i 's|archive.ubuntu.com|old-releases.ubuntu.com|g' {} \; 2>/dev/null || true && \
-    find /etc/apt/sources.list.d -name "*.list" -exec sed -i 's|security.ubuntu.com|old-releases.ubuntu.com|g' {} \; 2>/dev/null || true && \
-    find /etc/apt/sources.list.d -name "*.sources" -exec sed -i 's|archive.ubuntu.com|old-releases.ubuntu.com|g' {} \; 2>/dev/null || true && \
-    find /etc/apt/sources.list.d -name "*.sources" -exec sed -i 's|security.ubuntu.com|old-releases.ubuntu.com|g' {} \; 2>/dev/null || true
+RUN set -e && \
+    pacman -S --noconfirm --needed zstd && \
+    curl -L -o /tmp/icu-76.1-1-x86_64.pkg.tar.zst https://archive.archlinux.org/packages/i/icu/icu-76.1-1-x86_64.pkg.tar.zst && \
+    mkdir -p /tmp/icu76 && \
+    tar --use-compress-program=unzstd -xf /tmp/icu-76.1-1-x86_64.pkg.tar.zst -C /tmp/icu76 && \
+    mkdir -p /usr/lib/icu76 && \
+    cp -a /tmp/icu76/usr/lib/libicu*.so.76* /usr/lib/icu76/ && \
+    printf '%s\n' '/usr/lib/icu76' > /etc/ld.so.conf.d/icu76.conf && \
+    ldconfig && \
+    rm -rf /tmp/icu76 /tmp/icu-76.1-1-x86_64.pkg.tar.zst && \
+    pacman -Scc --noconfirm
 
-# Install Sway compositor, audio, and additional utilities
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Sway compositor and Wayland tools
-    sway \
-    swayidle \
-    swaybg \
-    wlr-randr \
-    wayland-utils \
-    wl-clipboard \
-    # Audio support
-    pulseaudio \
-    pulseaudio-utils \
-    # Wayland test clients (for testing)
-    weston \
-    foot \
-    # Process management
-    htop \
-    psmisc \
-    # Networking tools
-    iproute2 \
-    net-tools \
-    && \
-    # Clean up
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN set -e && \
+    curl -L -o /tmp/sunshine.pkg.tar.zst https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine.pkg.tar.zst && \
+    pacman -U --noconfirm /tmp/sunshine.pkg.tar.zst && \
+    rm -f /tmp/sunshine.pkg.tar.zst
 
-# Create gameuser (UID/GID 1000) if it doesn't exist
-RUN (getent group 1000 > /dev/null || groupadd -g 1000 gameuser) && \
-    (id -u 1000 > /dev/null 2>&1 || useradd -u 1000 -g 1000 -m -s /bin/bash gameuser) && \
-    echo "gameuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Create runtime user
+RUN useradd -m -u 1000 -s /bin/bash streamer && \
+    usermod -aG audio,video,input,render streamer
 
-# Create directories for Sway configs and sockets
+# Runtime directories
 RUN mkdir -p \
-    /config/sway \
-    /config/sway-configs \
-    /run/sway \
-    /run/dillinger \
-    /run/user/1000 \
-    /var/log/dillinger \
-    /data/wolf && \
-    chown -R 1000:1000 /config /run/sway /run/dillinger /run/user/1000 /var/log/dillinger /data
+      /run/dillinger \
+      /var/lib/sunshine \
+      /etc/sunshine \
+      /etc/sway \
+      /config/sway-configs/include.d \
+      /opt/health-server && \
+    chown -R streamer:streamer /run/dillinger /var/lib/sunshine /config
 
-# Copy entrypoint script
+ENV XDG_RUNTIME_DIR=/run/dillinger
+ENV WAYLAND_DISPLAY=wayland-dillinger
+ENV WLR_BACKENDS=headless
+
 COPY streaming-sidecar-entrypoint.sh /usr/local/bin/streaming-sidecar-entrypoint.sh
+COPY sunshine.conf.template /etc/sunshine/sunshine.conf.template
+COPY sway-config-template /etc/sway/sway-config-template
+COPY health-server/index.js /opt/health-server/index.js
+
 RUN chmod +x /usr/local/bin/streaming-sidecar-entrypoint.sh
 
-# Copy default Sway configuration
-COPY sway-config-template /config/sway/config.template
-
-# Environment variables
-ENV SIDECAR_MODE=game
-ENV SWAY_CONFIG_NAME=default
-ENV IDLE_TIMEOUT_MINUTES=15
-ENV WAYLAND_SOCKET_PATH=/run/dillinger/wayland-dillinger
-ENV TEST_PATTERN=smpte
-ENV GPU_TYPE=auto
-
-# Wolf streaming ports
-EXPOSE 47984/tcp 47984/udp
-EXPOSE 47989/tcp 47989/udp
-EXPOSE 47999/tcp 47999/udp
-EXPOSE 48010/tcp 48010/udp
-
-# Control API port for sidecar management
+EXPOSE 47984/tcp
+EXPOSE 47984/udp
+EXPOSE 47989/tcp
+EXPOSE 47989/udp
+EXPOSE 47990/tcp
+EXPOSE 47999/udp
+EXPOSE 48010/tcp
+EXPOSE 48010/udp
 EXPOSE 9999/tcp
 
-WORKDIR /home/gameuser
-
-# Override Wolf's default entrypoint with ours
 ENTRYPOINT ["/usr/local/bin/streaming-sidecar-entrypoint.sh"]

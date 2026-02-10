@@ -214,6 +214,7 @@ export class SettingsService {
     await this.ensureInitialized();
     // Return stored settings merged with defaults
     const defaults: StreamingSettings = {
+      streamingMode: 'profiles',
       gpuType: 'auto',
       codec: 'h264',
       quality: 'high',

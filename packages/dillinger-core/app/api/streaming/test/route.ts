@@ -9,8 +9,8 @@ const settingsService = SettingsService.getInstance();
 const swayConfigService = SwayConfigService.getInstance();
 
 const TEST_CONTAINER_NAME = 'dillinger-streaming-test';
-// Version comes from DILLINGER_STREAMING_SIDECAR_VERSION env or falls back to 0.3.1
-const SIDECAR_VERSION = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '0.3.1';
+// Version comes from DILLINGER_STREAMING_SIDECAR_VERSION env or falls back to 1.0.0
+const SIDECAR_VERSION = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '1.0.0';
 const SIDECAR_IMAGE = `ghcr.io/thrane20/dillinger/streaming-sidecar:${SIDECAR_VERSION}`;
 
 // Valid test patterns
@@ -60,7 +60,7 @@ async function getTestStatus(): Promise<TestStreamStatus> {
       containerId: container.Id,
       instructions: mode === 'test-x11' 
         ? 'Check your host display for the test pattern window'
-        : 'Connect with Moonlight to see the test pattern (ports 47984, 47989)',
+        : 'Connect with Moonlight to see the test pattern (ports 47984, 47990)',
     };
   } catch (error) {
     console.error('Failed to get test status:', error);
@@ -157,6 +157,10 @@ export async function POST(request: NextRequest) {
       `RESOLUTION_HEIGHT=${profile.height}`,
       `REFRESH_RATE=${profile.refreshRate}`,
       `IDLE_TIMEOUT_MINUTES=0`, // Never auto-stop during test
+      `ENABLE_GAMESCOPE=false`,
+      `AUDIO_ENABLED=true`,
+      `SUNSHINE_USERNAME=dillinger`,
+      `SUNSHINE_PASSWORD=test-${Date.now()}`,
       `PUID=${process.getuid?.() || 1000}`,
       `PGID=${process.getgid?.() || 1000}`,
     ];
@@ -165,21 +169,17 @@ export async function POST(request: NextRequest) {
     const fs = await import('fs');
     const gpuDevices: Docker.DeviceMapping[] = [];
     
-    // Try to add GPU devices if they exist
-    const possibleDevices = [
-      '/dev/dri/card0',
-      '/dev/dri/card1', 
-      '/dev/dri/renderD128',
-      '/dev/dri/renderD129',
-    ];
-    
-    for (const device of possibleDevices) {
-      try {
-        await fs.promises.access(device, fs.constants.R_OK);
-        gpuDevices.push({ PathOnHost: device, PathInContainer: device, CgroupPermissions: 'rwm' });
-      } catch {
-        // Device doesn't exist, skip it
+    // Scan /dev/dri for all available devices
+    // Using F_OK (existence check) instead of R_OK because the Node process may not have 
+    // read permission to DRM devices (card0/card1), but Docker will mount them with proper access
+    try {
+      const driDevices = await fs.promises.readdir('/dev/dri');
+      for (const device of driDevices) {
+        const devicePath = `/dev/dri/${device}`;
+        gpuDevices.push({ PathOnHost: devicePath, PathInContainer: devicePath, CgroupPermissions: 'rwm' });
       }
+    } catch {
+      // /dev/dri doesn't exist
     }
     
     // GPU is required for streaming - fail if none found
@@ -201,7 +201,12 @@ export async function POST(request: NextRequest) {
     const hostConfig: Docker.HostConfig = {
       AutoRemove: false,
       NetworkMode: 'host', // Use host networking for streaming ports
-      Privileged: false,
+      // TODO: Investigate if we can reduce from Privileged to specific capabilities
+      // amdgpu_cs_ctx_create2 requires kernel-level DRM access that may need --privileged
+      Privileged: true,
+      // Add user to host video/render groups for GPU access (numeric GIDs from host)
+      // card1 is owned by group 985, renderD128 by group 989
+      GroupAdd: ['985', '989'],
       // Capabilities required for Wayland compositor (Sway)
       CapAdd: [
         'SYS_ADMIN',      // Required for wlroots/Sway headless backend

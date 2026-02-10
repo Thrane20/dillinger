@@ -4,14 +4,14 @@
 # - GPU drivers (NVIDIA, AMD, Intel)
 # - PulseAudio audio system
 # - Gamescope compositor
-# - Moonlight/Wolf streaming server
+# - Streaming handled by external sidecar
 #
 # Based on Games on Whales architecture
 
 FROM archlinux:latest AS base
 
 LABEL maintainer="Dillinger Project"
-LABEL description="Base runner with X11, GPU, PulseAudio, Gamescope, and Moonlight streaming"
+LABEL description="Base runner with X11, GPU, PulseAudio, and Gamescope"
 LABEL version="2.0.0"
 
 # Configure default user and environment
@@ -260,87 +260,7 @@ RUN set -e && \
 ENV PATH="/usr/bin:${PATH}"
 
 #######################################################
-# Stage 6: Install Wolf/Moonlight streaming components
-#######################################################
-
-# Install Wolf runtime dependencies for Moonlight streaming
-RUN <<_INSTALL_MOONLIGHT
-set -e
-echo "**** Install Wolf/Moonlight dependencies ****"
-pacman -S --noconfirm --needed \
-    openssl \
-    icu \
-    libevdev \
-    systemd-libs \
-    curl \
-    libdrm \
-    pciutils \
-    libunwind \
-    boost-libs
-
-echo "**** Cleanup ****"
-pacman -Scc --noconfirm
-_INSTALL_MOONLIGHT
-
-#######################################################
-# Stage 6b: Copy Wolf binary and libraries from GOW image
-#######################################################
-
-# Copy pre-built Wolf binaries from the official Games on Whales image
-# This enables Moonlight streaming for any runner that inherits from this base
-COPY --from=ghcr.io/games-on-whales/wolf:stable /wolf/wolf /wolf/wolf
-COPY --from=ghcr.io/games-on-whales/wolf:stable /wolf/fake-udev /wolf/fake-udev
-
-# Copy Wolf's custom GStreamer libraries that it was built against
-# Wolf requires liblibgstwaylanddisplay.so and custom GStreamer builds
-COPY --from=ghcr.io/games-on-whales/wolf:stable /usr/local/lib/liblibgstwaylanddisplay.so* /usr/local/lib/
-COPY --from=ghcr.io/games-on-whales/wolf:stable /usr/local/lib/x86_64-linux-gnu/ /usr/local/lib/x86_64-linux-gnu/
-
-# Copy ICU libraries (Wolf was built against Debian's ICU 74, Arch has ICU 78)
-COPY --from=ghcr.io/games-on-whales/wolf:stable /usr/lib/x86_64-linux-gnu/libicu*.so.74* /usr/local/lib/
-
-# Create Wolf configuration directory and set permissions
-# Also set up library paths for Wolf's custom libraries
-RUN chmod +x /wolf/wolf /wolf/fake-udev && \
-    mkdir -p /etc/wolf/cfg && \
-    chown -R 1000:1000 /etc/wolf && \
-    echo "/usr/local/lib" >> /etc/ld.so.conf.d/wolf.conf && \
-    echo "/usr/local/lib/x86_64-linux-gnu" >> /etc/ld.so.conf.d/wolf.conf && \
-    ldconfig
-
-#######################################################
-# Stage 7: Setup GStreamer for streaming
-#######################################################
-
-RUN <<_INSTALL_GSTREAMER
-set -e
-echo "**** Refresh package database (fix stale mirrors) ****"
-pacman -Sy --noconfirm
-
-echo "**** Install GStreamer for video/audio streaming ****"
-pacman -S --noconfirm --needed \
-    gstreamer \
-    gst-plugins-base \
-    gst-plugins-good \
-    gst-plugins-bad \
-    gst-plugins-ugly \
-    gst-libav \
-    gst-plugin-pipewire \
-    gst-plugin-va \
-    x265
-
-echo "**** Cleanup ****"
-pacman -Scc --noconfirm
-_INSTALL_GSTREAMER
-
-# Set GStreamer environment for optimal performance
-ENV GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0/ \
-    GST_GL_API=gles2 \
-    GST_GL_WINDOW=surfaceless \
-    GST_DEBUG=2
-
-#######################################################
-# Stage 8: Create user and setup directories
+# Stage 6: Create user and setup directories
 #######################################################
 
 # Create gameuser with proper groups
@@ -382,20 +302,6 @@ RUN mkdir -p /opt/dillinger/scripts
 
 # Volumes for persistent data
 VOLUME ["/game", "/saves", "/config", "/wineprefix", "/installers", "/run/user/gameuser"]
-
-# Expose Moonlight/Wolf ports
-# HTTPS
-EXPOSE 47984/tcp
-# HTTP  
-EXPOSE 47989/tcp
-# Control
-EXPOSE 47999/udp
-# RTSP
-EXPOSE 48010/tcp
-# Video
-EXPOSE 48100/udp
-# Audio
-EXPOSE 48200/udp
 
 # Working directory
 WORKDIR /home/gameuser
