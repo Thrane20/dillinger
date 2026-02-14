@@ -91,7 +91,7 @@
               }
             ],
             "attributes": {
-              "compositor": "sway"
+              "compositor": "wolf"
             }
           },
           {
@@ -156,8 +156,8 @@
           },
           {
             "id": "sun",
-            "type": "SunshineSink",
-            "displayName": "Sunshine",
+            "type": "MoonlightSink",
+            "displayName": "Moonlight",
             "inputs": [
               {
                 "id": "video",

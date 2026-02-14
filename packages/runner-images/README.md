@@ -127,6 +127,12 @@ Runs Amiga computer games via FS-UAE emulator.
 ### Building Images
 
 ```bash
+# Build all runner images plus the streaming sidecar
+pnpm docker:build:all
+
+# Rebuild base first when base/entrypoint.sh changes
+pnpm docker:build:base
+
 # Build Linux native runner
 docker build -t ghcr.io/thrane20/dillinger/runner-linux-native:latest ./packages/runner-images/linux-native
 
@@ -184,6 +190,10 @@ docker run -it --rm \
 - `GAME_EXECUTABLE` - Path to the game executable or launch script (required)
 - `GAME_ARGS` - Arguments to pass to the game executable (optional)
 - `SAVE_DIR` - Directory for save files (default: `/saves`)
+- `RETROARCH_VIDEO_DRIVER` - Optional override for RetroArch video driver (defaults to `sdl2` on Wayland-only, `gl` otherwise)
+
+When `WAYLAND_DISPLAY` is set and `DISPLAY` is not, the base runner entrypoint sets
+Wayland-friendly defaults for `SDL_VIDEODRIVER`, `QT_QPA_PLATFORM`, and `GDK_BACKEND`.
 
 ### Linux Native Specific
 

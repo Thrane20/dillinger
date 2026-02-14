@@ -24,10 +24,10 @@ export GAMESCOPE_UPSCALER="${GAMESCOPE_UPSCALER:-auto}"
 export KEEP_ALIVE="${KEEP_ALIVE:-false}"
 
 # XDG directories
-export XDG_RUNTIME_DIR="/run/user/${UNAME}"
-export XDG_DATA_HOME="${SAVE_DIR}/data"
-export XDG_CONFIG_HOME="${SAVE_DIR}/config"
-export XDG_CACHE_HOME="${SAVE_DIR}/cache"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${UNAME}}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-${SAVE_DIR}/data}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${SAVE_DIR}/config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${SAVE_DIR}/cache}"
 
 #######################################################
 # Logging Functions
@@ -267,6 +267,61 @@ setup_display() {
     # Check for Wayland
     if [ -n "$WAYLAND_DISPLAY" ]; then
         log_success "Wayland display detected: $WAYLAND_DISPLAY"
+
+        # In streaming mode Wolf may rotate the Wayland socket name (wayland-1, wayland-2, ...).
+        # If the configured socket is stale, clients will connect but render to a dead socket
+        # (black screen). Validate the socket and fall back to the first connectable wayland-*.
+        if [ -n "${XDG_RUNTIME_DIR:-}" ] && command -v python3 >/dev/null 2>&1; then
+            _wayland_socket="${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}"
+            if [ -S "$_wayland_socket" ]; then
+                python3 - <<'PY' "$_wayland_socket" >/dev/null 2>&1
+import socket, sys
+path = sys.argv[1]
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    s.connect(path)
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+sys.exit(0)
+PY
+                if [ "$?" -ne 0 ]; then
+                    log_warning "Wayland socket not accepting connections: $_wayland_socket"
+                    for candidate in "${XDG_RUNTIME_DIR}"/wayland-*; do
+                        if [ -S "$candidate" ]; then
+                            python3 - <<'PY' "$candidate" >/dev/null 2>&1
+import socket, sys
+path = sys.argv[1]
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    s.connect(path)
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+sys.exit(0)
+PY
+                            if [ "$?" -eq 0 ]; then
+                                export WAYLAND_DISPLAY="$(basename "$candidate")"
+                                log_success "Switched to active Wayland display: $WAYLAND_DISPLAY"
+                                break
+                            fi
+                        fi
+                    done
+                fi
+            fi
+        fi
+
+        if [ -z "$DISPLAY" ]; then
+            export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}"
+            export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+            export GDK_BACKEND="${GDK_BACKEND:-wayland}"
+            if [ -z "${RETROARCH_VIDEO_DRIVER:-}" ]; then
+                export RETROARCH_VIDEO_DRIVER="sdl2"
+            fi
+            echo "  Wayland defaults set for SDL/Qt/GDK"
+        fi
     fi
 }
 

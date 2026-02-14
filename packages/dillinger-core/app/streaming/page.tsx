@@ -39,7 +39,7 @@ export default function StreamingPage() {
     return (
       <div className="min-h-screen bg-gray-900 text-white p-8">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold mb-8">🎮 Sunshine Streaming</h1>
+          <h1 className="text-3xl font-bold mb-8">🎮 Moonlight Streaming</h1>
           <div className="animate-pulse">Loading streaming status...</div>
         </div>
       </div>
@@ -50,7 +50,7 @@ export default function StreamingPage() {
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">🎮 Sunshine Streaming</h1>
+          <h1 className="text-3xl font-bold">🎮 Moonlight Streaming</h1>
           <Link href="/" className="text-blue-400 hover:text-blue-300">
             ← Back to Games
           </Link>
@@ -91,10 +91,10 @@ export default function StreamingPage() {
               <button
                 onClick={handleClearClients}
                 className="text-sm text-red-400/70 cursor-not-allowed"
-                title="Clear clients from Sunshine web UI"
+                title="Clear clients from Dillinger pairing"
                 disabled
               >
-                Clear All (use Sunshine UI)
+                Clear All (use Dillinger pairing)
               </button>
             )}
           </div>
@@ -129,8 +129,8 @@ export default function StreamingPage() {
             <li>Launch the game - the streaming sidecar will start automatically</li>
             <li>Open <a href="https://moonlight-stream.org/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Moonlight</a> on your client device (PC, phone, tablet, TV)</li>
             <li>Add this server&apos;s IP address in Moonlight</li>
-            <li>When Moonlight shows a PIN, open Sunshine web UI at <span className="font-mono">http://&lt;host&gt;:47990</span></li>
-            <li>Approve the pairing, then select the game to start streaming!</li>
+            <li>When Moonlight shows a PIN, approve it in Dillinger</li>
+            <li>Select the Dillinger app in Moonlight to start streaming (games are swapped from Dillinger)</li>
           </ol>
           
           <div className="mt-6 p-4 bg-gray-700 rounded">
@@ -138,7 +138,6 @@ export default function StreamingPage() {
             <ul className="text-sm text-gray-400 space-y-1">
               <li><span className="font-mono">47984</span> - HTTPS (pairing)</li>
               <li><span className="font-mono">47989</span> - HTTP (discovery)</li>
-              <li><span className="font-mono">47990</span> - Sunshine web UI</li>
               <li><span className="font-mono">47999</span> - Control</li>
               <li><span className="font-mono">48010</span> - RTSP (streaming)</li>
             </ul>

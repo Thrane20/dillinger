@@ -3,7 +3,7 @@
 # Based on Dillinger Base Runner with Games on Whales architecture
 
 # BASE_VERSION is passed from build.sh (sourced from versioning.env)
-ARG BASE_VERSION
+ARG BASE_VERSION=0.3.1
 FROM ghcr.io/thrane20/dillinger/runner-base:${BASE_VERSION}
 
 LABEL maintainer="Dillinger Project"

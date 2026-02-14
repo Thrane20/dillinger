@@ -124,6 +124,21 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
   useEffect(() => {
     let isMounted = true;
 
+    if (activeTab !== 'core') {
+      setIsConnected(false);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      return () => {
+        isMounted = false;
+      };
+    }
+
     const connect = () => {
       if (!isMounted) {
         return;
@@ -178,20 +193,28 @@ export default function LogPanel({ className = '' }: LogPanelProps) {
     };
 
     connect();
+
+    return () => {
+      isMounted = false;
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [activeTab, appendCoreLog]);
+
+  useEffect(() => {
     fetchContainerLogs();
     const interval = setInterval(fetchContainerLogs, 4000);
 
     return () => {
-      isMounted = false;
       clearInterval(interval);
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-      }
     };
-  }, [appendCoreLog, fetchContainerLogs]);
+  }, [fetchContainerLogs]);
 
   useEffect(() => {
     if (scrollRef.current) {

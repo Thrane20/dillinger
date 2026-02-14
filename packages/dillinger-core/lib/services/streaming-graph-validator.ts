@@ -11,10 +11,15 @@ const REQUIRED_ATTRIBUTES: Record<string, string[]> = {
   VirtualMonitor: ['width', 'height', 'refreshRate'],
   VideoEncoder: ['codec', 'bitrate'],
   AudioEncoder: ['codec', 'bitrate'],
-  SunshineSink: ['ports'],
+  MoonlightSink: ['port'],
   WebRTCSink: ['whipUrl'],
   RTMPTwitchSink: ['endpoint', 'streamKeyRef'],
   FileRecordingSink: ['path', 'container'],
+};
+
+const ALTERNATE_ATTRIBUTES: Record<string, string[]> = {
+  VideoEncoder: ['bitrateKbps'],
+  AudioEncoder: ['bitrateKbps'],
 };
 
 function getNodeById(graph: StreamingGraphDefinition, id: string) {
@@ -41,6 +46,11 @@ function validatePreset(preset: StreamingGraphPreset): StreamingGraphValidationI
       const attrs = node.attributes ?? {};
       for (const key of required) {
         if (!(key in attrs)) {
+          const alternates = ALTERNATE_ATTRIBUTES[node.type] || [];
+          const hasAlternate = alternates.some((alt) => alt in attrs);
+          if (hasAlternate) {
+            continue;
+          }
           issues.push({
             severity: 'blocking',
             nodeId: node.id,

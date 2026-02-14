@@ -30,16 +30,16 @@ ENV PUID=1000 \
 
 # Update system and install base packages + gosu
 RUN set -e && \
+    echo "**** Configure pacman defaults (parallel downloads + candy) ****" && \
+    sed -i 's/^#ParallelDownloads = .*/ParallelDownloads = 10/' /etc/pacman.conf && \
+    if ! grep -q '^ILoveCandy' /etc/pacman.conf; then sed -i '/^\[options\]/a ILoveCandy' /etc/pacman.conf; fi && \
+    if ! grep -q '^DisableDownloadTimeout' /etc/pacman.conf; then sed -i '/^\[options\]/a DisableDownloadTimeout' /etc/pacman.conf; fi && \
+    \
     echo "**** Configure pacman (enable multilib) ****" && \
     # The Arch Docker image doesn't have multilib section, so add it
     echo "" >> /etc/pacman.conf && \
     echo "[multilib]" >> /etc/pacman.conf && \
     echo "Include = /etc/pacman.d/mirrorlist" >> /etc/pacman.conf && \
-    \
-    echo "**** Configure pacman defaults (parallel downloads + candy) ****" && \
-    sed -i 's/^#ParallelDownloads = .*/ParallelDownloads = 10/' /etc/pacman.conf && \
-    if ! grep -q '^ILoveCandy' /etc/pacman.conf; then echo 'ILoveCandy' >> /etc/pacman.conf; fi && \
-    if ! grep -q '^DisableDownloadTimeout' /etc/pacman.conf; then echo 'DisableDownloadTimeout' >> /etc/pacman.conf; fi && \
     \
     echo "**** Set Fastly CDN as default mirror ****" && \
     echo 'Server = https://fastly.mirror.pkgbuild.com/$repo/os/$arch' > /etc/pacman.d/mirrorlist && \

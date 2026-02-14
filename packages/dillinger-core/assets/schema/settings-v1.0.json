@@ -24,6 +24,31 @@
           }
         }
       }
+    },
+    "retroarch": {
+      "type": "object",
+      "description": "RetroArch defaults",
+      "properties": {
+        "mame": {
+          "type": "object",
+          "description": "MAME display defaults",
+          "properties": {
+            "aspect": {
+              "type": "string",
+              "enum": ["4:3", "auto"],
+              "description": "Aspect ratio preference for MAME"
+            },
+            "integerScale": {
+              "type": "boolean",
+              "description": "Enable integer scaling"
+            },
+            "borderlessFullscreen": {
+              "type": "boolean",
+              "description": "Use borderless fullscreen"
+            }
+          }
+        }
+      }
     }
   }
 }

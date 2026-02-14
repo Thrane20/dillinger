@@ -2,7 +2,7 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import type { ScraperSettings, StreamingSettings } from '@dillinger/shared';
+import type { ScraperSettings, StreamingSettings, RetroarchSettings } from '@dillinger/shared';
 
 // Use the same DILLINGER_ROOT logic as storage service
 // This MUST point to the dillinger_root Docker volume mount point
@@ -54,6 +54,7 @@ export interface AppSettings {
   downloads?: DownloadSettings;
   joysticks?: JoystickSettings;
   streaming?: StreamingSettings;
+  retroarch?: RetroarchSettings;
 }
 
 export class SettingsService {
@@ -204,6 +205,38 @@ export class SettingsService {
   async getAllSettings(): Promise<AppSettings> {
     await this.ensureInitialized();
     return { ...this.settings };
+  }
+
+  async getRetroarchSettings(): Promise<RetroarchSettings> {
+    await this.ensureInitialized();
+    const defaults: RetroarchSettings = {
+      mame: {
+        aspect: 'auto',
+        integerScale: true,
+        borderlessFullscreen: true,
+      },
+    };
+    return {
+      ...defaults,
+      ...this.settings.retroarch,
+      mame: {
+        ...defaults.mame,
+        ...this.settings.retroarch?.mame,
+      },
+    };
+  }
+
+  async updateRetroarchSettings(settings: Partial<RetroarchSettings>): Promise<void> {
+    await this.ensureInitialized();
+    this.settings.retroarch = {
+      ...this.settings.retroarch,
+      ...settings,
+      mame: {
+        ...this.settings.retroarch?.mame,
+        ...settings.mame,
+      },
+    } as RetroarchSettings;
+    await this.save();
   }
 
   // ============================================================================

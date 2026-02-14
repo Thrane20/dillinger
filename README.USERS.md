@@ -39,13 +39,15 @@ docker ps
 The easiest way to get started:
 
 ```bash
-# Download and run the start script
-curl -fsSL https://raw.githubusercontent.com/Thrane20/dillinger/main/start-dillinger.sh -o start-dillinger.sh
-chmod +x start-dillinger.sh
-./start-dillinger.sh
+# Run the CLI directly (no global install)
+npx dillinger-gaming start
+
+# Or install globally
+pnpm add -g dillinger-gaming
+dillinger-gaming start
 ```
 
-This script will:
+This CLI command will:
 1. Check if Docker is installed
 2. Create the required `dillinger_root` volume
 3. Pull the latest Dillinger image

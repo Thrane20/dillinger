@@ -27,7 +27,6 @@ export async function GET(
       status,
     });
   } catch (error) {
-    console.error('Error getting download status:', error);
     return NextResponse.json(
       {
         success: false,

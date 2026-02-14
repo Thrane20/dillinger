@@ -79,6 +79,13 @@ pnpm dev
 # The app will be available at http://localhost:3010
 ```
 
+By default, dev mode writes data and logs under `packages/dillinger-core/data`.
+To override the dev data root, set `DILLINGER_ROOT_DEV`:
+
+```bash
+DILLINGER_ROOT_DEV=/data pnpm dev
+```
+
 This runs the core application in development mode with:
 - Hot module reloading
 - TypeScript type checking

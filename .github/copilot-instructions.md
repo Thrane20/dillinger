@@ -34,4 +34,5 @@ TypeScript 5.x with Node.js 18+: Follow standard conventions
 
 
 <!-- MANUAL ADDITIONS START -->
+- Streaming sidecar: Wolf built from source, no legacy compositor stack, no config.toml in Dillinger mode. REST API on port 9999.
 <!-- MANUAL ADDITIONS END -->

@@ -45,13 +45,14 @@ pnpm build                        # Build all packages
 pnpm lint                         # Run linting
 
 # Docker builds (run from project root)
-pnpm docker:build:all             # Build all runner images
+pnpm docker:build:all             # Build all runner images + streaming sidecar
 pnpm docker:build:base            # Build base runner image
 pnpm docker:build:retroarch       # Build RetroArch runner
 pnpm docker:build:wine            # Build Wine runner
 pnpm docker:build:vice            # Build VICE runner
 pnpm docker:build:fs-uae          # Build FS-UAE runner
 pnpm docker:build:linux-native    # Build Linux native runner
+pnpm docker:build:streaming-sidecar # Build Wolf streaming sidecar
 
 # Force rebuild without cache
 pnpm docker:build:base:no-cache
@@ -76,7 +77,8 @@ pnpm test
 ## Important Patterns
 
 ### Wolf Configuration
-Wolf uses config version 4 with TOML format:
+Wolf uses config version 4 with TOML format. In Dillinger mode, config.toml is
+not required and Wolf bootstraps a single "Dillinger" app programmatically.
 ```toml
 config_version = 4
 
@@ -120,6 +122,11 @@ entrypoint.sh is copied at build time, so use `--no-cache`:
 pnpm docker:build:base:no-cache
 pnpm docker:build:retroarch:no-cache  # Depends on base
 ```
+
+### Streaming Sidecar (Wolf Mode)
+- No legacy compositor stack; Wolf runs in single-app Dillinger mode.
+- REST API exposed on port 9999 (`/health`, `/status`, `/launch`, `/stop`, `/pair/status`, `/pair/accept`).
+- Set `DILLINGER_MODE=1` in the container environment.
 
 ## File Naming Conventions
 

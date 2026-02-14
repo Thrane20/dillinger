@@ -449,6 +449,113 @@ check_existing_container() {
     fi
 }
 
+# Setup udev rules for Wolf virtual inputs (Moonlight streaming)
+# These rules allow Wolf to create virtual gamepads and motion controllers
+setup_udev_rules() {
+    local UDEV_RULES_FILE="/etc/udev/rules.d/85-wolf-virtual-inputs.rules"
+    
+    print_info "Checking Wolf streaming udev rules..."
+    
+    # Check if rules already exist with correct content
+    if [ -f "$UDEV_RULES_FILE" ]; then
+        # Verify it contains our rules
+        if grep -q "Wolf PS5 (virtual) pad" "$UDEV_RULES_FILE" 2>/dev/null; then
+            print_success "Wolf udev rules already installed"
+            return 0
+        fi
+    fi
+    
+    print_info "Setting up udev rules for Wolf game streaming..."
+    echo "  These rules enable virtual gamepad support for Moonlight clients"
+    echo ""
+    
+    # Check if we have permission to write udev rules
+    if [ ! -w "/etc/udev/rules.d" ]; then
+        if ! command -v sudo &> /dev/null; then
+            print_warning "Cannot install udev rules - sudo not available"
+            print_info "To enable Moonlight gamepad support, manually create:"
+            echo "  $UDEV_RULES_FILE"
+            return 0
+        fi
+        
+        echo "Installing udev rules requires root privileges."
+        read -p "Install Wolf virtual input rules? (enables Moonlight gamepads) [Y/n] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_warning "Skipping udev rules - Moonlight gamepads may not work"
+            return 0
+        fi
+        
+        # Create rules file with sudo
+        sudo tee "$UDEV_RULES_FILE" > /dev/null << 'EOF'
+# Wolf Virtual Input Rules for Moonlight Game Streaming
+# Installed by Dillinger start-dillinger.sh
+# See: https://games-on-whales.github.io/wolf/
+
+# Allow Wolf to access /dev/uinput (for virtual joypad creation)
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput", TAG+="uaccess"
+
+# Allow Wolf to access /dev/uhid (for DualSense emulation)
+KERNEL=="uhid", GROUP="input", MODE="0660", TAG+="uaccess"
+
+# Virtual Joypads created by Wolf - assign to seat9 to prevent conflicts
+KERNEL=="hidraw*", ATTRS{name}=="Wolf PS5 (virtual) pad", GROUP="input", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf X-Box One (virtual) pad", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf PS5 (virtual) pad", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf gamepad (virtual) motion sensors", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf Nintendo (virtual) pad", MODE="0660", ENV{ID_SEAT}="seat9"
+EOF
+        
+        # Reload udev rules
+        print_info "Reloading udev rules..."
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger
+        
+        print_success "Wolf udev rules installed"
+        print_info "Virtual gamepads will work when streaming via Moonlight"
+    else
+        # Can write directly without sudo
+        cat > "$UDEV_RULES_FILE" << 'EOF'
+# Wolf Virtual Input Rules for Moonlight Game Streaming
+# Installed by Dillinger start-dillinger.sh
+# See: https://games-on-whales.github.io/wolf/
+
+# Allow Wolf to access /dev/uinput (for virtual joypad creation)
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput", TAG+="uaccess"
+
+# Allow Wolf to access /dev/uhid (for DualSense emulation)
+KERNEL=="uhid", GROUP="input", MODE="0660", TAG+="uaccess"
+
+# Virtual Joypads created by Wolf - assign to seat9 to prevent conflicts
+KERNEL=="hidraw*", ATTRS{name}=="Wolf PS5 (virtual) pad", GROUP="input", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf X-Box One (virtual) pad", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf PS5 (virtual) pad", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf gamepad (virtual) motion sensors", MODE="0660", ENV{ID_SEAT}="seat9"
+SUBSYSTEMS=="input", ATTRS{name}=="Wolf Nintendo (virtual) pad", MODE="0660", ENV{ID_SEAT}="seat9"
+EOF
+        
+        # Reload udev rules
+        udevadm control --reload-rules 2>/dev/null || true
+        udevadm trigger 2>/dev/null || true
+        
+        print_success "Wolf udev rules installed"
+    fi
+}
+
+# Initialize Wolf streaming configuration directory in volume
+init_wolf_config() {
+    print_info "Checking Wolf streaming configuration..."
+    
+    # Create a temporary container to initialize the wolf config directory
+    # This ensures the directory exists in the dillinger_root volume
+    if ! docker run --rm -v "$VOLUME_NAME:/data" alpine:latest sh -c "mkdir -p /data/wolf && chmod 777 /data/wolf" 2>/dev/null; then
+        print_warning "Could not initialize Wolf config directory"
+        return 0
+    fi
+    
+    print_success "Wolf configuration directory initialized"
+}
+
 # Start the container
 start_container() {
     print_info "Starting Dillinger..."
@@ -585,6 +692,8 @@ main() {
     check_docker_running
     check_docker_permissions
     check_volume
+    setup_udev_rules
+    init_wolf_config
     check_image
     check_existing_container
     start_container

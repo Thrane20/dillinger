@@ -16,14 +16,14 @@ export type StreamingCodec = 'h264' | 'h265' | 'av1';
 export type StreamingQuality = 'low' | 'medium' | 'high' | 'ultra';
 
 /**
- * Test pattern types for streaming test mode
+ * Test apps for streaming test mode (GStreamer pipelines)
  */
-export type TestPattern = 'smpte' | 'bar' | 'checkerboard' | 'ball' | 'snow';
+export type TestApp = 'gst-video-test' | 'gst-av-test';
 
 /**
  * Sidecar operating mode
  */
-export type SidecarMode = 'game' | 'test-stream' | 'test-x11';
+export type SidecarMode = 'game' | 'test';
 
 /**
  * Job specification passed to the streaming sidecar
@@ -42,9 +42,9 @@ export interface JobSpec {
 }
 
 /**
- * Sunshine client info returned by the sidecar
+ * Moonlight client info returned by the sidecar
  */
-export interface SunshineClientInfo {
+export interface MoonlightClientInfo {
   id?: string;
   name?: string;
   ip?: string;
@@ -52,9 +52,9 @@ export interface SunshineClientInfo {
 }
 
 /**
- * A Sway compositor profile for streaming
+ * A streaming compositor profile
  */
-export interface SwayProfile {
+export interface StreamingProfile {
   /** Unique profile ID (e.g., "1080p60", "custom-ultrawide") */
   id: string;
   
@@ -76,7 +76,7 @@ export interface SwayProfile {
   /** Whether this is a system default profile (not user-deletable) */
   isDefault?: boolean;
   
-  /** Custom Sway configuration directives (appended to generated config) */
+  /** Custom compositor configuration directives (appended to generated config) */
   customConfig?: string;
   
   /** ISO timestamp when created */
@@ -111,7 +111,7 @@ export interface StreamingSettings {
   /** Path for Wayland socket */
   waylandSocketPath: string;
   
-  /** ID of the default Sway profile */
+  /** ID of the default streaming profile */
   defaultProfileId: string;
   
   /** Whether to auto-start sidecar when streaming is requested */
@@ -137,9 +137,9 @@ export const DEFAULT_STREAMING_SETTINGS: StreamingSettings = {
 };
 
 /**
- * Default Sway profiles shipped with Dillinger
+ * Default streaming profiles shipped with Dillinger
  */
-export const DEFAULT_SWAY_PROFILES: SwayProfile[] = [
+export const DEFAULT_STREAMING_PROFILES: StreamingProfile[] = [
   {
     id: '1080p60',
     name: '1080p @ 60Hz',
@@ -199,7 +199,7 @@ export interface SidecarStatus {
   /** Current operating mode */
   mode?: SidecarMode;
   
-  /** Currently loaded Sway profile */
+  /** Currently loaded streaming profile */
   profileId?: string;
   
   /** Current resolution string (e.g., "1920x1080") */
@@ -208,8 +208,8 @@ export interface SidecarStatus {
   /** GPU type being used */
   gpuType?: StreamingGpuType;
 
-  /** Whether Sunshine is running */
-  sunshineRunning?: boolean;
+  /** Whether Wolf is running */
+  wolfRunning?: boolean;
   
   /** Container start time */
   startedAt?: string;
@@ -217,22 +217,16 @@ export interface SidecarStatus {
   /** Number of connected Wayland clients */
   clientCount?: number;
 
-  /** Sunshine paired clients */
-  clients?: SunshineClientInfo[];
+  /** Paired Moonlight clients */
+  pairedClients?: MoonlightClientInfo[];
 }
 
 /**
  * Request to start streaming test
  */
 export interface StartTestStreamRequest {
-  /** Test mode: stream to Moonlight or display on host X11 */
-  mode: 'stream' | 'x11';
-  
-  /** Sway profile to use */
-  profileId: string;
-  
-  /** Test pattern to display */
-  pattern: TestPattern;
+  /** Test app to launch inside the sidecar */
+  app: TestApp;
 }
 
 /**
@@ -243,13 +237,16 @@ export interface TestStreamStatus {
   running: boolean;
   
   /** Test mode */
-  mode?: 'stream' | 'x11';
+  mode?: 'stream';
   
-  /** Active profile */
-  profileId?: string;
-  
-  /** Active pattern */
-  pattern?: TestPattern;
+  /** Active test app */
+  app?: TestApp;
+
+  /** Waiting for Moonlight connection */
+  waiting?: boolean;
+
+  /** Pairing required before launch */
+  pairingRequired?: boolean;
   
   /** Container ID */
   containerId?: string;

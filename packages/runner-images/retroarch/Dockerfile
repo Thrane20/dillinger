@@ -2,7 +2,7 @@
 # Extends base runner for multi-system emulation via RetroArch
 
 # BASE_VERSION is passed from build.sh (sourced from versioning.env)
-ARG BASE_VERSION=0.2.0
+ARG BASE_VERSION=0.3.1
 FROM ghcr.io/thrane20/dillinger/runner-base:${BASE_VERSION}
 
 LABEL maintainer="Dillinger Project"
@@ -28,6 +28,8 @@ RUN echo "Refreshing package database..." && \
     echo "If downloads are slow, try: docker build --no-cache --network=host ..." && \
     timeout 600 yes | pacman -S --noconfirm --noprogressbar \
     icu \
+    sndio \
+    svt-av1 \
     retroarch \
     libretro-mame \
     libretro-nestopia \

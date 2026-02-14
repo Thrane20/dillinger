@@ -1,0 +1,47 @@
+{
+  "name": "dillinger-gaming",
+  "version": "0.1.0",
+  "description": "CLI tool for launching and managing Dillinger",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "dillinger-gaming": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "clean": "rimraf dist",
+    "prepublishOnly": "pnpm test && pnpm run type-check && pnpm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "conf": "^13.0.1",
+    "execa": "^9.5.2",
+    "inquirer": "^12.4.2",
+    "ora": "^8.1.1",
+    "semver": "^7.6.3",
+    "update-notifier": "^7.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/semver": "^7.7.1",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

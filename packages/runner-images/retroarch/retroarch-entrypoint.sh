@@ -180,8 +180,33 @@ set_config "input_driver" "sdl2" "$RETROARCH_CONFIG_FILE"
 # Use sdl2 joypad driver since udev daemon isn't running in containers
 # SDL2 can detect joysticks directly from /dev/input/js* without udev
 set_config "input_joypad_driver" "sdl2" "$RETROARCH_CONFIG_FILE"
-set_config "video_driver" "gl" "$RETROARCH_CONFIG_FILE"
-set_config "audio_driver" "pulse" "$RETROARCH_CONFIG_FILE"
+
+VIDEO_DRIVER="${RETROARCH_VIDEO_DRIVER:-}"
+if [ -z "$VIDEO_DRIVER" ]; then
+    if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then
+        VIDEO_DRIVER="sdl2"
+    else
+        VIDEO_DRIVER="gl"
+    fi
+fi
+
+set_config "video_driver" "$VIDEO_DRIVER" "$RETROARCH_CONFIG_FILE"
+
+AUDIO_DRIVER="pulse"
+if [ -n "${PULSE_SERVER:-}" ]; then
+    if command -v pactl >/dev/null 2>&1 && pactl info >/dev/null 2>&1; then
+        AUDIO_DRIVER="pulse"
+    else
+        log_warning "PulseAudio unavailable; falling back to ALSA"
+        AUDIO_DRIVER="alsa"
+        unset PULSE_SERVER
+    fi
+else
+    log_warning "PulseAudio not configured; falling back to ALSA"
+    AUDIO_DRIVER="alsa"
+fi
+
+set_config "audio_driver" "$AUDIO_DRIVER" "$RETROARCH_CONFIG_FILE"
 
 # Fullscreen mode (set RETROARCH_FULLSCREEN=true to enable)
 FULLSCREEN="${RETROARCH_FULLSCREEN:-false}"
@@ -212,12 +237,57 @@ chown -R "${UNAME}:${UNAME}" "$SCREENSHOTS_DIR"
 set_config "screenshot_directory" "$SCREENSHOTS_DIR" "$RETROARCH_CONFIG_FILE"
 set_config "screenshots_in_content_dir" "false" "$RETROARCH_CONFIG_FILE"
 
+# Aspect handling for arcade (4:3 with black bars)
+if [ "$RETROARCH_CORE" = "mame" ] || [ "$RETROARCH_CORE" = "mame2003" ] || [ "$RETROARCH_CORE" = "mame2003_plus" ]; then
+    MAME_ASPECT="${RETROARCH_MAME_ASPECT:-auto}"
+    if [ "$MAME_ASPECT" = "auto" ]; then
+        set_config "video_aspect_ratio_auto" "true" "$RETROARCH_CONFIG_FILE"
+        echo "  Aspect ratio: auto"
+    else
+        set_config "video_aspect_ratio_auto" "false" "$RETROARCH_CONFIG_FILE"
+        set_config "aspect_ratio_index" "1" "$RETROARCH_CONFIG_FILE"
+        echo "  Aspect ratio: 4:3"
+    fi
+    set_config "video_fullscreen" "true" "$RETROARCH_CONFIG_FILE"
+    MAME_BORDERLESS="${RETROARCH_MAME_BORDERLESS:-true}"
+    if [ "$MAME_BORDERLESS" = "true" ]; then
+        set_config "video_windowed_fullscreen" "true" "$RETROARCH_CONFIG_FILE"
+        echo "  Fullscreen: borderless"
+    else
+        set_config "video_windowed_fullscreen" "false" "$RETROARCH_CONFIG_FILE"
+        echo "  Fullscreen: exclusive"
+    fi
+    MAME_INTEGER_SCALE="${RETROARCH_MAME_INTEGER_SCALE:-${RETROARCH_INTEGER_SCALE:-true}}"
+    if [ "$MAME_INTEGER_SCALE" = "true" ]; then
+        set_config "video_integer_scale" "true" "$RETROARCH_CONFIG_FILE"
+        echo "  Integer scale: enabled"
+    else
+        set_config "video_integer_scale" "false" "$RETROARCH_CONFIG_FILE"
+        echo "  Integer scale: disabled"
+    fi
+fi
+
+# Optional logging to file for troubleshooting
+LOG_FILE="${RETROARCH_LOG_FILE:-}"
+if [ -n "$LOG_FILE" ]; then
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE" 2>/dev/null || true
+    chown "${UNAME}:${UNAME}" "$LOG_FILE" 2>/dev/null || true
+    set_config "log_to_file" "true" "$RETROARCH_CONFIG_FILE"
+    set_config "log_to_file_timestamp" "true" "$RETROARCH_CONFIG_FILE"
+    set_config "log_level" "${RETROARCH_LOG_LEVEL:-1}" "$RETROARCH_CONFIG_FILE"
+    set_config "log_file" "$LOG_FILE" "$RETROARCH_CONFIG_FILE"
+    echo "  Log file: $LOG_FILE"
+    STDOUT_LOG="/tmp/retroarch-stdout.log"
+    touch "$STDOUT_LOG" 2>/dev/null || true
+fi
+
 # Configure joypad autoconfig directory (contains pre-made button mappings for common controllers)
 set_config "joypad_autoconfig_dir" "/usr/share/libretro/autoconfig" "$RETROARCH_CONFIG_FILE"
 set_config "input_autodetect_enable" "true" "$RETROARCH_CONFIG_FILE"
 
-echo "  Video driver: gl"
-echo "  Audio driver: pulse"
+echo "  Video driver: $VIDEO_DRIVER"
+echo "  Audio driver: $AUDIO_DRIVER"
 echo "  Input driver: sdl2"
 echo "  Joypad driver: sdl2"
 echo "  System directory: $SYSTEM_DIR"
@@ -431,25 +501,58 @@ if [ "$ENABLE_MANGOHUD" = "true" ]; then
     echo ""
     
     # Launch in background to capture PID for signal handling
-    gosu "${UNAME}" mangohud "$CMD" "${ARGS[@]}" &
+    if [ -n "$LOG_FILE" ]; then
+        gosu "${UNAME}" mangohud "$CMD" "${ARGS[@]}" >>"$STDOUT_LOG" 2>&1 &
+    else
+        gosu "${UNAME}" mangohud "$CMD" "${ARGS[@]}" &
+    fi
     CHILD_PID=$!
 else
     echo -e "${BLUE}Executing: $CMD ${ARGS[*]}${NC}"
     echo ""
     
-    gosu "${UNAME}" "$CMD" "${ARGS[@]}" &
+    if [ -n "$LOG_FILE" ]; then
+        gosu "${UNAME}" "$CMD" "${ARGS[@]}" >>"$STDOUT_LOG" 2>&1 &
+    else
+        gosu "${UNAME}" "$CMD" "${ARGS[@]}" &
+    fi
     CHILD_PID=$!
 fi
 
 echo -e "${BLUE}Process started with PID: $CHILD_PID${NC}"
 echo -e "${BLUE}Waiting for process to complete...${NC}"
 
-# Wait for process and capture exit code
+# Wait for process and capture exit code without exiting on failure
+set +e
 wait $CHILD_PID
 EXIT_CODE=$?
+set -e
 
 echo ""
 echo -e "${BLUE}RetroArch exited with code: $EXIT_CODE${NC}"
+
+if [ -n "$LOG_FILE" ] && [ -n "$STDOUT_LOG" ]; then
+    if [ ! -s "$LOG_FILE" ] && [ -s "$STDOUT_LOG" ]; then
+        cp "$STDOUT_LOG" "$LOG_FILE" 2>/dev/null || true
+        chown "${UNAME}:${UNAME}" "$LOG_FILE" 2>/dev/null || true
+    fi
+    if [ "$EXIT_CODE" -ne 0 ]; then
+        if [ -s "$LOG_FILE" ]; then
+            echo ""
+            echo -e "${YELLOW}RetroArch log (tail)${NC}"
+            tail -n 200 "$LOG_FILE" 2>/dev/null || true
+        fi
+        if [ -s "$STDOUT_LOG" ]; then
+            echo ""
+            echo -e "${YELLOW}RetroArch stdout/stderr (tail)${NC}"
+            tail -n 200 "$STDOUT_LOG" 2>/dev/null || true
+        fi
+    elif [ ! -s "$LOG_FILE" ] && [ -s "$STDOUT_LOG" ]; then
+        echo ""
+        echo -e "${YELLOW}RetroArch stdout/stderr (no log file content)${NC}"
+        tail -n 200 "$STDOUT_LOG" 2>/dev/null || true
+    fi
+fi
 
 # Restore display if changed
 restore_xrandr_mode

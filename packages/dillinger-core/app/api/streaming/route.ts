@@ -4,7 +4,7 @@ import { logger } from '@/lib/services/logger';
 
 /**
  * GET /api/streaming
- * Get information about the current streaming session and Sunshine status
+ * Get information about the current streaming session and Wolf sidecar status
  */
 export async function GET() {
   try {
@@ -18,7 +18,6 @@ export async function GET() {
         ports: {
           https: 47984,
           http: 47989,
-          web: 47990,
           control: 47999,
           rtsp: 48010,
           video: 48100,
@@ -36,7 +35,6 @@ export async function GET() {
       ports: {
         https: 47984,
         http: 47989,
-        web: 47990,
         control: 47999,
         rtsp: 48010,
         video: 48100,

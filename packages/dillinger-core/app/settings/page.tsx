@@ -24,8 +24,8 @@ import type {
   GetScraperSettingsResponse,
   UpdateScraperSettingsRequest,
   ScraperType,
-  SwayProfile,
-  TestPattern,
+  StreamingProfile,
+  TestApp,
   TestStreamStatus,
   StreamingGraphPreset,
   StreamingGraphStore,
@@ -44,6 +44,7 @@ const SETTINGS_SECTIONS = [
   { id: 'ai', label: 'AI Assistant', icon: '🤖' },
   { id: 'audio', label: 'Audio', icon: '🔊' },
   { id: 'platforms', label: 'Platforms', icon: '🎯' },
+  { id: 'retroarch', label: 'RetroArch', icon: '🕹️' },
   { id: 'docker', label: 'Docker', icon: '🐳' },
   { id: 'gpu', label: 'GPU', icon: '💻' },
   { id: 'streaming', label: 'Streaming', icon: '📺' },
@@ -74,13 +75,20 @@ type GraphNodeData = {
   outputs?: GraphPortDefinition[];
 };
 
+const NODE_TYPE_LABELS: Record<string, string> = {
+  MoonlightSink: 'MoonlightSink',
+};
+
+const getNodeTypeLabel = (type: string) => NODE_TYPE_LABELS[type] ?? type;
+
 function GraphNodeCard({ data }: NodeProps<GraphNodeData>) {
   const inputs = data.inputs ?? [];
   const outputs = data.outputs ?? [];
   const maxPorts = Math.max(inputs.length, outputs.length);
+  const typeLabel = getNodeTypeLabel(data.type);
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 shadow-sm min-w-[180px]">
-      <div className="text-[10px] uppercase tracking-wide text-gray-400">{data.type}</div>
+      <div className="text-[10px] uppercase tracking-wide text-gray-400">{typeLabel}</div>
       <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{data.label}</div>
       <div className="mt-2 text-[10px] text-gray-500">
         <div className="grid grid-cols-2 gap-2">
@@ -172,6 +180,11 @@ export default function SettingsPage() {
 
   // GPU settings
   const [gpuVendor, setGpuVendor] = useState<'auto' | 'amd' | 'nvidia'>('auto');
+
+  // RetroArch settings (MAME defaults)
+  const [retroarchMameAspect, setRetroarchMameAspect] = useState<'4:3' | 'auto'>('auto');
+  const [retroarchMameIntegerScale, setRetroarchMameIntegerScale] = useState(true);
+  const [retroarchMameBorderlessFullscreen, setRetroarchMameBorderlessFullscreen] = useState(true);
   
   // Download settings
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
@@ -213,7 +226,7 @@ export default function SettingsPage() {
   const [streamingIdleTimeout, setStreamingIdleTimeout] = useState(15);
   const [streamingDefaultProfileId, setStreamingDefaultProfileId] = useState('1080p60');
   const [streamingMode, setStreamingMode] = useState<'profiles' | 'graph'>('profiles');
-  const [swayProfiles, setSwayProfiles] = useState<SwayProfile[]>([]);
+  const [streamingProfiles, setStreamingProfiles] = useState<StreamingProfile[]>([]);
   const [graphStore, setGraphStore] = useState<StreamingGraphStore | null>(null);
   const [graphPresets, setGraphPresets] = useState<StreamingGraphPreset[]>([]);
   const [graphDefaultPresetId, setGraphDefaultPresetId] = useState('');
@@ -247,16 +260,17 @@ export default function SettingsPage() {
 
   const hasActiveGraphPreset = graphEditorMode === 'create' || !!graphEditorPreset;
   const [testStreamStatus, setTestStreamStatus] = useState<TestStreamStatus>({ running: false });
-  const [testPattern, setTestPattern] = useState<TestPattern>('smpte');
-  const [testProfileId, setTestProfileId] = useState('1080p60');
+  const [testApp, setTestApp] = useState<TestApp>('gst-video-test');
   const [testLoading, setTestLoading] = useState(false);
   const [pairingPin, setPairingPin] = useState('');
   const [pairingLoading, setPairingLoading] = useState(false);
   const [pairingMessage, setPairingMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [pairingStatus, setPairingStatus] = useState<{ ready: boolean; message?: string } | null>(null);
   const [pairingStatusLoading, setPairingStatusLoading] = useState(false);
+  const [pairingSecret, setPairingSecret] = useState<string | null>(null);
+  const [pairingClientIp, setPairingClientIp] = useState<string | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<SwayProfile | null>(null);
+  const [editingProfile, setEditingProfile] = useState<StreamingProfile | null>(null);
   const streamingSettingsLoadedRef = useRef(false);
   const streamingSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [streamingAutoSaveStatus, setStreamingAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -316,6 +330,7 @@ export default function SettingsPage() {
     loadAudioSettings();
     loadDockerSettings();
     loadGpuSettings();
+    loadRetroarchSettings();
     loadDownloadSettings();
     loadJoystickSettings();
     loadAiSettings();
@@ -433,6 +448,23 @@ export default function SettingsPage() {
       }
     } catch (error) {
       console.error('Failed to load GPU settings:', error);
+    }
+  };
+
+  const loadRetroarchSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/retroarch`);
+      if (!response.ok) {
+        throw new Error('Failed to load RetroArch settings');
+      }
+      const data = await response.json();
+      const mame = data.settings?.mame || {};
+      const aspect = mame.aspect;
+      setRetroarchMameAspect(aspect === '4:3' ? '4:3' : 'auto');
+      setRetroarchMameIntegerScale(mame.integerScale !== false);
+      setRetroarchMameBorderlessFullscreen(mame.borderlessFullscreen !== false);
+    } catch (error) {
+      console.error('Failed to load RetroArch settings:', error);
     }
   };
 
@@ -556,7 +588,7 @@ export default function SettingsPage() {
       VirtualCompositor: {
         inputs: [{ id: 'video', label: 'Video In', contract: { mediaType: 'video/raw' } }],
         outputs: [{ id: 'video', label: 'Video Out', contract: { mediaType: 'video/raw' } }],
-        attributes: { compositor: 'sway' },
+        attributes: { compositor: 'wolf' },
       },
       VirtualMonitor: {
         inputs: [{ id: 'video', label: 'Video In', contract: { mediaType: 'video/raw' } }],
@@ -602,7 +634,7 @@ export default function SettingsPage() {
         ],
         attributes: {},
       },
-      SunshineSink: {
+      MoonlightSink: {
         inputs: [
           { id: 'video', label: 'Video In', contract: { mediaType: 'video/encoded' }, required: true },
           { id: 'audio', label: 'Audio In', contract: { mediaType: 'audio/encoded' }, required: true },
@@ -656,7 +688,7 @@ export default function SettingsPage() {
         'AudioEncoder',
         'VideoTee',
         'AudioTee',
-        'SunshineSink',
+        'MoonlightSink',
         'InputSource',
         'InputMapper',
         'InputInjector',
@@ -677,7 +709,7 @@ export default function SettingsPage() {
       AudioEncoder: 'Encodes audio samples for streaming.',
       VideoTee: 'Splits video frames to multiple sinks/outputs.',
       AudioTee: 'Splits audio samples to multiple sinks/outputs.',
-      SunshineSink: 'Publishes encoded streams to the Sunshine/Moonlight endpoint.',
+      MoonlightSink: 'Publishes encoded streams to the Wolf/Moonlight endpoint.',
       InputSource: 'Receives input events from streaming clients.',
       InputMapper: 'Maps/normalizes input events for the target runner.',
       InputInjector: 'Injects input events into the runner/container.',
@@ -794,14 +826,11 @@ export default function SettingsPage() {
         }
       }
 
-      // Load Sway profiles
-      const profilesResponse = await fetch(`${API_BASE_URL}/api/settings/sway-configs`);
+      // Load display profiles
+      const profilesResponse = await fetch(`${API_BASE_URL}/api/settings/streaming-profiles`);
       if (profilesResponse.ok) {
         const data = await profilesResponse.json();
-        setSwayProfiles(data.profiles || []);
-        if (data.profiles?.length > 0 && !testProfileId) {
-          setTestProfileId(data.profiles[0].id);
-        }
+        setStreamingProfiles(data.profiles || []);
       }
 
       // Load test stream status
@@ -1376,24 +1405,30 @@ export default function SettingsPage() {
     setNodeDocsOpen(false);
   }, [graphEditorSelectedNodeId]);
 
-  const startTestStream = async (mode: 'stream' | 'x11') => {
+  const startTestStream = async () => {
     try {
       setTestLoading(true);
       const response = await fetch(`${API_BASE_URL}/api/streaming/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mode,
-          profileId: testProfileId,
-          pattern: testPattern,
+          app: testApp,
         }),
       });
 
       const data = await response.json();
-      if (!response.ok) {
+      if (!response.ok && response.status !== 202) {
+        if (data?.pairingRequired) {
+          setTestStreamStatus(data.status || { running: false, waiting: true, pairingRequired: true, app: testApp });
+          setPairingMessage({
+            type: 'error',
+            text: 'Pairing required. Enter the Moonlight PIN below to continue.',
+          });
+          return;
+        }
         throw new Error(data.message || data.error || 'Failed to start test stream');
       }
-      setTestStreamStatus(data.status || { running: true });
+      setTestStreamStatus(data.status || { running: true, app: testApp, mode: 'stream' });
     } catch (error) {
       console.error('Failed to start test stream:', error);
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to start test stream' });
@@ -1425,6 +1460,14 @@ export default function SettingsPage() {
       return;
     }
 
+    if (!pairingSecret) {
+      setPairingMessage({
+        type: 'error',
+        text: 'No pending pairing request found. Open Moonlight and click Add Host, then use Check Requests.',
+      });
+      return;
+    }
+
     try {
       setPairingLoading(true);
       setPairingMessage(null);
@@ -1432,7 +1475,7 @@ export default function SettingsPage() {
       const response = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pair', pin: normalizedPin }),
+        body: JSON.stringify({ action: 'pair', pin: normalizedPin, pair_secret: pairingSecret }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -1442,6 +1485,8 @@ export default function SettingsPage() {
 
       setPairingMessage({ type: 'success', text: 'Pairing successful! You can connect in Moonlight now.' });
       setPairingPin('');
+      setPairingSecret(null);
+      setPairingClientIp(null);
       setPairingStatus({ ready: true, message: 'Moonlight client paired and ready to connect.' });
     } catch (error) {
       setPairingMessage({
@@ -1456,6 +1501,29 @@ export default function SettingsPage() {
   const refreshPairingStatus = async () => {
     try {
       setPairingStatusLoading(true);
+      const pairResponse = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
+        method: 'GET',
+      });
+
+      const pairData = await pairResponse.json().catch(() => ({}));
+      const pending = Array.isArray(pairData.pending) ? pairData.pending : [];
+
+      if (pairResponse.ok && pending.length > 0) {
+        const request = pending[0] || {};
+        setPairingSecret(request.pair_secret || null);
+        setPairingClientIp(request.client_ip || null);
+        setPairingStatus({
+          ready: true,
+          message: request.client_ip
+            ? `Pairing request received from ${request.client_ip}. Enter the PIN shown in Moonlight.`
+            : 'Pairing request received. Enter the PIN shown in Moonlight.',
+        });
+        return;
+      }
+
+      setPairingSecret(null);
+      setPairingClientIp(null);
+
       const response = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1478,10 +1546,10 @@ export default function SettingsPage() {
     }
   };
 
-  const createSwayProfile = async () => {
+  const createStreamingProfile = async () => {
     try {
       setSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/settings/sway-configs`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/streaming-profiles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileFormData),
@@ -1504,11 +1572,11 @@ export default function SettingsPage() {
     }
   };
 
-  const updateSwayProfile = async () => {
+  const updateStreamingProfile = async () => {
     if (!editingProfile) return;
     try {
       setSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/settings/sway-configs/${editingProfile.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/streaming-profiles/${editingProfile.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1535,7 +1603,7 @@ export default function SettingsPage() {
     }
   };
 
-  const openProfileModal = (profile?: SwayProfile) => {
+  const openProfileModal = (profile?: StreamingProfile) => {
     if (profile) {
       setEditingProfile(profile);
       setProfileFormData({
@@ -1601,6 +1669,38 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Failed to save GPU settings:', error);
       setMessage({ type: 'error', text: 'Failed to save GPU settings' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveRetroarchSettings = async () => {
+    try {
+      setSaving(true);
+      setMessage(null);
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/retroarch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mame: {
+            aspect: retroarchMameAspect,
+            integerScale: retroarchMameIntegerScale,
+            borderlessFullscreen: retroarchMameBorderlessFullscreen,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save RetroArch settings');
+      }
+
+      showSaveIndicator('retroarch', 'RetroArch settings saved!');
+    } catch (error) {
+      console.error('Failed to save RetroArch settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save RetroArch settings' });
     } finally {
       setSaving(false);
     }
@@ -2257,6 +2357,84 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* RetroArch Settings */}
+          <div
+            id="retroarch"
+            ref={(el) => { sectionRefs.current['retroarch'] = el; }}
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+          >
+            <SaveIndicator show={!!savedSections['retroarch']} message={savedSections['retroarch'] || ''} />
+            <h2 className="text-xl font-semibold mb-4">🕹️ RetroArch Settings</h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              Defaults for RetroArch MAME games. You can override these per game in the editor.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="retroarchMameAspect" className="block text-sm font-medium mb-2">
+                  MAME Aspect Ratio
+                </label>
+                <select
+                  id="retroarchMameAspect"
+                  value={retroarchMameAspect}
+                  onChange={(e) => setRetroarchMameAspect(e.target.value as '4:3' | 'auto')}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="4:3">4:3 (Arcade)</option>
+                  <option value="auto">Auto (Core Default)</option>
+                </select>
+              </div>
+
+              <div className="flex items-start">
+                <div className="flex items-center h-5">
+                  <input
+                    id="retroarchMameIntegerScale"
+                    type="checkbox"
+                    checked={retroarchMameIntegerScale}
+                    onChange={(e) => setRetroarchMameIntegerScale(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  />
+                </div>
+                <div className="ml-3 text-sm">
+                  <label htmlFor="retroarchMameIntegerScale" className="font-medium text-gray-900 dark:text-gray-100">
+                    Integer Scale
+                  </label>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Keeps pixels crisp with integer scaling in MAME.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start">
+                <div className="flex items-center h-5">
+                  <input
+                    id="retroarchMameBorderlessFullscreen"
+                    type="checkbox"
+                    checked={retroarchMameBorderlessFullscreen}
+                    onChange={(e) => setRetroarchMameBorderlessFullscreen(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  />
+                </div>
+                <div className="ml-3 text-sm">
+                  <label htmlFor="retroarchMameBorderlessFullscreen" className="font-medium text-gray-900 dark:text-gray-100">
+                    Borderless Fullscreen
+                  </label>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Uses windowed fullscreen to avoid mode switches.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={saveRetroarchSettings}
+                disabled={saving}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {saving ? 'Saving...' : 'Save RetroArch Settings'}
+              </button>
+            </div>
+          </div>
+
           {/* Streaming Settings */}
           <div 
             id="streaming" 
@@ -2400,12 +2578,12 @@ export default function SettingsPage() {
                       </button>
                       <button
                         onClick={() => {
-                          const profile = swayProfiles.find((item) => item.id === streamingDefaultProfileId);
+                          const profile = streamingProfiles.find((item) => item.id === streamingDefaultProfileId);
                           if (profile) {
                             openProfileModal(profile);
                           }
                         }}
-                        disabled={!swayProfiles.find((item) => item.id === streamingDefaultProfileId)}
+                        disabled={!streamingProfiles.find((item) => item.id === streamingDefaultProfileId)}
                         className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs rounded-lg transition-colors disabled:opacity-50"
                       >
                         Edit Profile
@@ -2419,7 +2597,7 @@ export default function SettingsPage() {
                       onChange={(e) => setStreamingDefaultProfileId(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
                     >
-                      {swayProfiles.map((profile) => (
+                      {streamingProfiles.map((profile) => (
                         <option key={profile.id} value={profile.id}>
                           {profile.name} ({profile.width}×{profile.height} @ {profile.refreshRate}Hz)
                         </option>
@@ -2501,45 +2679,23 @@ export default function SettingsPage() {
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                 <h3 className="text-lg font-medium mb-4">Test Streaming</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                  Verify your streaming setup with a test pattern before launching games.
+                  Verify your streaming setup with a lightweight GStreamer test pattern before launching games.
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <div>
-                    <label htmlFor="testProfile" className="block text-sm font-medium mb-2">
-                      Profile
+                    <label htmlFor="testApp" className="block text-sm font-medium mb-2">
+                      Test App
                     </label>
                     <select
-                      id="testProfile"
-                      value={testProfileId}
-                      onChange={(e) => setTestProfileId(e.target.value)}
+                      id="testApp"
+                      value={testApp}
+                      onChange={(e) => setTestApp(e.target.value as TestApp)}
                       disabled={testStreamStatus.running}
                       className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                     >
-                      {swayProfiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label htmlFor="testPattern" className="block text-sm font-medium mb-2">
-                      Test Pattern
-                    </label>
-                    <select
-                      id="testPattern"
-                      value={testPattern}
-                      onChange={(e) => setTestPattern(e.target.value as TestPattern)}
-                      disabled={testStreamStatus.running}
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                    >
-                      <option value="smpte">SMPTE Bars (Standard TV Test)</option>
-                      <option value="bar">Color Bars</option>
-                      <option value="checkerboard">Checkerboard (Motion Test)</option>
-                      <option value="ball">Bouncing Ball</option>
-                      <option value="snow">Snow (Random Noise)</option>
+                      <option value="gst-video-test">GStreamer Video Test (SMPTE)</option>
+                      <option value="gst-av-test">GStreamer AV Test (SMPTE + Sine)</option>
                     </select>
                   </div>
                 </div>
@@ -2554,41 +2710,71 @@ export default function SettingsPage() {
                       {testStreamStatus.instructions}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                      Mode: {testStreamStatus.mode === 'x11' ? 'Host Display' : 'Moonlight Stream'} • 
-                      Pattern: {testStreamStatus.pattern} • 
-                      Profile: {testStreamStatus.profileId}
+                      Mode: Moonlight Stream • 
+                      App: {testStreamStatus.app || testApp}
+                    </p>
+                  </div>
+                ) : testStreamStatus.waiting ? (
+                  <div className={`mb-4 p-4 border rounded-lg ${testStreamStatus.pairingRequired ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'}`}>
+                    <div className={`flex items-center gap-2 font-medium mb-2 ${testStreamStatus.pairingRequired ? 'text-amber-700 dark:text-amber-300' : 'text-blue-700 dark:text-blue-300'}`}>
+                      <span className="animate-spin">◌</span>
+                      {testStreamStatus.pairingRequired ? 'Waiting for Pairing' : 'Waiting for Moonlight'}
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {testStreamStatus.pairingRequired
+                        ? 'Pair your Moonlight client first, then the test app will launch automatically.'
+                        : 'Connect in Moonlight to start the test app automatically.'}
                     </p>
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                    Audio: 440Hz sine wave tone
+                    Launches a GStreamer test pattern inside the sidecar.
                   </p>
                 )}
 
                 <div className="flex gap-3">
                   {testStreamStatus.running ? (
-                    <button
-                      onClick={stopTestStream}
-                      disabled={testLoading}
-                      className="flex-1 bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                    >
-                      {testLoading ? 'Stopping...' : '■ Stop Test'}
-                    </button>
+                    <>
+                      <button
+                        onClick={stopTestStream}
+                        disabled={testLoading}
+                        className="flex-1 bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
+                      >
+                        {testLoading ? 'Stopping...' : '■ Stop Test'}
+                      </button>
+                      <button
+                        onClick={() => startTestStream()}
+                        disabled={testLoading}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
+                      >
+                        {testLoading ? 'Restarting...' : '↻ Restart Test'}
+                      </button>
+                    </>
+                  ) : testStreamStatus.waiting ? (
+                    <>
+                      <button
+                        onClick={stopTestStream}
+                        disabled={testLoading}
+                        className="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
+                      >
+                        {testLoading ? 'Cancelling...' : 'Cancel Queue'}
+                      </button>
+                      <button
+                        onClick={() => startTestStream()}
+                        disabled={testLoading}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
+                      >
+                        {testLoading ? 'Updating...' : 'Update Queue'}
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button
-                        onClick={() => startTestStream('stream')}
+                        onClick={() => startTestStream()}
                         disabled={testLoading}
                         className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
                       >
                         {testLoading ? 'Starting...' : '▶ Test to Moonlight'}
-                      </button>
-                      <button
-                        onClick={() => startTestStream('x11')}
-                        disabled={testLoading}
-                        className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                      >
-                        {testLoading ? 'Starting...' : '▶ Test to Host Display'}
                       </button>
                     </>
                   )}
@@ -2599,7 +2785,7 @@ export default function SettingsPage() {
                     <div>
                       <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Moonlight Pairing PIN</h4>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Enter the 4-digit PIN shown in Moonlight to approve pairing without opening Sunshine.
+                        Enter the 4-digit PIN shown in Moonlight to approve pairing without opening a separate web UI.
                       </p>
                       <p className="text-[11px] text-gray-400 mt-1">
                         Devcontainer note: pairing checks use host networking (host.docker.internal).
@@ -2610,12 +2796,17 @@ export default function SettingsPage() {
                       disabled={pairingStatusLoading}
                       className="text-xs px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
                     >
-                      {pairingStatusLoading ? 'Checking...' : 'Check Ready'}
+                      {pairingStatusLoading ? 'Checking...' : 'Check Requests'}
                     </button>
                   </div>
                   {pairingStatus && (
                     <div className={`mb-3 text-xs ${pairingStatus.ready ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
                       {pairingStatus.message || (pairingStatus.ready ? 'Sidecar is ready for pairing.' : 'Sidecar is not ready for pairing.')}
+                    </div>
+                  )}
+                  {pairingSecret && (
+                    <div className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                      Pending request {pairingClientIp ? `from ${pairingClientIp}` : 'detected'}.
                     </div>
                   )}
                   <div className="flex flex-wrap items-center gap-3">
@@ -3025,7 +3216,7 @@ export default function SettingsPage() {
                                   />
                                 </div>
                                 <div className="text-xs text-gray-500 dark:text-gray-400">
-                                  Type: <span className="font-semibold">{selectedNode.type}</span>
+                                  Type: <span className="font-semibold">{getNodeTypeLabel(selectedNode.type)}</span>
                                 </div>
                                 <div>
                                   <div className="text-xs font-semibold mb-2">Attributes</div>
@@ -3141,7 +3332,7 @@ export default function SettingsPage() {
                           >
                             {availableGraphNodeTypes.map((type) => (
                               <option key={type} value={type}>
-                                {type}
+                                {getNodeTypeLabel(type)}
                               </option>
                             ))}
                           </select>
@@ -3282,11 +3473,11 @@ export default function SettingsPage() {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-medium mb-1">Custom Sway Config (optional)</label>
+                    <label className="block text-sm font-medium mb-1">Custom Compositor Config (optional)</label>
                     <textarea
                       value={profileFormData.customConfig}
                       onChange={(e) => setProfileFormData({ ...profileFormData, customConfig: e.target.value })}
-                      placeholder="# Additional Sway configuration directives..."
+                      placeholder="# Additional compositor configuration directives..."
                       rows={4}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 font-mono text-sm"
                     />
@@ -3301,7 +3492,7 @@ export default function SettingsPage() {
                     Cancel
                   </button>
                   <button
-                    onClick={editingProfile ? updateSwayProfile : createSwayProfile}
+                    onClick={editingProfile ? updateStreamingProfile : createStreamingProfile}
                     disabled={saving || (!editingProfile && !profileFormData.id) || !profileFormData.name}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:bg-gray-400"
                   >

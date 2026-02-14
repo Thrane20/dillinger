@@ -180,9 +180,9 @@ export const DEFAULT_STREAMING_GRAPH_STORE: StreamingGraphStore = {
             },
           },
           {
-            id: 'sun',
-            type: 'SunshineSink',
-            displayName: 'Sunshine',
+            id: 'moonlight',
+            type: 'MoonlightSink',
+            displayName: 'Moonlight',
             inputs: [
               { id: 'video', label: 'Video In', contract: { mediaType: 'video/encoded' }, required: true },
               { id: 'audio', label: 'Audio In', contract: { mediaType: 'audio/encoded' }, required: true },
@@ -198,8 +198,8 @@ export const DEFAULT_STREAMING_GRAPH_STORE: StreamingGraphStore = {
           { id: 'edge-runner-comp', from: 'runner', out: 'video', to: 'comp', in: 'video' },
           { id: 'edge-comp-venc', from: 'comp', out: 'video', to: 'venc', in: 'video' },
           { id: 'edge-runner-audio', from: 'runner', out: 'audio', to: 'aenc', in: 'audio' },
-          { id: 'edge-venc-sun', from: 'venc', out: 'video', to: 'sun', in: 'video' },
-          { id: 'edge-aenc-sun', from: 'aenc', out: 'audio', to: 'sun', in: 'audio' },
+          { id: 'edge-venc-moonlight', from: 'venc', out: 'video', to: 'moonlight', in: 'video' },
+          { id: 'edge-aenc-moonlight', from: 'aenc', out: 'audio', to: 'moonlight', in: 'audio' },
         ],
       },
     },

@@ -98,6 +98,7 @@ export default function GamesPage() {
   const [gridColumns, setGridColumns] = useState(2); // Default to 2 columns
 
   const [debugDialogOpenForGameId, setDebugDialogOpenForGameId] = useState<string | null>(null);
+  const [streamDebugDialogOpenForGameId, setStreamDebugDialogOpenForGameId] = useState<string | null>(null);
   const [selectedGameForModal, setSelectedGameForModal] = useState<Game | null>(null);
 
   // Compact mode for zoom levels 4-6
@@ -130,11 +131,12 @@ export default function GamesPage() {
   } | null>(null);
 
   useEffect(() => {
-    if (!debugDialogOpenForGameId) return;
+    if (!debugDialogOpenForGameId && !streamDebugDialogOpenForGameId) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setDebugDialogOpenForGameId(null);
+        setStreamDebugDialogOpenForGameId(null);
       }
     };
 
@@ -152,6 +154,7 @@ export default function GamesPage() {
 
       if (!clickedInside) {
         setDebugDialogOpenForGameId(null);
+        setStreamDebugDialogOpenForGameId(null);
       }
     };
 
@@ -161,7 +164,7 @@ export default function GamesPage() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('mousedown', onMouseDown);
     };
-  }, [debugDialogOpenForGameId]);
+  }, [debugDialogOpenForGameId, streamDebugDialogOpenForGameId]);
 
   const hoveredGame = hoveredGameId
     ? games.find((g) => g.id === hoveredGameId)
@@ -496,56 +499,52 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
         if (data.success) {
           const games = data.data || [];
 
-          // Check download status for each game
-          const gamesWithDownloadStatus = await Promise.all(
-            games.map(async (game: any) => {
-              try {
-                const downloadResponse = await fetch(
-                  `/api/games/${game.id}/download/status`
-                );
-                if (downloadResponse.ok) {
-                  const downloadData = await downloadResponse.json();
-                  if (downloadData.success && downloadData.status) {
-                    const dlStatus = downloadData.status;
-                    
-                    // Handle different download states
-                    if (dlStatus.status === 'failed') {
-                      return {
-                        ...game,
-                        installation: {
-                          ...game.installation,
-                          status: 'download_cancelled',
-                          downloadProgress: dlStatus.totalProgress,
-                        },
-                      };
-                    } else if (dlStatus.status === 'downloading' || dlStatus.status === 'queued') {
-                      return {
-                        ...game,
-                        installation: {
-                          ...game.installation,
-                          status: 'downloading',
-                          downloadProgress: dlStatus.totalProgress,
-                        },
-                      };
-                    } else if (dlStatus.status === 'paused') {
-                      return {
-                        ...game,
-                        installation: {
-                          ...game.installation,
-                          status: 'download_cancelled',
-                          downloadProgress: dlStatus.totalProgress,
-                        },
-                      };
-                    }
-                    // If completed, let the game keep its current state
-                  }
+          // Fetch all active download statuses in one request to avoid per-game polling.
+          const activeDownloadsByGameId = new Map<string, any>();
+          try {
+            const downloadsResponse = await fetch('/api/online-sources/gog/downloads');
+            if (downloadsResponse.ok) {
+              const downloadsData = await downloadsResponse.json();
+              for (const dl of downloadsData.downloads || []) {
+                if (dl?.gameId) {
+                  activeDownloadsByGameId.set(dl.gameId, dl);
                 }
-              } catch (err) {
-                // Ignore errors for individual games
               }
+            }
+          } catch {
+            // Ignore download-status aggregation errors and continue with base game list.
+          }
+
+          const gamesWithDownloadStatus = games.map((game: any) => {
+            const dlStatus = activeDownloadsByGameId.get(game.id);
+            if (!dlStatus) {
               return game;
-            })
-          );
+            }
+
+            if (dlStatus.status === 'failed' || dlStatus.status === 'paused') {
+              return {
+                ...game,
+                installation: {
+                  ...game.installation,
+                  status: 'download_cancelled',
+                  downloadProgress: dlStatus.progress?.totalProgress ?? 0,
+                },
+              };
+            }
+
+            if (dlStatus.status === 'downloading' || dlStatus.status === 'queued') {
+              return {
+                ...game,
+                installation: {
+                  ...game.installation,
+                  status: 'downloading',
+                  downloadProgress: dlStatus.progress?.totalProgress ?? 0,
+                },
+              };
+            }
+
+            return game;
+          });
 
           setGames(gamesWithDownloadStatus);
           // Clear any previous errors on successful load
@@ -593,7 +592,6 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
         return;
       }
     } catch (err) {
-      console.error('Failed to check download status:', err);
       // Continue with regular delete flow if check fails
     }
 
@@ -1219,6 +1217,9 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
 
               const isAnotherGameHovered =
                 hoveredGameId !== null && hoveredGameId !== game.id;
+              const isDebugMenuOpen =
+                debugDialogOpenForGameId === game.id ||
+                streamDebugDialogOpenForGameId === game.id;
 
               return (
                 <div
@@ -1230,7 +1231,7 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                       : isAnotherGameHovered
                         ? 'opacity-90'
                         : 'opacity-100'
-                  }`}
+                  } ${isDebugMenuOpen ? 'z-50' : 'z-0'}`}
                   onMouseEnter={() => setHoveredGameId(game.id)}
                   onMouseLeave={() => setHoveredGameId(null)}
                 >
@@ -1364,16 +1365,93 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
                             </button>
-                            <button
-                              onClick={() => launchGame(game.id, 'streaming')}
-                              disabled={isLaunching}
-                              className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors disabled:opacity-60"
-                              title="Stream"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
-                            </button>
+                            <div className="relative inline-flex" data-debug-menu="true">
+                              <button
+                                onClick={() => launchGame(game.id, 'streaming')}
+                                disabled={isLaunching}
+                                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-l transition-colors disabled:opacity-60"
+                                title="Stream"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() =>
+                                  setStreamDebugDialogOpenForGameId((prev) =>
+                                    prev === game.id ? null : game.id
+                                  )
+                                }
+                                disabled={isLaunching}
+                                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-r transition-colors disabled:opacity-60 border-l border-blue-900/30"
+                                title="Debug stream options (keeps container alive)"
+                                aria-label="Open stream debug options"
+                              >
+                                <svg
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M19 9l-7 7-7-7"
+                                  />
+                                </svg>
+                              </button>
+
+                              {streamDebugDialogOpenForGameId === game.id && (
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-[9998]"
+                                    data-debug-menu="true"
+                                    onClick={() => setStreamDebugDialogOpenForGameId(null)}
+                                  />
+                                  <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-[9999]" data-debug-menu="true">
+                                    <div className="p-3 border-b border-border">
+                                      <div className="text-sm font-semibold text-text">
+                                        Start Debugging (Stream)
+                                      </div>
+                                      <div className="text-xs text-muted mt-1">
+                                        Keeps the streaming container alive for logs/inspect.
+                                      </div>
+                                    </div>
+                                    <div className="p-3 flex gap-2">
+                                      <button
+                                        onClick={() => {
+                                          setStreamDebugDialogOpenForGameId(null);
+                                          void launchGame(game.id, 'streaming', undefined, {
+                                            keepContainer: true,
+                                            keepAlive: true,
+                                          });
+                                        }}
+                                        disabled={isLaunching}
+                                        className="flex-1 bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-2 transition-colors disabled:opacity-60"
+                                        title="Debug stream (keep container + keep alive)"
+                                      >
+                                        {isLaunching ? (
+                                          <span className="inline-flex items-center gap-2">
+                                            <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                                            Launching…
+                                          </span>
+                                        ) : (
+                                          'Start Debugging'
+                                        )}
+                                      </button>
+                                      <button
+                                        onClick={() => setStreamDebugDialogOpenForGameId(null)}
+                                        className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700 text-text hover:opacity-90"
+                                        title="Cancel"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
                             <button
                               onClick={() => setSelectedGameForModal(game)}
                               className="p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
@@ -1860,36 +1938,113 @@ docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
                               </>
                             )}
                           </div>
-                          <button
-                            onClick={() => launchGame(game.id, 'streaming')}
-                            disabled={isLaunching}
-                            className="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 transition-colors flex-1 disabled:opacity-60 disabled:cursor-not-allowed"
-                            title="Launch game for streaming via Moonlight"
-                          >
-                            {isLaunching ? (
+                          <div className="relative inline-flex flex-1" data-debug-menu="true">
+                            <button
+                              onClick={() => launchGame(game.id, 'streaming')}
+                              disabled={isLaunching}
+                              className="bg-blue-600 hover:bg-blue-700 text-white rounded-l-md px-3 py-2 transition-colors flex-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                              title="Launch game for streaming via Moonlight"
+                            >
+                              {isLaunching ? (
+                                <>
+                                  <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                                  Launching...
+                                </>
+                              ) : (
+                                <>
+                                  <svg
+                                    className="inline-block h-4 w-4 mr-2"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                    />
+                                  </svg>
+                                  Stream
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() =>
+                                setStreamDebugDialogOpenForGameId((prev) =>
+                                  prev === game.id ? null : game.id
+                                )
+                              }
+                              disabled={isLaunching}
+                              className="bg-blue-600 hover:bg-blue-700 text-white rounded-r-md px-2 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed border-l border-blue-900/30"
+                              title="Open stream debug options"
+                              aria-label="Open stream debug options"
+                            >
+                              <svg
+                                className="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 9l-7 7-7-7"
+                                />
+                              </svg>
+                            </button>
+
+                            {streamDebugDialogOpenForGameId === game.id && (
                               <>
-                                <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                                Launching...
-                              </>
-                            ) : (
-                              <>
-                                <svg
-                                  className="inline-block h-4 w-4 mr-2"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                  />
-                                </svg>
-                                Stream
+                                <div
+                                  className="fixed inset-0 z-[9998]"
+                                  data-debug-menu="true"
+                                  onClick={() => setStreamDebugDialogOpenForGameId(null)}
+                                />
+                                <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-[9999]" data-debug-menu="true">
+                                  <div className="p-3 border-b border-border">
+                                    <div className="text-sm font-semibold text-text">
+                                      Start Debugging (Stream)
+                                    </div>
+                                    <div className="text-xs text-muted mt-1">
+                                      Keeps the streaming container alive for logs/inspect.
+                                    </div>
+                                  </div>
+                                  <div className="p-3 flex gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setStreamDebugDialogOpenForGameId(null);
+                                        void launchGame(game.id, 'streaming', undefined, {
+                                          keepContainer: true,
+                                          keepAlive: true,
+                                        });
+                                      }}
+                                      disabled={isLaunching}
+                                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-2 transition-colors disabled:opacity-60"
+                                      title="Debug stream (keep container + keep alive)"
+                                    >
+                                      {isLaunching ? (
+                                        <span className="inline-flex items-center gap-2">
+                                          <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                                          Launching…
+                                        </span>
+                                      ) : (
+                                        'Start Debugging'
+                                      )}
+                                    </button>
+                                    <button
+                                      onClick={() => setStreamDebugDialogOpenForGameId(null)}
+                                      className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700 text-text hover:opacity-90"
+                                      title="Cancel"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
                               </>
                             )}
-                          </button>
+                          </div>
                           <a
                             href={`/games/${game.id}/edit`}
                             className="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm"

@@ -1,9 +1,9 @@
 import Docker from 'dockerode';
 import path from 'path';
-import { randomBytes } from 'crypto';
 import { existsSync, statSync, readFileSync, readdirSync } from 'fs';
 import type { Game, Platform } from '@dillinger/shared';
 import { JSONStorageService } from './storage';
+import { getDefaultVolume } from './volume-defaults';
 import { SettingsService } from './settings';
 import { logger } from './logger';
 
@@ -13,7 +13,7 @@ export interface GameLaunchOptions {
   game: Game;
   platform: Platform;
   sessionId: string;
-  mode?: 'local' | 'streaming'; // Launch mode: local (host display) or streaming (Sunshine)
+  mode?: 'local' | 'streaming'; // Launch mode: local (host display) or streaming (Wolf sidecar)
   keepContainer?: boolean; // If true, do not auto-remove container (debugging)
   keepAlive?: boolean; // If true, keep runner alive after failure (debugging)
 }
@@ -55,6 +55,28 @@ export class DockerService {
   
   // Volume name for the current game session
   private readonly SESSION_VOLUME = 'dillinger_current_session';
+  private readonly STREAMING_RUNTIME_VOLUME = 'dillinger_streaming_runtime';
+
+  private async detectActiveStreamingWaylandDisplay(): Promise<string | null> {
+    // Wolf may rotate Wayland socket names across sessions (wayland-1, wayland-2, ...).
+    // Runner containers must connect to the currently active socket, which lives in the
+    // shared streaming runtime volume.
+    try {
+      const { exitCode, output } = await this.runInVolume(
+        this.STREAMING_RUNTIME_VOLUME,
+        '/mnt',
+        // Pick the newest wayland-* that is a Unix socket.
+        'for f in $(ls -1t /mnt/wayland-* 2>/dev/null); do [ -S "$f" ] && basename "$f" && exit 0; done; exit 1'
+      );
+      if (exitCode === 0) {
+        const name = output.trim().split('\n')[0]?.trim();
+        if (name) return name;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
   
   // Host path mapping for devcontainer
   // When running in a devcontainer, /workspaces/dillinger maps to a host path
@@ -123,6 +145,161 @@ export class DockerService {
     }
     
     return null;
+  }
+
+  /**
+   * If a container path lives inside a Docker volume mount, return the volume name
+   * and relative path within that volume.
+   */
+  private getVolumeMountForPath(containerPath: string): { volumeName: string; relativePath: string } | null {
+    if (!this.mounts || this.mounts.length === 0) {
+      return null;
+    }
+
+    const sortedMounts = [...this.mounts].sort((a, b) => b.Destination.length - a.Destination.length);
+    for (const mount of sortedMounts) {
+      if (mount.Type !== 'volume') continue;
+
+      const isExact = containerPath === mount.Destination;
+      const isPrefix = containerPath.startsWith(mount.Destination + '/');
+      if (!isExact && !isPrefix) continue;
+
+      const relativePath = isExact ? '' : containerPath.substring(mount.Destination.length);
+      const volumeName = mount.Name || mount.Source;
+      if (!volumeName) continue;
+
+      return { volumeName, relativePath };
+    }
+
+    return null;
+  }
+
+  /**
+   * Build the ROM bind mount and container path, handling devcontainer volume mounts.
+   */
+  private async resolveRomMount(romPath: string): Promise<{ bind: string; containerPath: string }> {
+    let normalizedRomPath = romPath;
+    if (romPath === '/roms' || romPath.startsWith('/roms/')) {
+      const { volume } = await getDefaultVolume('roms');
+      if (volume?.hostPath) {
+        const relative = romPath.replace(/^\/roms\/?/, '');
+        normalizedRomPath = relative ? path.posix.join(volume.hostPath, relative) : volume.hostPath;
+        logger.info(`  Normalized ROM path ${romPath} -> ${normalizedRomPath} (roms default volume)`);
+      } else {
+        logger.warn('  ROM path uses /roms but no default ROM volume is configured');
+      }
+    }
+
+    const romDir = path.posix.dirname(normalizedRomPath);
+    const romFilename = path.posix.basename(normalizedRomPath);
+    const stripLeadingSlash = (value: string) => value.replace(/^\/+/, '');
+
+    const volumeMount = this.getVolumeMountForPath(romDir);
+    if (volumeMount) {
+      const relative = stripLeadingSlash(volumeMount.relativePath);
+      const containerPath = relative
+        ? path.posix.join('/roms', relative, romFilename)
+        : path.posix.join('/roms', romFilename);
+
+      return { bind: `${volumeMount.volumeName}:/roms:ro`, containerPath };
+    }
+
+    const hostRomDir = this.resolveHostPath(romDir);
+    const volumeMatch = await this.findVolumeForPath(hostRomDir);
+    if (volumeMatch) {
+      const relative = stripLeadingSlash(volumeMatch.relativePath);
+      const containerPath = relative
+        ? path.posix.join('/roms', relative, romFilename)
+        : path.posix.join('/roms', romFilename);
+
+      return { bind: `${volumeMatch.volume.dockerVolumeName}:/roms:ro`, containerPath };
+    }
+
+    // Fallback: try to preserve subdirectory structure when the ROM path
+    // lives under a well-known mount (e.g. /roms/c64/GAME.D64).  Instead of
+    // mounting the immediate parent dir, find the top-level mount and keep
+    // the relative path within the container.
+    const hostRomRoot = this.resolveHostPath('/roms');
+    if (hostRomRoot !== '/roms' && normalizedRomPath.startsWith('/roms/')) {
+      // resolveHostPath found a real host path for /roms
+      const relativeInRoms = normalizedRomPath.slice('/roms/'.length); // e.g. c64/RAIDONBB.D64
+      const containerPath = path.posix.join('/roms', relativeInRoms);
+      logger.info(`  Fallback ROM mount: ${hostRomRoot}:/roms:ro, path: ${containerPath}`);
+      return { bind: `${hostRomRoot}:/roms:ro`, containerPath };
+    }
+
+    return { bind: `${hostRomDir}:/roms:ro`, containerPath: path.posix.join('/roms', romFilename) };
+  }
+
+  private async callSidecarAPI<T>(endpoint: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
+    const baseUrl = process.env.DILLINGER_SIDECAR_API_BASE || 'http://localhost:9999';
+    const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    const response = await fetch(url, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      const detail = text ? ` ${text.slice(0, 200)}` : '';
+      throw new Error(`Sidecar API ${method} ${endpoint} failed: ${response.status}${detail}`);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    return await response.json() as T;
+  }
+
+  private async safeSidecarGet<T>(endpoint: string): Promise<T | null> {
+    try {
+      return await this.callSidecarAPI<T>(endpoint, 'GET');
+    } catch (error) {
+      logger.debug(`Sidecar GET ${endpoint} failed:`, error);
+      return null;
+    }
+  }
+
+  async getSidecarHealth(): Promise<{ status?: string; version?: string } | null> {
+    return await this.safeSidecarGet('/health');
+  }
+
+  async getSidecarStatus(): Promise<any | null> {
+    return await this.safeSidecarGet('/status');
+  }
+
+  async getPairStatus(): Promise<any | null> {
+    return await this.safeSidecarGet('/pair/status');
+  }
+
+  async acceptPairing(pairSecret: string, pin: string): Promise<any> {
+    return await this.callSidecarAPI('/pair/accept', 'POST', {
+      pair_secret: pairSecret,
+      pin,
+    });
+  }
+
+  async launchSidecarCommand(cmd: string, env?: Record<string, string>): Promise<any> {
+    return await this.callSidecarAPI('/launch', 'POST', {
+      cmd,
+      env: env || {},
+    });
+  }
+
+  async stopSidecarCommand(): Promise<void> {
+    try {
+      await this.callSidecarAPI('/stop', 'POST', {});
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('ECONNREFUSED')) {
+        logger.warn('Sidecar API not reachable while stopping test stream; assuming stopped.');
+        return;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -431,14 +608,31 @@ export class DockerService {
     }
     
     try {
-      // Get the hostname (container ID)
-      const os = await import('os');
-      const hostname = os.hostname();
+      // Detect our container ID.  os.hostname() returns the *hostname* which
+      // may differ from the Docker container ID (e.g. when the devcontainer
+      // sets a custom hostname).  We first try to extract the real container
+      // ID from /proc/self/mountinfo (Docker writes paths containing the
+      // full 64-hex-char container ID).  Fall back to os.hostname().
+      let containerId: string | null = null;
+      try {
+        const mountinfo = readFileSync('/proc/self/mountinfo', 'utf8');
+        const cidMatch = mountinfo.match(/\/var\/lib\/docker\/containers\/([0-9a-f]{64})\//);
+        if (cidMatch) {
+          containerId = cidMatch[1];
+          logger.info(`Detected container ID from mountinfo: ${containerId.substring(0, 12)}...`);
+        }
+      } catch { /* ignore */ }
+
+      if (!containerId) {
+        const os = await import('os');
+        containerId = os.hostname();
+        logger.info(`Using hostname as container ID: ${containerId}`);
+      }
       
-      logger.info(`Detecting host path for container: ${hostname}`);
+      logger.info(`Detecting host path for container: ${containerId.substring(0, 12)}`);
       
       // Inspect the current container to find the workspace mount
-      const container = docker.getContainer(hostname);
+      const container = docker.getContainer(containerId);
       const info = await container.inspect();
       
       this.mounts = info.Mounts || []; // Store mounts for general translation
@@ -763,10 +957,12 @@ export class DockerService {
     let gameExecutable: string;
     let cmdArray: string[];
     let containerWorkingDir: string | undefined;
+    let romBind: string | null = null;
+    let romContainerPath: string | null = null;
     
     // Map platform IDs to VICE emulator commands
     const viceEmulators: Record<string, string> = {
-      'c64': 'x64sc',           // Commodore 64 (accurate)
+      'c64': 'x64',             // Commodore 64 (better host joystick compatibility)
       'c128': 'x128',           // Commodore 128
       'vic20': 'xvic',          // VIC-20
       'plus4': 'xplus4',        // Plus/4
@@ -899,6 +1095,43 @@ export class DockerService {
       } else {
         // Set RETROARCH_CORE env var for normal games
         environment['RETROARCH_CORE'] = core;
+        environment['RETROARCH_LOG_FILE'] = '/home/gameuser/.config/retroarch/retroarch.log';
+        environment['RETROARCH_LOG_LEVEL'] = '1';
+
+        const isMameCore = ['mame', 'mame2003', 'mame2003_plus'].includes(core);
+        if (isMameCore) {
+          try {
+            const settingsService = SettingsService.getInstance();
+            const retroarchSettings = await settingsService.getRetroarchSettings();
+            const globalMame = retroarchSettings.mame || {};
+            const gameMame = (game.settings?.emulator?.settings as {
+              mame?: { aspect?: '4:3' | 'auto'; integerScale?: boolean; borderlessFullscreen?: boolean };
+            } | undefined)?.mame || {};
+
+            const aspect = gameMame.aspect ?? globalMame.aspect;
+            if (aspect) {
+              environment['RETROARCH_MAME_ASPECT'] = aspect;
+            }
+
+            const integerScale = gameMame.integerScale ?? globalMame.integerScale;
+            if (typeof integerScale === 'boolean') {
+              environment['RETROARCH_MAME_INTEGER_SCALE'] = integerScale ? 'true' : 'false';
+            }
+
+            const borderlessFullscreen = gameMame.borderlessFullscreen ?? globalMame.borderlessFullscreen;
+            if (typeof borderlessFullscreen === 'boolean') {
+              environment['RETROARCH_MAME_BORDERLESS'] = borderlessFullscreen ? 'true' : 'false';
+            }
+
+            logger.info('RetroArch MAME settings resolved:', {
+              aspect,
+              integerScale,
+              borderlessFullscreen,
+            });
+          } catch (err) {
+            logger.warn('Failed to apply RetroArch MAME settings:', err);
+          }
+        }
 
         // Get platform settings for fullscreen preference
         if (game.platformId === 'psx') {
@@ -918,13 +1151,14 @@ export class DockerService {
         if (!romPath) {
           throw new Error('No ROM file specified for RetroArch game');
         }
-        
-        // The ROM file is mounted into /roms inside the container
-        const romFilename = path.basename(romPath);
-        
+
+        const romMount = await this.resolveRomMount(romPath);
+        romBind = romMount.bind;
+        romContainerPath = romMount.containerPath;
+
         // Command is just the ROM path (entrypoint handles the rest)
         gameExecutable = 'retroarch'; // Just for logging
-        cmdArray = [`/roms/${romFilename}`];
+        cmdArray = [romContainerPath];
         containerWorkingDir = '/home/gameuser';
         
         logger.info(`Launching RetroArch game: ${game.title}`);
@@ -948,9 +1182,14 @@ export class DockerService {
       
       // VICE emulator command: x64sc /roms/game.d64
       // The ROM file is mounted into /roms inside the container
-      const romFilename = path.basename(romPath);
+      const romMount = await this.resolveRomMount(romPath);
+      romBind = romMount.bind;
+      romContainerPath = romMount.containerPath;
       gameExecutable = emulatorCmd;
-      cmdArray = [emulatorCmd, `/roms/${romFilename}`];
+      // Do NOT pass -default: it resets joystick/input settings to disabled.
+      // Fresh containers have no stale config, so -default is unnecessary.
+      // VICE uses its own evdev joystick driver to scan /dev/input.
+      cmdArray = [emulatorCmd, romContainerPath];
       containerWorkingDir = '/home/gameuser';
       
       logger.info(`Launching Commodore game: ${game.title}`);
@@ -974,9 +1213,11 @@ export class DockerService {
       
       // FS-UAE emulator command: fs-uae /roms/game.adf
       // The ROM file is mounted into /roms inside the container
-      const romFilename = path.basename(romPath);
+      const romMount = await this.resolveRomMount(romPath);
+      romBind = romMount.bind;
+      romContainerPath = romMount.containerPath;
       gameExecutable = emulatorCmd;
-      cmdArray = [emulatorCmd, `/roms/${romFilename}`];
+      cmdArray = [emulatorCmd, romContainerPath];
       containerWorkingDir = '/home/gameuser';
       
       // Determine Amiga model from platform ID
@@ -1017,6 +1258,9 @@ export class DockerService {
       if (!romPath) {
         throw new Error('No ROM file specified for MAME game');
       }
+
+      const romMount = await this.resolveRomMount(romPath);
+      romBind = romMount.bind;
       
       // MAME expects the driver name (filename without extension)
       // The ROM directory is mounted to /roms
@@ -1112,6 +1356,10 @@ export class DockerService {
         env.push(`JOYSTICK_DEVICE_ID=${joystickConfig.deviceId}`);
         env.push(`JOYSTICK_DEVICE_NAME=${joystickConfig.deviceName}`);
         logger.info(`  Joystick configured: ${joystickConfig.deviceName} (${joystickConfig.deviceId})`);
+
+        // VICE joystick detection is handled by SDL2 inside the container.
+        // The entrypoint sets SDL_JOYSTICK_DEVICE to point SDL2 at the
+        // correct /dev/input/event* nodes (since udevd isn't running).
       }
     } catch (err) {
       logger.warn('Failed to inject joystick configuration:', err);
@@ -1123,6 +1371,11 @@ export class DockerService {
     const pgid = process.env.PGID || '1000';
     env.push(`PUID=${puid}`);
     env.push(`PGID=${pgid}`);
+
+    if (options.keepAlive === true) {
+      env.push('KEEP_ALIVE=true');
+      logger.info('  KEEP_ALIVE enabled for runner');
+    }
 
     // Pass global GPU selection to runner (base entrypoint consumes GPU_VENDOR)
     try {
@@ -1250,10 +1503,10 @@ export class DockerService {
       logger.info(`  MangoHUD overlay enabled`);
     }
 
-    // Streaming configuration (Sunshine sidecar)
+    // Streaming configuration (Wolf sidecar)
     // Note: moonlightConfig is already defined at the top of launchGame()
     if (moonlightConfig?.enabled) {
-      logger.info('  Streaming enabled for this game (Sunshine sidecar)');
+      logger.info('  Streaming enabled for this game (Wolf sidecar)');
       if (moonlightConfig.bitrate) {
         logger.info(`  Requested bitrate: ${moonlightConfig.bitrate}Mbps`);
       }
@@ -1266,6 +1519,11 @@ export class DockerService {
       if (moonlightConfig.codec) {
         logger.info(`  Requested codec: ${moonlightConfig.codec}`);
       }
+    }
+
+    if (isStreamingMode) {
+      logger.info('Ensuring streaming sidecar is running for game session');
+      await this.ensureStreamerSidecar('game');
     }
 
     // Add Wine-specific configuration for Windows games
@@ -1342,8 +1600,14 @@ export class DockerService {
       }
     }
 
+    const preferX11ForVice = !isStreamingMode &&
+      (Boolean(game.platformId && viceEmulators[game.platformId]) ||
+        Boolean(platform.configuration.containerImage?.includes('runner-vice')));
+
     // Get display forwarding configuration
-    const displayConfig = await this.getDisplayConfiguration();
+    const displayConfig = isStreamingMode
+      ? await this.getSidecarDisplayConfiguration()
+      : await this.getDisplayConfiguration({ preferX11: preferX11ForVice });
     env.push(...displayConfig.env);
     
     logger.info(`  Display mode: ${displayConfig.mode}`);
@@ -1598,9 +1862,15 @@ export class DockerService {
     // For Commodore, Amiga, MAME, and RetroArch emulator games, mount the ROM file directory and per-game home
     else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId] || retroarchCores[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
       if (game.filePath && game.filePath !== 'MENU') {
-        const romDir = path.dirname(game.filePath);
-        binds.push(`${romDir}:/roms:ro`);
-        logger.info(`  Mounting ROM directory: ${romDir} -> /roms`);
+        if (romBind) {
+          binds.push(romBind);
+          logger.info(`  Mounting ROM directory: ${romBind} -> /roms`);
+        } else {
+          // Fallback: attempt to resolve via resolveRomMount to handle volumes/subdirs correctly
+          const romMount = await this.resolveRomMount(game.filePath);
+          binds.push(romMount.bind);
+          logger.info(`  Mounting ROM directory (fallback): ${romMount.bind} -> /roms`);
+        }
       }
       
       // Mount per-game home directory for emulator config and saves
@@ -1708,16 +1978,34 @@ export class DockerService {
         ? false
         : (dockerSettings.autoRemoveContainers !== undefined
           ? dockerSettings.autoRemoveContainers
-          : false); // Default to false (keep containers)
+          : true); // Default to true (clean up after close)
 
       // Resolve the actual installed runner image
       const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-linux-native';
       const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
 
+      // Derive a human-readable container name from the runner image
+      // e.g. "ghcr.io/thrane20/dillinger/runner-retroarch" -> "dillinger-retroarch"
+      const runnerSlug = baseImage.split('/').pop()?.replace(/^runner-/, '') || 'game';
+      const containerName = `dillinger-${runnerSlug}`;
+
+      // Stop and remove any existing container with the same name
+      try {
+        const existing = docker.getContainer(containerName);
+        const info = await existing.inspect();
+        if (info) {
+          logger.info(`Removing existing container: ${containerName}`);
+          try { await existing.stop(); } catch { /* already stopped */ }
+          await existing.remove({ force: true });
+        }
+      } catch {
+        // Container doesn't exist — that's fine
+      }
+
       // Create and start the container
       const containerConfig: any = {
         Image: resolvedImage,
-        name: `dillinger-session-${sessionId}`,
+        name: containerName,
         Env: env,
         WorkingDir: containerWorkingDir,
         Labels: {
@@ -1730,6 +2018,7 @@ export class DockerService {
           AutoRemove: autoRemove,
           Binds: binds,
           Devices: displayConfig.devices,
+          DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
           NetworkMode: displayConfig.networkMode,
@@ -1744,22 +2033,6 @@ export class DockerService {
       if (keepContainer) {
         logger.info('  Keep container enabled: container will not be auto-removed');
       }
-      
-      // Configure streaming mode (Sunshine sidecar)
-      if (isStreamingMode) {
-        logger.info('  Configuring container for streaming sidecar...');
-
-        const settingsService = SettingsService.getInstance();
-        const streamingSettings = await settingsService.getStreamingSettings();
-        await this.ensureStreamerSidecar(streamingSettings.defaultProfileId, 'game');
-
-        // Mount shared Wayland socket from sidecar
-        binds.push('dillinger_streaming_wayland:/run/dillinger:rw');
-        env.push('XDG_RUNTIME_DIR=/run/dillinger');
-        env.push('WAYLAND_DISPLAY=wayland-dillinger');
-        logger.info('    Using sidecar Wayland socket: /run/dillinger/wayland-dillinger');
-      }
-      
       
       // Pass the command array to the container
       // The entrypoint script will execute it with gosu
@@ -1892,7 +2165,10 @@ export class DockerService {
     }
 
     // Setup display configuration
-    const displayConfig = await this.getDisplayConfiguration();
+    const preferX11ForVice =
+      Boolean(game.platformId && viceEmulators[game.platformId]) ||
+      Boolean(platform.configuration.containerImage?.includes('runner-vice'));
+    const displayConfig = await this.getDisplayConfiguration({ preferX11: preferX11ForVice });
     
     // Base environment
     const env = [
@@ -1931,8 +2207,8 @@ export class DockerService {
       binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
       // Also mount ROM directory if available
       if (game.filePath) {
-        const romDir = path.dirname(game.filePath);
-        binds.push(`${romDir}:/roms:ro`);
+        const romMount = await this.resolveRomMount(game.filePath);
+        binds.push(romMount.bind);
       }
     } else {
       binds.push(`${this.SESSION_VOLUME}:/game:ro`);
@@ -1953,6 +2229,7 @@ export class DockerService {
           AutoRemove: false,
           Binds: binds,
           Devices: displayConfig.devices,
+          DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
           NetworkMode: displayConfig.networkMode,
@@ -2483,6 +2760,7 @@ export class DockerService {
             ...displayConfig.volumes
           ],
           Devices: displayConfig.devices,
+          DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
           NetworkMode: displayConfig.networkMode,
@@ -2889,6 +3167,13 @@ export class DockerService {
    */
   async stopGame(containerId: string, cleanupVolume: boolean = true): Promise<void> {
     try {
+      const sidecarStatus = await this.getStreamerSidecarStatus();
+      if (sidecarStatus?.containerId === containerId) {
+        logger.info('Stopping game via streaming sidecar API');
+        await this.callSidecarAPI('/stop', 'POST', {});
+        return;
+      }
+
       const container = docker.getContainer(containerId);
       
       // Extract session ID from container name before stopping
@@ -2899,8 +3184,8 @@ export class DockerService {
           const info = await container.inspect();
           const containerName = info.Name.replace(/^\//, ''); // Remove leading slash
           // Verify this is a dillinger session container
-          if (!containerName.match(/dillinger-session-(.+)/)) {
-            logger.warn('Container does not appear to be a dillinger session');
+          if (!containerName.match(/^dillinger-/)) {
+            logger.warn('Container does not appear to be a dillinger container');
           }
         } catch (err) {
           logger.warn('Could not inspect container for cleanup:', err);
@@ -2994,11 +3279,17 @@ export class DockerService {
     try {
       const containers = await docker.listContainers({
         filters: {
-          name: ['dillinger-session-']
+          name: ['dillinger-']
         }
       });
 
-      return containers.map((container: Docker.ContainerInfo) => ({
+      return containers
+        .filter((c: Docker.ContainerInfo) => {
+          const name = c.Names?.[0]?.replace(/^\//, '') || '';
+          // Exclude infrastructure containers (streaming sidecar, etc.)
+          return name.startsWith('dillinger-') && !name.startsWith('dillinger-streaming-');
+        })
+        .map((container: Docker.ContainerInfo) => ({
         containerId: container.Id,
         status: container.State,
         createdAt: new Date(container.Created * 1000).toISOString(),
@@ -3144,61 +3435,77 @@ export class DockerService {
     try {
       const mountinfo = readFileSync('/proc/self/mountinfo', 'utf8');
       const lines = mountinfo.split('\n');
-      
+      let bestMatch: { mountpoint: string; fsType: string; root: string; source: string; line: string } | null = null;
+
       for (const line of lines) {
         // mountinfo format: ID parent major:minor root mountpoint options - type source opts
-        // We need to find the line where mountpoint matches our containerPath
         const parts = line.split(' ');
         if (parts.length < 10) continue;
-        
+
         const mountpoint = parts[4];
-        if (mountpoint === containerPath) {
-          // Found the mount - extract the source info
-          const separatorIdx = parts.indexOf('-');
-          if (separatorIdx === -1) continue;
-          
-          const fsType = parts[separatorIdx + 1];
-          const root = parts[3]; // This is the path within the mounted filesystem
-          
-          // For tmpfs mounts (like /run/user/1000), the root shows the relative path
-          // e.g., root=/xauth_SRETBv means /run/user/1000/xauth_SRETBv on host
-          if (fsType === 'tmpfs') {
-            // Check if this is a /run/user mount
-            const match = line.match(/mode=700,uid=1000/);
-            if (match && root !== '/') {
-              // This is likely a file from /run/user/1000
-              const hostPath = `/run/user/1000${root}`;
-              logger.info(`  Resolved ${containerPath} → ${hostPath} (from tmpfs mount)`);
-              return hostPath;
-            }
+        const isExact = mountpoint === containerPath;
+        const isPrefix = containerPath.startsWith(mountpoint + '/');
+
+        if (!isExact && !isPrefix) continue;
+
+        const separatorIdx = parts.indexOf('-');
+        if (separatorIdx === -1) continue;
+
+        const fsType = parts[separatorIdx + 1];
+        const source = parts[separatorIdx + 2] || '';
+        const root = parts[3]; // Path within the mounted filesystem
+
+        if (!bestMatch || mountpoint.length > bestMatch.mountpoint.length) {
+          bestMatch = { mountpoint, fsType, root, source, line };
+        }
+      }
+
+      if (bestMatch) {
+        const { mountpoint, fsType, root, source, line } = bestMatch;
+        const relativePath = containerPath === mountpoint
+          ? ''
+          : containerPath.slice(mountpoint.length + 1);
+
+        if (fsType === 'tmpfs') {
+          const match = line.match(/mode=700,uid=1000/);
+          if (match && root !== '/') {
+            const hostBase = `/run/user/1000${root}`;
+            const hostPath = relativePath ? path.posix.join(hostBase, relativePath) : hostBase;
+            logger.info(`  Resolved ${containerPath} → ${hostPath} (from tmpfs mount)`);
+            return hostPath;
           }
-          
-          // For ext4/normal mounts, the root is relative to the device mount
-          // e.g., root=/home/ians/.Xauthority on ext4
-          if ((fsType === 'ext4' || fsType === 'btrfs' || fsType === 'xfs') && root !== '/') {
-            logger.info(`  Resolved ${containerPath} → ${root} (from ${fsType} mount)`);
-            return root;
-          }
+        }
+
+        if ((fsType === 'ext4' || fsType === 'btrfs' || fsType === 'xfs') && root !== '/') {
+          const hostPath = relativePath ? path.posix.join(root, relativePath) : root;
+          logger.info(`  Resolved ${containerPath} → ${hostPath} (from ${fsType} mount)`);
+          return hostPath;
+        }
+
+        if (root === '/' && source && source.startsWith('/') && !source.startsWith('/dev/')) {
+          const hostPath = relativePath ? path.posix.join(source, relativePath) : source;
+          logger.info(`  Resolved ${containerPath} → ${hostPath} (from bind source)`);
+          return hostPath;
         }
       }
     } catch (error) {
       logger.warn(`  Could not read mountinfo: ${error}`);
     }
-    
-    // Return original path if we can't resolve it
+
     return containerPath;
   }
 
   /**
    * Get display forwarding configuration based on host environment
    * Supports X11 and Wayland display protocols
-   * Prefers X11 when both are available (more compatible with games)
+    * Prefers Wayland when both are available; falls back to X11
    */
-  private async getDisplayConfiguration(): Promise<{
+  private async getDisplayConfiguration(options?: { preferX11?: boolean }): Promise<{
     mode: 'x11' | 'wayland' | 'none';
     env: string[];
     volumes: string[];
     devices: Array<{ PathOnHost: string; PathInContainer: string; CgroupPermissions: string }>;
+    deviceCgroupRules?: string[];
     ipcMode?: string;
     securityOpt?: string[];
     networkMode?: string;
@@ -3206,38 +3513,137 @@ export class DockerService {
     const display = process.env.DISPLAY;
     const waylandDisplay = process.env.WAYLAND_DISPLAY;
     const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() || 1000}`;
+    const waylandSocket = waylandDisplay ? `${xdgRuntimeDir}/${waylandDisplay}` : '';
+    const preferX11 = options?.preferX11 === true;
+
+    const xauthorityCandidates = [
+      process.env.XAUTHORITY,
+      `${process.env.HOME}/.Xauthority`,
+      '/home/ians/.Xauthority',
+      '/home/node/.Xauthority',
+    ].filter(Boolean) as string[];
+
+    let xauthorityPath: string | null = null;
+    let xauthorityContainerPath: string | null = null;
+    for (const candidate of xauthorityCandidates) {
+      try {
+        const stat = statSync(candidate);
+        if (stat.isFile() && stat.size > 0) {
+          xauthorityContainerPath = candidate;
+          xauthorityPath = this.resolveHostPath(candidate);
+          break;
+        }
+      } catch {
+        // File doesn't exist, try next
+      }
+    }
     
-    // Prefer X11 first (more compatible with legacy games and tools like xterm)
-    if (display) {
-      // Try multiple paths for Xauthority - devcontainer env may not match host
-      // We check paths we can see inside this container, then resolve to host paths
-      const xauthorityCandidates = [
-        process.env.XAUTHORITY,
-        `${process.env.HOME}/.Xauthority`,
-        '/home/ians/.Xauthority',  // Common host user path
-        '/home/node/.Xauthority',
-      ].filter(Boolean) as string[];
+    // Prefer Wayland first; fall back to X11 when needed
+    const hasWaylandSocket = Boolean(waylandDisplay && xdgRuntimeDir && existsSync(waylandSocket));
+    if (!preferX11 && hasWaylandSocket) {
+      logger.info(`Using Wayland display: ${waylandDisplay}`);
       
-      logger.info(`Using X11 display: ${display}`);
+      // Check if GPU device exists
+      const devices = [];
+      if (existsSync('/dev/dri')) {
+        devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
+        logger.info(`  ✓ GPU device available`);
+      } else {
+        logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+      }
+
+      // Check if sound device exists
+      if (existsSync('/dev/snd')) {
+        devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
+        logger.info(`  ✓ Sound device available`);
+      }
       
-      // Check if Xauthority file exists AND is actually a file (not a directory)
-      // Docker creates directories when mounting non-existent files, so we must verify
-      let xauthorityPath: string | null = null;
-      let xauthorityContainerPath: string | null = null; // The path we found inside this container
-      for (const candidate of xauthorityCandidates) {
-        try {
-          const stat = statSync(candidate);
-          if (stat.isFile() && stat.size > 0) {
-            xauthorityContainerPath = candidate;
-            // Resolve to host path - this is critical when running inside a container
-            // because Docker daemon needs the HOST path, not our container path
-            xauthorityPath = this.resolveHostPath(candidate);
-            break;
-          }
-        } catch {
-          // File doesn't exist, try next
+      const volumes: string[] = [];
+      if (existsSync(xdgRuntimeDir)) {
+        const hostRuntimeDir = this.resolveHostPath(xdgRuntimeDir);
+        volumes.push(`${hostRuntimeDir}:/run/user/1000:rw`);
+      } else if (waylandSocket) {
+        volumes.push(`${waylandSocket}:/run/user/1000/${waylandDisplay}:rw`);
+      }
+
+      if (existsSync('/tmp/.X11-unix')) {
+        const hostX11SocketDir = this.resolveHostPath('/tmp/.X11-unix');
+        volumes.push(`${hostX11SocketDir}:/tmp/.X11-unix:rw`);
+      }
+
+      // Bind-mount /dev/input as a volume so the full directory tree
+      // (event*, js*) is visible inside the container.  Docker API Devices
+      // only maps individual device nodes, not directories.
+      if (existsSync('/dev/input')) {
+        volumes.push('/dev/input:/dev/input:rw');
+        logger.info(`  ✓ Input devices bind-mounted (/dev/input)`);
+
+        // Also mount /proc/bus/input/devices so we can identify devices by name
+        // Mount to /tmp/host-input-devices to avoid "inside /proc" mount errors
+        if (existsSync('/proc/bus/input/devices')) {
+          volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
+        }
+
+        // Mount /run/udev to allow libudev to query device details (names, capabilities)
+        if (existsSync('/run/udev')) {
+          volumes.push('/run/udev:/run/udev:ro');
+          logger.info(`  ✓ udev database mounted`);
         }
       }
+      
+      // Add uinput for virtual input device creation (needed by some emulators)
+      if (existsSync('/dev/uinput')) {
+        devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
+        logger.info(`  ✓ uinput device available`);
+      }
+      
+      const envVars = [
+        `WAYLAND_DISPLAY=${waylandDisplay}`,
+        'XDG_RUNTIME_DIR=/run/user/1000',
+        'QT_QPA_PLATFORM=wayland',
+        'GDK_BACKEND=wayland',
+        'SDL_VIDEODRIVER=wayland',
+      ];
+
+      const pulseSocketDir = `${xdgRuntimeDir}/pulse`;
+      const pulseSocketPath = `${pulseSocketDir}/native`;
+      if (existsSync(pulseSocketPath)) {
+        const hostPulseSocketDir = this.resolveHostPath(pulseSocketDir);
+        volumes.push(`${hostPulseSocketDir}:/run/user/1000/pulse:rw`);
+        envVars.push('PULSE_SERVER=unix:/run/user/1000/pulse/native');
+
+        const userHome = process.env.HOME || '/home/node';
+        const pulseCookiePaths = [
+          `${userHome}/.config/pulse/cookie`,
+          '/home/dillinger/.config/pulse/cookie',
+        ];
+        for (const pulseCookie of pulseCookiePaths) {
+          if (existsSync(pulseCookie)) {
+            const hostPulseCookie = this.resolveHostPath(pulseCookie);
+            volumes.push(`${hostPulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
+            envVars.push('PULSE_COOKIE=/home/gameuser/.config/pulse/cookie');
+            break;
+          }
+        }
+      } else {
+        logger.warn(`  ⚠ No PulseAudio socket found at ${pulseSocketPath}`);
+      }
+
+      return {
+        mode: 'wayland',
+        env: envVars,
+        volumes,
+        devices,
+        deviceCgroupRules: ['c 13:* rwm'],
+        securityOpt: [],
+        ipcMode: 'host',
+        networkMode: 'host',
+      };
+    }
+
+    // Fall back to X11 when Wayland is not available
+    if (display) {
+      logger.info(`Using X11 display: ${display}`);
       
       const volumes = ['/tmp/.X11-unix:/tmp/.X11-unix:rw'];
       if (xauthorityPath) {
@@ -3305,10 +3711,12 @@ export class DockerService {
         logger.info(`  ✓ Sound device available`);
       }
       
-      // Add input devices for keyboard, mouse, and joystick support
+      // Bind-mount /dev/input as a volume so the full directory tree
+      // (event*, js*) is visible inside the container.  Docker API Devices
+      // only maps individual device nodes, not directories.
       if (existsSync('/dev/input')) {
-        devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
-        logger.info(`  ✓ Input devices available (keyboard, mouse, joystick)`);
+        volumes.push('/dev/input:/dev/input:rw');
+        logger.info(`  ✓ Input devices bind-mounted (/dev/input)`);
 
         // Also mount /proc/bus/input/devices so we can identify devices by name
         // Mount to /tmp/host-input-devices to avoid "inside /proc" mount errors
@@ -3320,16 +3728,6 @@ export class DockerService {
         if (existsSync('/run/udev')) {
           volumes.push('/run/udev:/run/udev:ro');
           logger.info(`  ✓ udev database mounted`);
-        }
-      }
-      
-      // Add explicit joystick devices (js0, js1, js2, etc.)
-      // These need to be passed individually for proper access in containers
-      for (let i = 0; i < 10; i++) {
-        const jsDevice = `/dev/input/js${i}`;
-        if (existsSync(jsDevice)) {
-          devices.push({ PathOnHost: jsDevice, PathInContainer: jsDevice, CgroupPermissions: 'rwm' });
-          logger.info(`  ✓ Joystick device available: ${jsDevice}`);
         }
       }
       
@@ -3352,6 +3750,10 @@ export class DockerService {
         'PULSE_SERVER=unix:/run/user/1000/pulse/native',
         'PULSE_COOKIE=/home/gameuser/.config/pulse/cookie',
       ];
+
+      if (preferX11) {
+        envVars.push('SDL_VIDEODRIVER=x11', 'GDK_BACKEND=x11', 'QT_QPA_PLATFORM=xcb');
+      }
       
       if (pulseSink) {
         envVars.push(`PULSE_SINK=${pulseSink}`);
@@ -3368,80 +3770,10 @@ export class DockerService {
         env: envVars,
         volumes,
         devices,
+        deviceCgroupRules: ['c 13:* rwm'],
         ipcMode: 'host', // Required for X11 shared memory
         securityOpt: ['seccomp=unconfined'], // Some X11 apps need this
         networkMode: 'host', // Required for abstract socket access (XWayland)
-      };
-    }
-    
-    // Fall back to Wayland if X11 is not available
-    if (waylandDisplay && xdgRuntimeDir) {
-      const waylandSocket = `${xdgRuntimeDir}/${waylandDisplay}`;
-      logger.info(`Using Wayland display: ${waylandDisplay}`);
-      
-      // Check if GPU device exists
-      const devices = [];
-      if (existsSync('/dev/dri')) {
-        devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
-        logger.info(`  ✓ GPU device available`);
-      } else {
-        logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
-      }
-
-      // Check if sound device exists
-      if (existsSync('/dev/snd')) {
-        devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
-        logger.info(`  ✓ Sound device available`);
-      }
-      
-      const volumes = [`${waylandSocket}:/run/user/1000/${waylandDisplay}:rw`];
-
-      // Add input devices for keyboard, mouse, and joystick support
-      if (existsSync('/dev/input')) {
-        devices.push({ PathOnHost: '/dev/input', PathInContainer: '/dev/input', CgroupPermissions: 'rwm' });
-        logger.info(`  ✓ Input devices available (keyboard, mouse, joystick)`);
-
-        // Also mount /proc/bus/input/devices so we can identify devices by name
-        // Mount to /tmp/host-input-devices to avoid "inside /proc" mount errors
-        if (existsSync('/proc/bus/input/devices')) {
-          volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
-        }
-
-        // Mount /run/udev to allow libudev to query device details (names, capabilities)
-        if (existsSync('/run/udev')) {
-          volumes.push('/run/udev:/run/udev:ro');
-          logger.info(`  ✓ udev database mounted`);
-        }
-      }
-      
-      // Add explicit joystick devices (js0, js1, js2, etc.)
-      // These need to be passed individually for proper access in containers
-      for (let i = 0; i < 10; i++) {
-        const jsDevice = `/dev/input/js${i}`;
-        if (existsSync(jsDevice)) {
-          devices.push({ PathOnHost: jsDevice, PathInContainer: jsDevice, CgroupPermissions: 'rwm' });
-          logger.info(`  ✓ Joystick device available: ${jsDevice}`);
-        }
-      }
-      
-      // Add uinput for virtual input device creation (needed by some emulators)
-      if (existsSync('/dev/uinput')) {
-        devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
-        logger.info(`  ✓ uinput device available`);
-      }
-      
-      return {
-        mode: 'wayland',
-        env: [
-          `WAYLAND_DISPLAY=${waylandDisplay}`,
-          `XDG_RUNTIME_DIR=/run/user/1000`,
-          'QT_QPA_PLATFORM=wayland',
-          'GDK_BACKEND=wayland',
-          'SDL_VIDEODRIVER=wayland'
-        ],
-        volumes,
-        devices,
-        securityOpt: []
       };
     }
     
@@ -3454,6 +3786,122 @@ export class DockerService {
       env: [],
       volumes: [],
       devices: []
+    };
+  }
+
+  /**
+   * Get display configuration for runner containers that render into the streaming sidecar.
+   */
+  private async getSidecarDisplayConfiguration(): Promise<{
+    mode: 'x11' | 'wayland' | 'none';
+    env: string[];
+    volumes: string[];
+    devices: Array<{ PathOnHost: string; PathInContainer: string; CgroupPermissions: string }>;
+    deviceCgroupRules?: string[];
+    ipcMode?: string;
+    securityOpt?: string[];
+    networkMode?: string;
+  }> {
+    const runtimeDir = '/run/user/1000';
+    const detectedWayland = await this.detectActiveStreamingWaylandDisplay();
+    const waylandDisplay = detectedWayland || 'wayland-1';
+
+    const volumes: string[] = [`${this.STREAMING_RUNTIME_VOLUME}:${runtimeDir}:rw`];
+    const devices: Array<{ PathOnHost: string; PathInContainer: string; CgroupPermissions: string }> = [];
+
+    // Audio: bind-mount host PulseAudio socket if available.
+    // This overrides the /run/user/1000 volume subpath so the runner can talk to host Pulse.
+    const hasHostPulse = existsSync('/run/user/1000/pulse/native');
+    if (hasHostPulse) {
+      volumes.push('/run/user/1000/pulse:/run/user/1000/pulse:rw');
+    }
+
+    // Pulse cookie for auth (best-effort). Only mount if it is a non-empty file.
+    let haveRunnerPulseCookie = false;
+    if (hasHostPulse) {
+      const pulseCookieCandidates = [
+        process.env.PULSE_COOKIE,
+        `${process.env.HOME || '/home/node'}/.config/pulse/cookie`,
+        '/home/dillinger/.config/pulse/cookie',
+        '/home/node/.config/pulse/cookie',
+      ].filter(Boolean) as string[];
+
+      for (const candidate of pulseCookieCandidates) {
+        try {
+          const st = statSync(candidate);
+          if (st.isFile() && st.size > 0) {
+            volumes.push(`${this.resolveHostPath(candidate)}:/home/gameuser/.config/pulse/cookie:ro`);
+            haveRunnerPulseCookie = true;
+            break;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (existsSync('/dev/dri')) {
+      devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
+      logger.info(`  ✓ GPU device available`);
+    } else {
+      logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+    }
+
+    if (existsSync('/dev/snd')) {
+      devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
+      logger.info(`  ✓ Sound device available`);
+    }
+
+    // Bind-mount /dev/input as a volume so the full directory tree
+    // (event*, js*) is visible inside the container.
+    if (existsSync('/dev/input')) {
+      volumes.push('/dev/input:/dev/input:rw');
+      logger.info(`  ✓ Input devices bind-mounted (/dev/input)`);
+
+      if (existsSync('/proc/bus/input/devices')) {
+        volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
+      }
+
+      if (existsSync('/run/udev')) {
+        volumes.push('/run/udev:/run/udev:ro');
+        logger.info(`  ✓ udev database mounted`);
+      }
+    }
+
+    if (existsSync('/dev/uinput')) {
+      devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
+      logger.info(`  ✓ uinput device available`);
+    }
+
+    // Allow directing audio to a specific sink (e.g. a null sink) so streaming audio
+    // doesn't have to play through host speakers.
+    let pulseSink = process.env.PULSE_SINK || '';
+    try {
+      const settingsService = SettingsService.getInstance();
+      const audioSettings = await settingsService.getAudioSettings();
+      pulseSink = audioSettings.defaultSink || pulseSink;
+    } catch {
+      // ignore
+    }
+
+    return {
+      mode: 'wayland',
+      env: [
+        `WAYLAND_DISPLAY=${waylandDisplay}`,
+        `XDG_RUNTIME_DIR=${runtimeDir}`,
+        'QT_QPA_PLATFORM=wayland',
+        'GDK_BACKEND=wayland',
+        'SDL_VIDEODRIVER=wayland',
+        ...(hasHostPulse ? ['PULSE_SERVER=unix:/run/user/1000/pulse/native'] : []),
+        ...(haveRunnerPulseCookie ? ['PULSE_COOKIE=/home/gameuser/.config/pulse/cookie'] : []),
+        ...(pulseSink ? [`PULSE_SINK=${pulseSink}`] : []),
+      ],
+      volumes,
+      devices,
+      deviceCgroupRules: ['c 13:* rwm'],
+      securityOpt: [],
+      ipcMode: 'host',
+      networkMode: 'host',
     };
   }
 
@@ -3537,7 +3985,7 @@ export class DockerService {
       const containers = await docker.listContainers({
         all: true,
         filters: {
-          name: ['dillinger-session-'],
+          name: ['dillinger-'],
           status: ['exited', 'dead']
         }
       });
@@ -3545,6 +3993,11 @@ export class DockerService {
       const removed: string[] = [];
       
       for (const containerInfo of containers) {
+        const name = containerInfo.Names?.[0]?.replace(/^\//, '') || '';
+        // Skip infrastructure containers
+        if (name.startsWith('dillinger-streaming-') || name === 'dillinger-core') {
+          continue;
+        }
         try {
           const container = docker.getContainer(containerInfo.Id);
           await container.remove({ v: true }); // Remove with volumes
@@ -3610,8 +4063,8 @@ export class DockerService {
           continue;
         }
 
-        // Skip non-dillinger volumes
-        if (!volumeName.startsWith('dillinger-session-')) {
+        // Skip non-dillinger game volumes
+        if (!volumeName.startsWith('dillinger-session-') && !volumeName.startsWith('dillinger_saves_')) {
           continue;
         }
 
@@ -3644,100 +4097,192 @@ export class DockerService {
 
   /**
    * Ensures the streaming sidecar container is running.
-   * If not running, starts it with the specified configuration.
-   * If running with different config, restarts it.
-   * 
-   * @param profileId - The Sway profile ID to use for streaming
-   * @param mode - The sidecar mode: 'game', 'test-stream', or 'test-x11'
-   * @param testOptions - Options for test modes (pattern, etc.)
-   * @returns Container information
+   * If not running, starts it.
    */
-  async ensureStreamerSidecar(
-    profileId: string,
-    mode: 'game' | 'test-stream' | 'test-x11' = 'game',
-    testOptions?: { pattern?: string }
-  ): Promise<{ containerId: string; status: string; wayland: string; pulse: string }> {
+  async ensureStreamerSidecar(reason: 'game' | 'test' = 'game'): Promise<{ containerId: string; status: string }> {
     const settings = SettingsService.getInstance();
     const streamingSettings = await settings.getStreamingSettings();
 
-    // Check if sidecar is already running
+    const imageTag = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '0.3.1';
+    const image = `ghcr.io/thrane20/dillinger/streaming-sidecar:${imageTag}`;
+
+    // If the image for the configured tag has been rebuilt locally, its image ID will change.
+    // Restart the sidecar so it actually runs the updated bits (even when the tag is unchanged).
+    let expectedImageId: string | null = null;
+    try {
+      expectedImageId = (await docker.getImage(image).inspect()).Id || null;
+    } catch {
+      expectedImageId = null;
+    }
+
     const existing = await this.getStreamerSidecarStatus();
-    
     if (existing && existing.status === 'running') {
-      // Check if config matches
-      const labels = existing.labels || {};
-      const currentProfileId = labels['dillinger.streaming.profileId'];
-      const currentMode = labels['dillinger.streaming.mode'];
-      
-      if (currentProfileId === profileId && currentMode === mode) {
-        logger.info(`Streaming sidecar already running with correct config`);
-        return {
-          containerId: existing.containerId,
-          status: 'running',
-          wayland: '/run/dillinger/wayland-dillinger',
-          pulse: '/run/dillinger/pipewire-0',
-        };
+      const existingMode = existing.labels?.['dillinger.streaming.mode'];
+      let needsRestart = false;
+
+      if (existingMode && existingMode !== reason) {
+        needsRestart = true;
       }
-      
-      // Config changed - restart the sidecar
-      logger.info(`Streaming sidecar config changed, restarting...`);
+
+      // When starting in game mode, ensure the sidecar is sharing the runtime volume.
+      // If it was started in test mode (or older versions without labels), it may be bind-mounted
+      // to the host /run/user/1000 which runners cannot access.
+      if (!needsRestart && reason === 'game') {
+        try {
+          const inspect = await docker.getContainer(existing.containerId).inspect();
+          const hasSharedRuntime = (inspect.Mounts || []).some((m: any) => {
+            return m?.Name === this.STREAMING_RUNTIME_VOLUME && m?.Destination === '/run/user/1000';
+          });
+          if (!hasSharedRuntime) {
+            needsRestart = true;
+          }
+        } catch (err) {
+          // Be conservative: if we can't inspect, don't force restart.
+          logger.debug('Could not inspect streaming sidecar mounts:', err);
+        }
+      }
+
+      if (!needsRestart && expectedImageId) {
+        try {
+          const inspect = await docker.getContainer(existing.containerId).inspect();
+          const runningImageId = inspect?.Image;
+          if (runningImageId && runningImageId !== expectedImageId) {
+            needsRestart = true;
+            logger.info('Streaming sidecar image updated; restarting to pick up new build...');
+          }
+        } catch (err) {
+          logger.debug('Could not inspect streaming sidecar image:', err);
+        }
+      }
+
+      if (needsRestart) {
+        logger.info(`Streaming sidecar running in '${existingMode || 'unknown'}' mode; restarting for '${reason}' mode...`);
+        await this.stopStreamerSidecar();
+      } else {
+        logger.info('Streaming sidecar already running');
+        return { containerId: existing.containerId, status: 'running' };
+      }
+    }
+
+    if (existing) {
+      logger.info('Streaming sidecar found but not running; restarting...');
       await this.stopStreamerSidecar();
     }
 
-    // Get Sway profile configuration
-    const { SwayConfigService } = await import('./sway-config');
-    const swayConfigService = SwayConfigService.getInstance();
-    const profile = await swayConfigService.getProfile(profileId);
-    
-    if (!profile) {
-      throw new Error(`Streaming profile not found: ${profileId}`);
-    }
-
-    const sunshinePassword = randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
-
-    // Determine GPU type
     const gpuType = streamingSettings.gpuType;
-    
-    // Get the image version from environment or fallback
-    const imageTag = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '1.0.0';
-    const image = `ghcr.io/thrane20/dillinger/streaming-sidecar:${imageTag}`;
-    
-    logger.info(`Starting streaming sidecar: profile=${profileId}, mode=${mode}, gpu=${gpuType}`);
-    logger.info(`  Image: ${image}`);
-    logger.info(`  Resolution: ${profile.width}x${profile.height}@${profile.refreshRate}Hz`);
+    const apiPort = process.env.DILLINGER_API_PORT || '9999';
 
-    // Build environment variables (match entrypoint expectations)
+    logger.info(`Starting streaming sidecar (${reason})`);
+    logger.info(`  Image: ${image}`);
+
+    // Allow directing audio to a specific sink (e.g. a null sink) so streaming audio
+    // doesn't have to play through host speakers.
+    const audioSettings = await settings.getAudioSettings().catch(() => null);
+    const pulseSink = audioSettings?.defaultSink || process.env.PULSE_SINK || '';
+
     const env: string[] = [
-      `SIDECAR_MODE=${mode}`,
-      `GPU_TYPE=${gpuType}`,
-      `SWAY_CONFIG_NAME=${profileId}`,
-      `RESOLUTION_WIDTH=${profile.width}`,
-      `RESOLUTION_HEIGHT=${profile.height}`,
-      `REFRESH_RATE=${profile.refreshRate}`,
-      `IDLE_TIMEOUT_MINUTES=${streamingSettings.idleTimeoutMinutes}`,
-      `ENABLE_GAMESCOPE=${mode === 'game' ? 'true' : 'false'}`,
-      `AUDIO_ENABLED=true`,
-      `SUNSHINE_USERNAME=dillinger`,
-      `SUNSHINE_PASSWORD=${sunshinePassword}`,
-      `PUID=${process.getuid?.() || 1000}`,
-      `PGID=${process.getgid?.() || 1000}`,
+      'DILLINGER_MODE=1',
+      `DILLINGER_API_PORT=${apiPort}`,
+      'WOLF_CFG_FOLDER=/data/wolf',
+      // Persist Wolf state (per-client app state folders, etc.) across container restarts/rebuilds.
+      // This lives inside the persisted dillinger_root volume.
+      'HOST_APPS_STATE_FOLDER=/data/wolf/apps',
     ];
 
-    // Add test mode options
-    if (mode === 'test-stream' || mode === 'test-x11') {
-      env.push(`TEST_PATTERN=${testOptions?.pattern || 'smpte'}`);
+    if (pulseSink) {
+      env.push(`PULSE_SINK=${pulseSink}`);
     }
 
-    // Add custom Sway config if provided
-    if (profile.customConfig) {
-      env.push(`SWAY_CUSTOM_CONFIG=${Buffer.from(profile.customConfig).toString('base64')}`);
+    const binds: string[] = ['dillinger_root:/data:rw'];
+
+    const useSharedRuntime = reason === 'game';
+    if (useSharedRuntime) {
+      // Clear any stale sockets in the shared runtime volume.
+      // If the sidecar previously exited uncleanly (or the volume was used by a different sidecar),
+      // these can remain and prevent Wolf from binding to the socket path.
+      try {
+        const cleanup = await docker.createContainer({
+          Image: 'alpine:3.20',
+          Cmd: ['sh', '-lc', 'rm -f /mnt/wayland-* /mnt/wayland-*.lock /mnt/wolf.sock || true'],
+          HostConfig: {
+            AutoRemove: true,
+            Binds: [`${this.STREAMING_RUNTIME_VOLUME}:/mnt:rw`],
+          },
+        } as any);
+        await cleanup.start();
+        await cleanup.wait();
+      } catch (err) {
+        logger.debug('Failed to cleanup streaming runtime volume sockets (continuing):', err);
+      }
+
+      binds.push(`${this.STREAMING_RUNTIME_VOLUME}:/run/user/1000:rw`);
+      env.push('XDG_RUNTIME_DIR=/run/user/1000');
+      env.push('WAYLAND_DISPLAY=wayland-1');
+
+      // Audio for streaming: mount host PulseAudio socket (or PipeWire-Pulse) into the container.
+      // This must be a bind mount (more specific path) because /run/user/1000 itself is a volume.
+      if (existsSync('/run/user/1000/pulse/native')) {
+        binds.push('/run/user/1000/pulse:/run/user/1000/pulse:rw');
+        env.push('PULSE_SERVER=unix:/run/user/1000/pulse/native');
+
+        // Pulse cookie for auth (best-effort). Avoid mounting a directory.
+        const pulseCookieCandidates = [
+          process.env.PULSE_COOKIE,
+          `${process.env.HOME || '/home/node'}/.config/pulse/cookie`,
+          '/home/dillinger/.config/pulse/cookie',
+          '/home/node/.config/pulse/cookie',
+        ].filter(Boolean) as string[];
+
+        for (const candidate of pulseCookieCandidates) {
+          try {
+            const st = statSync(candidate);
+            if (st.isFile() && st.size > 0) {
+              binds.push(`${this.resolveHostPath(candidate)}:/root/.config/pulse/cookie:ro`);
+              break;
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
     }
 
-    // Build device mappings - detect available DRI devices dynamically
+    if (!useSharedRuntime) {
+      const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+      if (xdgRuntimeDir && existsSync(xdgRuntimeDir)) {
+        binds.push(`${xdgRuntimeDir}:${xdgRuntimeDir}:rw`);
+        env.push(`XDG_RUNTIME_DIR=${xdgRuntimeDir}`);
+        if (!process.env.PULSE_SERVER) {
+          env.push(`PULSE_SERVER=unix:${xdgRuntimeDir}/pulse/native`);
+        }
+      }
+
+      if (process.env.PULSE_SERVER) {
+        env.push(`PULSE_SERVER=${process.env.PULSE_SERVER}`);
+        if (process.env.PULSE_SERVER.startsWith('unix:')) {
+          const socketPath = process.env.PULSE_SERVER.slice('unix:'.length);
+          const socketDir = path.posix.dirname(socketPath);
+          if (existsSync(socketDir)) {
+            binds.push(`${socketDir}:${socketDir}:rw`);
+          }
+        }
+      }
+
+      const userHome = process.env.HOME || '/home/node';
+      const pulseCookiePaths = [
+        `${userHome}/.config/pulse/cookie`,
+        '/home/dillinger/.config/pulse/cookie',
+      ];
+      for (const pulseCookie of pulseCookiePaths) {
+        if (existsSync(pulseCookie)) {
+          binds.push(`${pulseCookie}:/root/.config/pulse/cookie:ro`);
+          break;
+        }
+      }
+    }
+
     const devices: Docker.DeviceMapping[] = [];
-    
-    if (gpuType === 'amd' || gpuType === 'auto') {
-      // Scan /dev/dri for available devices (card0, card1, renderD128, etc.)
+    if (gpuType === 'amd' || gpuType === 'auto' || gpuType === 'nvidia') {
       if (existsSync('/dev/dri')) {
         const driDevices = readdirSync('/dev/dri');
         for (const device of driDevices) {
@@ -3751,8 +4296,7 @@ export class DockerService {
         logger.info(`  📺 Mapped ${devices.length} GPU devices: ${driDevices.join(', ')}`);
       }
     }
-    
-    // Add input devices for Sunshine uinput and controller support
+
     if (existsSync('/dev/uinput')) {
       devices.push({
         PathOnHost: '/dev/uinput',
@@ -3773,10 +4317,8 @@ export class DockerService {
       }
     }
 
-    // For NVIDIA, we'd use nvidia-container-runtime instead of devices
     const runtime = gpuType === 'nvidia' ? 'nvidia' : undefined;
 
-    // Container configuration
     const containerConfig: Docker.ContainerCreateOptions = {
       name: this.SIDECAR_CONTAINER_NAME,
       Image: image,
@@ -3784,30 +4326,22 @@ export class DockerService {
       Labels: {
         'dillinger.managed': 'true',
         'dillinger.streaming.sidecar': 'true',
-        'dillinger.streaming.profileId': profileId,
-        'dillinger.streaming.mode': mode,
-        'dillinger.streaming.sunshineUser': 'dillinger',
+        'dillinger.streaming.mode': reason,
       },
       ExposedPorts: {
         '47984/tcp': {},
-        '47984/udp': {},
         '47989/tcp': {},
-        '47989/udp': {},
-        '47990/tcp': {},
-        '47999/tcp': {},
         '47999/udp': {},
         '48010/tcp': {},
-        '48010/udp': {},
+        '48100/udp': {},
+        '48200/udp': {},
         '9999/tcp': {},
       },
       HostConfig: {
-        NetworkMode: 'host', // Use host networking for Sunshine discovery
+        NetworkMode: 'host',
         Devices: devices,
         CapAdd: ['SYS_ADMIN', 'SYS_PTRACE', 'SYS_NICE'],
-        Binds: [
-          'dillinger_streaming_wayland:/run/dillinger:rw',
-          'dillinger_sunshine_state:/var/lib/sunshine:rw',
-        ],
+        Binds: binds,
         Tmpfs: {
           '/tmp': 'exec,nosuid,nodev',
         },
@@ -3815,48 +4349,45 @@ export class DockerService {
       } as any,
     };
 
-    // For test-x11 mode, we need to pass through the host display
-    if (mode === 'test-x11') {
-      containerConfig.Env?.push(`DISPLAY=${process.env.DISPLAY || ':0'}`);
-      containerConfig.HostConfig!.Binds!.push('/tmp/.X11-unix:/tmp/.X11-unix:ro');
-    }
-
     try {
-      // Pull image if not present
       const images = await docker.listImages({ filters: { reference: [image] } });
       if (images.length === 0) {
         logger.info(`Pulling streaming sidecar image: ${image}`);
-        await new Promise<void>((resolve, reject) => {
-          docker.pull(image, (err: Error | null, stream: NodeJS.ReadableStream) => {
-            if (err) {
-              reject(err);
-              return;
-            }
-            docker.modem.followProgress(stream, (pullErr: Error | null) => {
-              if (pullErr) {
-                reject(pullErr);
-              } else {
-                resolve();
+        try {
+          await new Promise<void>((resolve, reject) => {
+            docker.pull(image, (err: Error | null, stream: NodeJS.ReadableStream) => {
+              if (err) {
+                reject(err);
+                return;
               }
+              docker.modem.followProgress(stream, (pullErr: Error | null) => {
+                if (pullErr) {
+                  reject(pullErr);
+                } else {
+                  resolve();
+                }
+              });
             });
           });
-        });
+        } catch (pullError) {
+          logger.error(`Failed to pull streaming sidecar image ${image}`, pullError);
+          throw new Error(
+            `Streaming sidecar image not available: ${image}. ` +
+            `Build it locally or set DILLINGER_STREAMING_SIDECAR_VERSION to a tag you have.`
+          );
+        }
       }
 
-      // Create and start the container
       const container = await docker.createContainer(containerConfig);
       await container.start();
 
       logger.info(`Streaming sidecar started: ${container.id.substring(0, 12)}`);
 
-      // Wait a moment for services to initialize
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       return {
         containerId: container.id,
         status: 'running',
-        wayland: '/run/dillinger/wayland-dillinger',
-        pulse: '/run/dillinger/pipewire-0',
       };
     } catch (error) {
       logger.error('Failed to start streaming sidecar:', error);

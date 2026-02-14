@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
-import type { GamePlatformConfig } from '@dillinger/shared';
+import type { GamePlatformConfig, RetroarchMameSettings, RetroarchMameAspect } from '@dillinger/shared';
 import InstallGameDialog from './InstallGameDialog';
 import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
 import FileExplorer from './FileExplorer';
@@ -95,6 +95,12 @@ interface GameFormData {
     };
     mangohud?: {
       enabled?: boolean;
+    };
+    emulator?: {
+      core?: string;
+      settings?: {
+        mame?: RetroarchMameSettings;
+      };
     };
   };
   // Store the full original game data to preserve scraper metadata
@@ -219,6 +225,11 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   // Convenience accessors for the currently selected platform config
   const activePlatformConfig = formData.platforms.find(p => p.platformId === formData.platformId);
   const activeInstallation = activePlatformConfig?.installation || formData._originalGame?.installation;
+  const mameAspectValue = (formData.settings?.emulator?.settings?.mame?.aspect ?? 'default') as RetroarchMameAspect | 'default';
+  const mameIntegerScaleValue = formData.settings?.emulator?.settings?.mame?.integerScale;
+  const mameIntegerScaleSelect = mameIntegerScaleValue === undefined ? 'default' : mameIntegerScaleValue ? 'true' : 'false';
+  const mameBorderlessValue = formData.settings?.emulator?.settings?.mame?.borderlessFullscreen;
+  const mameBorderlessSelect = mameBorderlessValue === undefined ? 'default' : mameBorderlessValue ? 'true' : 'false';
 
   // Section definitions for sidebar navigation (Wine games only)
   const WINE_SECTIONS = [
@@ -400,6 +411,10 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                   },
                   mangohud: {
                     enabled: activeSettings?.mangohud?.enabled || false,
+                  },
+                  emulator: {
+                    core: activeSettings?.emulator?.core,
+                    settings: activeSettings?.emulator?.settings,
                   },
                 },
                 _originalGame: game, // Store full original data
@@ -832,6 +847,41 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         [name]: value,
       }));
     }
+  };
+
+  const normalizeMameSettings = (settings: RetroarchMameSettings): RetroarchMameSettings => {
+    const normalized: RetroarchMameSettings = {};
+    if (settings.aspect) normalized.aspect = settings.aspect;
+    if (typeof settings.integerScale === 'boolean') normalized.integerScale = settings.integerScale;
+    if (typeof settings.borderlessFullscreen === 'boolean') {
+      normalized.borderlessFullscreen = settings.borderlessFullscreen;
+    }
+    return normalized;
+  };
+
+  const updateMameOverrides = (updates: Partial<RetroarchMameSettings>) => {
+    setFormData((prev) => {
+      const existing = prev.settings?.emulator?.settings?.mame || {};
+      const merged = normalizeMameSettings({ ...existing, ...updates });
+      const emulatorSettings = { ...(prev.settings?.emulator?.settings || {}) };
+
+      if (Object.keys(merged).length === 0) {
+        delete emulatorSettings.mame;
+      } else {
+        emulatorSettings.mame = merged;
+      }
+
+      return {
+        ...prev,
+        settings: {
+          ...prev.settings,
+          emulator: {
+            ...prev.settings?.emulator,
+            settings: emulatorSettings,
+          },
+        },
+      };
+    });
   };
 
 
@@ -1565,6 +1615,80 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                         Selected: {formData.filePath}
                       </p>
                     )}
+                  </div>
+                )}
+
+                {formData.platformId === 'mame' && (
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900 space-y-4">
+                    <div>
+                      <div className="text-sm font-semibold text-text">MAME Display Overrides</div>
+                      <div className="text-xs text-muted">
+                        Leave as Use Global to follow the RetroArch defaults in Settings.
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label htmlFor="mameAspectOverride" className="block text-sm font-medium text-muted mb-2">
+                          Aspect Ratio
+                        </label>
+                        <select
+                          id="mameAspectOverride"
+                          value={mameAspectValue}
+                          onChange={(e) => {
+                            const value = e.target.value as RetroarchMameAspect | 'default';
+                            updateMameOverrides({ aspect: value === 'default' ? undefined : value });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        >
+                          <option value="default">Use Global</option>
+                          <option value="4:3">4:3</option>
+                          <option value="auto">Auto</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label htmlFor="mameIntegerScaleOverride" className="block text-sm font-medium text-muted mb-2">
+                          Integer Scale
+                        </label>
+                        <select
+                          id="mameIntegerScaleOverride"
+                          value={mameIntegerScaleSelect}
+                          onChange={(e) => {
+                            const value = e.target.value as 'default' | 'true' | 'false';
+                            updateMameOverrides({
+                              integerScale: value === 'default' ? undefined : value === 'true',
+                            });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        >
+                          <option value="default">Use Global</option>
+                          <option value="true">Enabled</option>
+                          <option value="false">Disabled</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label htmlFor="mameBorderlessOverride" className="block text-sm font-medium text-muted mb-2">
+                          Borderless Fullscreen
+                        </label>
+                        <select
+                          id="mameBorderlessOverride"
+                          value={mameBorderlessSelect}
+                          onChange={(e) => {
+                            const value = e.target.value as 'default' | 'true' | 'false';
+                            updateMameOverrides({
+                              borderlessFullscreen: value === 'default' ? undefined : value === 'true',
+                            });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
+                        >
+                          <option value="default">Use Global</option>
+                          <option value="true">Enabled</option>
+                          <option value="false">Disabled</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 )}
 

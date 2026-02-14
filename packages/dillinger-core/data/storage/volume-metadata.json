@@ -1,0 +1,13 @@
+{
+  "volumes": {
+    "/data": {
+      "storageType": "ssd"
+    }
+  },
+  "defaults": {
+    "installers": null,
+    "downloads": null,
+    "installed": null,
+    "roms": null
+  }
+}

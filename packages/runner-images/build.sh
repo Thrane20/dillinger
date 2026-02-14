@@ -125,6 +125,46 @@ build_image() {
     local image_name=$1
     local image_dir=$2
     local docker_tag=$3
+
+    if [ "$image_dir" = "streaming-sidecar" ]; then
+        printf "\n"
+        printf "\033[0;34m========================================\033[0m\n"
+        printf "\033[0;32mBuilding %s...\033[0m\n" "$image_name"
+        printf "\033[0;34mTag: %s\033[0m\n" "$docker_tag"
+        printf "\033[0;34m========================================\033[0m\n"
+
+        local build_start=$(date +%s)
+        local no_cache_flag=""
+        if [ -n "$NO_CACHE" ]; then
+            no_cache_flag="--no-cache"
+        fi
+
+        if "$SCRIPT_DIR/streaming-sidecar/build.sh" $no_cache_flag; then
+            local build_end=$(date +%s)
+            local build_duration=$((build_end - build_start))
+            local minutes=$((build_duration / 60))
+            local seconds=$((build_duration % 60))
+            printf "\033[0;32m✓ %s built successfully (${minutes}m ${seconds}s)\033[0m\n" "$image_name"
+            printf "\033[0;32m  Tagged as: %s\033[0m\n" "$docker_tag"
+
+            if [ "$PUSH" = true ]; then
+                printf "\033[0;34mPushing %s...\033[0m\n" "$docker_tag"
+                if docker push "$docker_tag"; then
+                    printf "\033[0;32m✓ Pushed %s\033[0m\n" "$docker_tag"
+                else
+                    printf "\033[0;31m✗ Failed to push %s\033[0m\n" "$docker_tag"
+                    return 1
+                fi
+            fi
+
+            printf "\n"
+            return 0
+        else
+            printf "\033[0;31m✗ %s build failed\033[0m\n" "$image_name"
+            printf "\n"
+            return 1
+        fi
+    fi
     
     printf "\n"
     printf "\033[0;34m========================================\033[0m\n"

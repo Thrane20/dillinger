@@ -7,6 +7,7 @@ export * from './types/websocket.js';
 export * from './types/schema-version.js';
 export * from './types/streaming.js';
 export * from './types/streaming-graph.js';
+export * from './types/retroarch.js';
 
 // Export runner types (previously @dillinger/runner-types)
 export * from './runner/api.js';

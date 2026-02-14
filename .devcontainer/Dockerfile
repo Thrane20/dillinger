@@ -14,6 +14,16 @@ RUN apt-get update \
         curl \
         ca-certificates \
         git \
+        build-essential \
+        cmake \
+        ninja-build \
+        meson \
+        clang \
+        libboost-dev \
+        libwayland-dev \
+        pkg-config \
+        python3 \
+        python3-pip \
         unzip \
         pulseaudio-utils \
     && rm -rf /var/lib/apt/lists/*
