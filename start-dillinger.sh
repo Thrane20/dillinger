@@ -5,7 +5,12 @@
 set -e
 
 # Script version (update this when publishing new versions)
-SCRIPT_VERSION="0.2.0"
+SCRIPT_VERSION="0.3.0"
+
+# Upstream URLs for update checks
+GITHUB_MAIN_RAW_BASE="https://raw.githubusercontent.com/Thrane20/dillinger/main"
+SCRIPT_REMOTE_URL="$GITHUB_MAIN_RAW_BASE/start-dillinger.sh"
+VERSIONING_REMOTE_URL="$GITHUB_MAIN_RAW_BASE/versioning.env"
 
 # Colors for output
 RED='\033[0;31m'
@@ -19,7 +24,14 @@ IMAGE_NAME="ghcr.io/thrane20/dillinger/core"
 IMAGE_TAG=""  # Will be set from versioning.env
 CONTAINER_NAME="dillinger"
 PORT="3010"
-VOLUME_NAME="dillinger_root"
+VOLUME_NAME="dillinger_core"
+# Optional: bind a host directory directly to /data instead of using a Docker volume
+# Example: export DILLINGER_CORE_HOST_PATH=/mnt/linuxfast/dillinger_core
+DILLINGER_CORE_HOST_PATH="${DILLINGER_CORE_HOST_PATH:-}"
+
+# Resolved at runtime by check_volume()
+DATA_MOUNT_SPEC=""
+DATA_MOUNT_KIND=""
 
 print_header() {
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════${NC}"
@@ -101,27 +113,44 @@ check_docker_permissions() {
     fi
 }
 
-# Check if dillinger_data volume exists
+# Check if dillinger_core data source exists
 check_volume() {
-    print_info "Checking for dillinger_data volume..."
-    
-    if ! docker volume inspect "$VOLUME_NAME" &> /dev/null; then
-        print_warning "Volume '$VOLUME_NAME' does not exist"
-        print_info "Creating volume '$VOLUME_NAME'..."
-        
-        if docker volume create "$VOLUME_NAME" &> /dev/null; then
-            print_success "Volume '$VOLUME_NAME' created successfully"
-            
-            # Show where the volume is stored
-            VOLUME_PATH=$(docker volume inspect "$VOLUME_NAME" --format '{{ .Mountpoint }}' 2>/dev/null || echo "unknown")
-            print_info "Volume location: $VOLUME_PATH"
-        else
-            print_error "Failed to create volume"
+    print_info "Checking core data mount..."
+
+    # 1) Explicit host bind path takes precedence
+    if [ -n "$DILLINGER_CORE_HOST_PATH" ]; then
+        if [ ! -d "$DILLINGER_CORE_HOST_PATH" ]; then
+            print_error "DILLINGER_CORE_HOST_PATH is set but directory does not exist: $DILLINGER_CORE_HOST_PATH"
             exit 1
         fi
-    else
-        print_success "Volume '$VOLUME_NAME' exists"
+        DATA_MOUNT_SPEC="$DILLINGER_CORE_HOST_PATH:/data"
+        DATA_MOUNT_KIND="bind"
+        print_success "Using host bind for core data"
+        print_info "Host path: $DILLINGER_CORE_HOST_PATH"
+        return 0
     fi
+
+    # 2) Preferred named volume
+    if docker volume inspect "$VOLUME_NAME" &> /dev/null; then
+        DATA_MOUNT_SPEC="$VOLUME_NAME:/data"
+        DATA_MOUNT_KIND="volume"
+        print_success "Volume '$VOLUME_NAME' exists"
+        return 0
+    fi
+
+    # 3) No valid existing source found - fail fast (do not auto-create)
+    print_error "No existing core data source found for /data"
+    echo ""
+    echo "Provide one of the following before starting Dillinger:"
+    echo ""
+    echo "  1) Set a host bind path:"
+    echo "     export DILLINGER_CORE_HOST_PATH=/path/to/your/dillinger/data"
+    echo ""
+    echo "  2) Create/import the preferred volume:"
+    echo "     docker volume create $VOLUME_NAME"
+    echo ""
+    echo "Script will not auto-create '$VOLUME_NAME' to avoid accidental empty data mounts."
+    exit 1
 }
 
 # Get the latest local version from available tags
@@ -176,20 +205,30 @@ get_remote_version() {
     fi
 }
 
-# Get the latest script version from GitHub versioning.env
+# Get the latest script version from GitHub.
+# Primary source: embedded SCRIPT_VERSION in the remote start-dillinger.sh
+# Fallback source: DILLINGER_START_SCRIPT_VERSION in remote versioning.env
 get_remote_script_version() {
-    # Fetch versioning.env from GitHub and extract DILLINGER_START_SCRIPT_VERSION
-    local github_url="https://raw.githubusercontent.com/Thrane20/dillinger/main/versioning.env"
-    
-    local version=$(curl -s "$github_url" 2>/dev/null | \
+    # Parse SCRIPT_VERSION from the script artifact we actually download
+    local script_version=$(curl -fsSL "$SCRIPT_REMOTE_URL" 2>/dev/null | \
+        sed -n 's/^SCRIPT_VERSION="\([^"]*\)"$/\1/p' | \
+        head -1 | \
+        sed 's/^v//')
+
+    if [ -n "$script_version" ]; then
+        echo "$script_version"
+        return
+    fi
+
+    # Fallback to versioning.env if script parsing fails
+    local env_version=$(curl -s "$VERSIONING_REMOTE_URL" 2>/dev/null | \
         grep '^DILLINGER_START_SCRIPT_VERSION=' | \
         cut -d'=' -f2 | \
         tr -d ' ' | \
         sed 's/^v//')
-    
-    # Return version without prefix
-    if [ -n "$version" ]; then
-        echo "${version}"
+
+    if [ -n "$env_version" ]; then
+        echo "$env_version"
     fi
 }
 
@@ -218,14 +257,13 @@ check_script_update() {
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             print_info "Downloading updated script..."
             
-            local script_url="https://raw.githubusercontent.com/Thrane20/dillinger/main/start-dillinger.sh"
             local backup_file="${0}.backup"
             
             # Backup current script
             cp "$0" "$backup_file"
             
             # Download new script
-            if curl -s "$script_url" -o "$0" 2>/dev/null; then
+            if curl -s "$SCRIPT_REMOTE_URL" -o "$0" 2>/dev/null; then
                 chmod +x "$0"
                 print_success "Script updated to $remote_version"
                 echo ""
@@ -547,8 +585,8 @@ init_wolf_config() {
     print_info "Checking Wolf streaming configuration..."
     
     # Create a temporary container to initialize the wolf config directory
-    # This ensures the directory exists in the dillinger_root volume
-    if ! docker run --rm -v "$VOLUME_NAME:/data" alpine:latest sh -c "mkdir -p /data/wolf && chmod 777 /data/wolf" 2>/dev/null; then
+    # This ensures the directory exists in the configured data mount
+    if ! docker run --rm -v "$DATA_MOUNT_SPEC" alpine:latest sh -c "mkdir -p /data/wolf && chmod 777 /data/wolf" 2>/dev/null; then
         print_warning "Could not initialize Wolf config directory"
         return 0
     fi
@@ -564,7 +602,7 @@ start_container() {
     local DOCKER_ARGS="-d --name $CONTAINER_NAME"
     DOCKER_ARGS="$DOCKER_ARGS -p $PORT:3010"
     DOCKER_ARGS="$DOCKER_ARGS -v /var/run/docker.sock:/var/run/docker.sock"
-    DOCKER_ARGS="$DOCKER_ARGS -v $VOLUME_NAME:/data"
+    DOCKER_ARGS="$DOCKER_ARGS -v $DATA_MOUNT_SPEC"
     DOCKER_ARGS="$DOCKER_ARGS --restart unless-stopped"
     
     # X11 Display passthrough for GUI games
@@ -676,8 +714,16 @@ show_success_message() {
     echo "  docker start $CONTAINER_NAME      # Start again"
     echo ""
     echo "Data location:"
-    VOLUME_PATH=$(docker volume inspect "$VOLUME_NAME" --format '{{ .Mountpoint }}' 2>/dev/null || echo "managed by Docker")
-    echo "  $VOLUME_PATH"
+    if [ "$DATA_MOUNT_KIND" = "bind" ]; then
+        echo "  $DILLINGER_CORE_HOST_PATH"
+    else
+        VOLUME_PATH=$(docker volume inspect "$VOLUME_NAME" --format '{{ .Mountpoint }}' 2>/dev/null || echo "managed by Docker")
+        VOLUME_DEVICE=$(docker volume inspect "$VOLUME_NAME" --format '{{ index .Options "device" }}' 2>/dev/null || true)
+        echo "  $VOLUME_PATH"
+        if [ -n "$VOLUME_DEVICE" ] && [ "$VOLUME_DEVICE" != "<no value>" ]; then
+            echo "  (backing path: $VOLUME_DEVICE)"
+        fi
+    fi
     echo ""
     echo -e "${YELLOW}Need help? Visit: https://github.com/Thrane20/dillinger${NC}"
     echo ""

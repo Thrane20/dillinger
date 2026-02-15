@@ -10,7 +10,7 @@ const GOG_CLIENT_ID = '46899977096215655';
 const GOG_CLIENT_SECRET = '9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9';
 const GOG_TOKEN_URL = 'https://auth.gog.com/token';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
 
 interface GOGTokenData {
   access_token: string;
@@ -30,7 +30,7 @@ interface GOGAuthState {
 }
 
 function getGOGTokensPath(): string {
-  return path.join(DILLINGER_ROOT, 'storage', 'online-sources', 'gog-tokens.json');
+  return path.join(DILLINGER_CORE_PATH, 'storage', 'online-sources', 'gog-tokens.json');
 }
 
 async function getStoredTokens(): Promise<GOGTokenData | null> {

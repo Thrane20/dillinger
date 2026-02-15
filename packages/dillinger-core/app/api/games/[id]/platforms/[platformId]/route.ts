@@ -11,7 +11,7 @@ import {
 } from '@dillinger/shared';
 
 const storage = JSONStorageService.getInstance();
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
 
 /**
  * Helper to find a game and its storage filename
@@ -177,7 +177,7 @@ export async function DELETE(
       
       // Clean up associated directories
       if (game.slug) {
-        const metadataPath = path.join(DILLINGER_ROOT, 'storage', 'metadata', game.slug);
+        const metadataPath = path.join(DILLINGER_CORE_PATH, 'storage', 'metadata', game.slug);
         try {
           if (await fs.pathExists(metadataPath)) {
             await fs.remove(metadataPath);
@@ -187,7 +187,7 @@ export async function DELETE(
         }
       }
 
-      const savesPath = path.join(DILLINGER_ROOT, 'saves', game.id);
+      const savesPath = path.join(DILLINGER_CORE_PATH, 'saves', game.id);
       try {
         if (await fs.pathExists(savesPath)) {
           await fs.remove(savesPath);

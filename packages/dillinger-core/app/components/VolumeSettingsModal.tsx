@@ -16,31 +16,7 @@ interface VolumeSettingsModalProps {
   onSave: () => void;
 }
 
-type DefaultType = 'installers' | 'downloads' | 'installed' | 'roms';
 type StorageType = 'ssd' | 'platter' | 'archive' | '';
-
-const DEFAULT_LABELS: Record<DefaultType, { label: string; icon: string; description: string }> = {
-  installers: {
-    label: 'Installers',
-    icon: '📦',
-    description: 'Store downloaded game installers (.exe, .msi, etc.)',
-  },
-  downloads: {
-    label: 'Downloads',
-    icon: '⬇️',
-    description: 'Temporary storage for in-progress downloads',
-  },
-  installed: {
-    label: 'Installed Games',
-    icon: '🎮',
-    description: 'Where games are installed and run from',
-  },
-  roms: {
-    label: 'ROMs',
-    icon: '💾',
-    description: 'ROM files for emulated platforms',
-  },
-};
 
 const STORAGE_TYPES: { value: StorageType; label: string; icon: string; description: string }[] = [
   { value: '', label: 'Not Set', icon: '❓', description: 'No storage type specified' },
@@ -52,9 +28,6 @@ const STORAGE_TYPES: { value: StorageType; label: string; icon: string; descript
 export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }: VolumeSettingsModalProps) {
   const [saving, setSaving] = useState(false);
   const [friendlyName, setFriendlyName] = useState(volume.friendlyName || '');
-  const [selectedDefaults, setSelectedDefaults] = useState<Set<DefaultType>>(
-    new Set(volume.isDefaultFor as DefaultType[])
-  );
   const [storageType, setStorageType] = useState<StorageType>(volume.storageType || '');
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +35,6 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
   useEffect(() => {
     if (isOpen) {
       setFriendlyName(volume.friendlyName || '');
-      setSelectedDefaults(new Set(volume.isDefaultFor as DefaultType[]));
       setStorageType(volume.storageType || '');
       setError(null);
     }
@@ -77,8 +49,6 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
         mountPath: string;
         friendlyName?: string;
         storageType?: string;
-        setAsDefault?: string[];
-        clearDefault?: string[];
       } = {
         mountPath: volume.mountPath,
       };
@@ -91,18 +61,6 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
       // Only include storageType if changed
       if (storageType !== (volume.storageType || '')) {
         payload.storageType = storageType || undefined;
-      }
-
-      // Figure out which defaults changed
-      const currentDefaults = new Set(volume.isDefaultFor);
-      const toAdd = [...selectedDefaults].filter(d => !currentDefaults.has(d));
-      const toRemove = [...currentDefaults].filter(d => !selectedDefaults.has(d as DefaultType));
-
-      if (toAdd.length > 0) {
-        payload.setAsDefault = toAdd;
-      }
-      if (toRemove.length > 0) {
-        payload.clearDefault = toRemove;
       }
 
       const response = await fetch('/api/volumes/metadata', {
@@ -125,22 +83,10 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
     }
   }
 
-  function toggleDefault(type: DefaultType) {
-    setSelectedDefaults(prev => {
-      const next = new Set(prev);
-      if (next.has(type)) {
-        next.delete(type);
-      } else {
-        next.add(type);
-      }
-      return next;
-    });
-  }
-
   // Get display name for the volume
   function getDisplayName(): string {
     if (volume.friendlyName) return volume.friendlyName;
-    if (volume.mountPath === '/data') return 'dillinger_root';
+    if (volume.mountPath === '/data') return 'dillinger_core';
     const segments = volume.mountPath.split('/').filter(Boolean);
     return segments[segments.length - 1] || volume.mountPath;
   }
@@ -219,56 +165,6 @@ export default function VolumeSettingsModal({ isOpen, onClose, volume, onSave }:
             </div>
           </div>
 
-          {/* Default Assignments */}
-          <div>
-            <h3 className="text-sm font-semibold text-text mb-3">Default Assignments</h3>
-            <p className="text-xs text-muted mb-4">
-              Set this volume as the default location for different content types.
-              These will be used when downloading, installing, or browsing for files.
-            </p>
-            <div className="space-y-2">
-              {(Object.keys(DEFAULT_LABELS) as DefaultType[]).map(type => {
-                const { label, icon, description } = DEFAULT_LABELS[type];
-                const isSelected = selectedDefaults.has(type);
-                
-                return (
-                  <button
-                    key={type}
-                    onClick={() => toggleDefault(type)}
-                    className={`w-full p-3 rounded-lg border text-left transition-all ${
-                      isSelected
-                        ? 'border-primary bg-primary/10'
-                        : 'border-border hover:border-primary/50 hover:bg-background'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-xl">{icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-text">{label}</span>
-                          {isSelected && (
-                            <span className="px-2 py-0.5 text-[10px] font-semibold bg-primary text-white rounded">
-                              DEFAULT
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted mt-0.5">{description}</p>
-                      </div>
-                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                        isSelected ? 'border-primary bg-primary' : 'border-muted'
-                      }`}>
-                        {isSelected && (
-                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
 
         {/* Footer */}

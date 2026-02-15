@@ -125,6 +125,12 @@ interface ArcadeSettings {
   videoMode: 'opengl' | 'bgfx' | 'soft';
 }
 
+interface RetroarchMameSettings {
+  aspect: '4:3' | 'auto';
+  integerScale: boolean;
+  borderlessFullscreen: boolean;
+}
+
 interface C64Settings {
   trueDriveEmulation: boolean;
   warpMode: boolean;
@@ -187,6 +193,11 @@ export default function PlatformsPage() {
 
   // Per-section save indicators
   const [savedSections, setSavedSections] = useState<Record<string, string>>({});
+  const [retroarchMameSettings, setRetroarchMameSettings] = useState<RetroarchMameSettings>({
+    aspect: 'auto',
+    integerScale: true,
+    borderlessFullscreen: true,
+  });
   
   // Platform settings state
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
@@ -195,7 +206,26 @@ export default function PlatformsPage() {
   // Load platform settings on mount
   useEffect(() => {
     loadPlatformSettings();
+    loadRetroarchMameSettings();
   }, []);
+
+  const loadRetroarchMameSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/retroarch`);
+      if (!response.ok) {
+        throw new Error('Failed to load RetroArch settings');
+      }
+      const data = await response.json();
+      const mame = data.settings?.mame || {};
+      setRetroarchMameSettings({
+        aspect: mame.aspect === '4:3' ? '4:3' : 'auto',
+        integerScale: mame.integerScale !== false,
+        borderlessFullscreen: mame.borderlessFullscreen !== false,
+      });
+    } catch (error) {
+      console.error('Failed to load RetroArch settings:', error);
+    }
+  };
 
   const loadPlatformSettings = async () => {
     try {
@@ -248,6 +278,32 @@ export default function PlatformsPage() {
     } catch (error) {
       console.error(`Failed to save ${platformId} settings:`, error);
       setMessage({ type: 'error', text: `Failed to save ${platformId} settings` });
+    }
+  };
+
+  const saveRetroarchMameSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/retroarch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mame: {
+            aspect: retroarchMameSettings.aspect,
+            integerScale: retroarchMameSettings.integerScale,
+            borderlessFullscreen: retroarchMameSettings.borderlessFullscreen,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save RetroArch settings');
+      }
+
+      showSaveIndicator('arcade', 'Arcade / MAME settings saved!');
+      setMessage({ type: 'success', text: 'Arcade / MAME settings saved successfully' });
+    } catch (error) {
+      console.error('Failed to save RetroArch settings:', error);
+      setMessage({ type: 'error', text: 'Failed to save Arcade / MAME settings' });
     }
   };
 
@@ -1403,13 +1459,71 @@ export default function PlatformsPage() {
                   <option value="soft">Software</option>
                 </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Aspect Ratio
+                </label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                  value={retroarchMameSettings.aspect}
+                  onChange={(e) =>
+                    setRetroarchMameSettings((prev) => ({
+                      ...prev,
+                      aspect: e.target.value === '4:3' ? '4:3' : 'auto',
+                    }))
+                  }
+                >
+                  <option value="4:3">4:3 (Arcade)</option>
+                  <option value="auto">Auto (Core Default)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="font-medium text-gray-700 dark:text-gray-300">Integer Scale</label>
+                  <p className="text-sm text-gray-500">Keeps pixels crisp with integer scaling in MAME</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="w-5 h-5 rounded border-gray-300"
+                  checked={retroarchMameSettings.integerScale}
+                  onChange={(e) =>
+                    setRetroarchMameSettings((prev) => ({
+                      ...prev,
+                      integerScale: e.target.checked,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="font-medium text-gray-700 dark:text-gray-300">Borderless Fullscreen</label>
+                  <p className="text-sm text-gray-500">Uses windowed fullscreen to avoid mode switches</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="w-5 h-5 rounded border-gray-300"
+                  checked={retroarchMameSettings.borderlessFullscreen}
+                  onChange={(e) =>
+                    setRetroarchMameSettings((prev) => ({
+                      ...prev,
+                      borderlessFullscreen: e.target.checked,
+                    }))
+                  }
+                />
+              </div>
             </div>
 
             {/* Save Button */}
             <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
               <SaveIndicator show={!!savedSections['arcade']} message={savedSections['arcade'] || ''} />
               <button
-                onClick={() => savePlatformSettings('arcade')}
+                onClick={async () => {
+                  await savePlatformSettings('arcade');
+                  await saveRetroarchMameSettings();
+                }}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
               >
                 Save MAME Settings

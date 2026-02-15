@@ -12,12 +12,12 @@ import {
   serializeVersionedData,
 } from '@dillinger/shared';
 
-// DILLINGER_ROOT is the base directory for all game data and metadata
-// This MUST point to the dillinger_root Docker volume mount point
-// In development: Bind mounted to ./packages/dillinger-core/data via dillinger_root volume
-// In production: The dillinger_root Docker volume (typically /data inside container)
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const DATA_PATH = path.join(DILLINGER_ROOT, 'storage');
+// DILLINGER_CORE_PATH is the base directory for all game data and metadata
+// This SHOULD point to the dillinger_core Docker volume mount point
+// In development: Bind mounted to ./packages/dillinger-core/data via dillinger_core volume
+// In production: The dillinger_core Docker volume (typically /data inside container)
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const DATA_PATH = path.join(DILLINGER_CORE_PATH, 'storage');
 
 export interface EntityCounts {
   games: number;
@@ -113,10 +113,14 @@ export class JSONStorageService {
   }
 
   /**
-   * Get the DILLINGER_ROOT path (base directory for all data)
+   * Get the DILLINGER_CORE_PATH path (base directory for all data)
    */
+  getDillingerCorePath(): string {
+    return DILLINGER_CORE_PATH;
+  }
+
   getDillingerRoot(): string {
-    return DILLINGER_ROOT;
+    return DILLINGER_CORE_PATH;
   }
 
   /**
@@ -130,15 +134,15 @@ export class JSONStorageService {
    * Get the games directory path (actual game installations)
    */
   getGamesPath(): string {
-    return path.join(DILLINGER_ROOT, 'games');
+    return path.join(DILLINGER_CORE_PATH, 'games');
   }
 
   /**
    * Ensure all required data directories exist
    */
   async ensureDirectories(): Promise<void> {
-    // Ensure DILLINGER_ROOT exists
-    await fs.ensureDir(DILLINGER_ROOT);
+    // Ensure DILLINGER_CORE_PATH exists
+    await fs.ensureDir(DILLINGER_CORE_PATH);
     
     // Ensure storage subdirectories exist
     const storageDirs = ['games', 'platforms', 'sessions', 'collections', 'metadata', 'volumes'];
@@ -565,7 +569,7 @@ export class JSONStorageService {
     counts: EntityCounts;
   }> {
     try {
-      const rootExists = await fs.pathExists(DILLINGER_ROOT);
+      const rootExists = await fs.pathExists(DILLINGER_CORE_PATH);
       const storageExists = await fs.pathExists(DATA_PATH);
 
       if (!rootExists || !storageExists) {

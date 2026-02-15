@@ -5,10 +5,10 @@ import path from 'path';
 import type { StreamingProfile } from '@dillinger/shared';
 import { DEFAULT_STREAMING_PROFILES } from '@dillinger/shared';
 
-// Use the same DILLINGER_ROOT logic as storage service
-export const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const STREAMING_PROFILE_PATH = path.join(DILLINGER_ROOT, 'storage', 'streaming-profiles.json');
-const STREAMING_PROFILE_FILES_PATH = path.join(DILLINGER_ROOT, 'streaming-profiles');
+// Use the same DILLINGER_CORE_PATH logic as storage service
+export const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const STREAMING_PROFILE_PATH = path.join(DILLINGER_CORE_PATH, 'storage', 'streaming-profiles.json');
+const STREAMING_PROFILE_FILES_PATH = path.join(DILLINGER_CORE_PATH, 'streaming-profiles');
 
 export class StreamingProfileService {
   private static instance: StreamingProfileService;

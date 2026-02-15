@@ -78,7 +78,7 @@ docker run -d \
   --name dillinger \
   -p 3010:3010 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v dillinger_root:/data \
+   -v dillinger_core:/data \
   ghcr.io/thrane20/dillinger/core:latest
 ```
 

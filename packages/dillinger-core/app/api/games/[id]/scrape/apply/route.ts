@@ -12,8 +12,8 @@ const scraperManager = getScraperManager();
 const settingsService = SettingsService.getInstance();
 const storage = JSONStorageService.getInstance();
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const METADATA_PATH = path.join(DILLINGER_ROOT, 'storage', 'metadata');
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const METADATA_PATH = path.join(DILLINGER_CORE_PATH, 'storage', 'metadata');
 
 async function findGameAndFileKey(id: string): Promise<{ game: Game | null; fileKey: string | null }> {
   const directGame = await storage.readEntity<Game>('games', id);

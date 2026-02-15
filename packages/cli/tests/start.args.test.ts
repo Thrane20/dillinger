@@ -3,7 +3,7 @@ import { buildStartDockerArgs } from '../src/commands/start.js';
 
 describe('buildStartDockerArgs', () => {
   it('includes default passthroughs', () => {
-    const args = buildStartDockerArgs('dillinger', 'dillinger_root', 'img:1.0.0', 3010, {
+    const args = buildStartDockerArgs('dillinger', 'dillinger_core', 'img:1.0.0', 3010, {
       detach: true,
       noUpdateCheck: true,
     });
@@ -17,7 +17,7 @@ describe('buildStartDockerArgs', () => {
   });
 
   it('omits disabled passthroughs', () => {
-    const args = buildStartDockerArgs('dillinger', 'dillinger_root', 'img:1.0.0', 3010, {
+    const args = buildStartDockerArgs('dillinger', 'dillinger_core', 'img:1.0.0', 3010, {
       gpu: false,
       audio: false,
       display: false,

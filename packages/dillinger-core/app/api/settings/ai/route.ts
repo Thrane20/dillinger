@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs-extra';
 import path from 'path';
 
-const DATA_PATH = process.env.DILLINGER_ROOT || '/data';
+const DATA_PATH = process.env.DILLINGER_CORE_PATH || '/data';
 const AI_SETTINGS_PATH = path.join(DATA_PATH, 'storage', 'settings', 'ai.json');
 
 export interface AISettings {

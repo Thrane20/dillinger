@@ -14,8 +14,8 @@ import type {
 const scraperManager = getScraperManager();
 const storage = JSONStorageService.getInstance();
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const METADATA_PATH = path.join(DILLINGER_ROOT, 'storage', 'metadata');
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const METADATA_PATH = path.join(DILLINGER_CORE_PATH, 'storage', 'metadata');
 
 // POST /api/scrapers/save - Save game metadata and optionally download images
 export async function POST(request: NextRequest) {

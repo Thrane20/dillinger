@@ -172,7 +172,7 @@ export class DownloadManager extends EventEmitter {
     let destinationDir: string;
     
     if (cacheMode === 'with_game') {
-      // Store installers alongside game metadata in dillinger_root/storage/games/{game-id}/installers/
+      // Store installers alongside game metadata in dillinger_core/storage/games/{game-id}/installers/
       const dillingerRoot = this.storage.getDillingerRoot();
       destinationDir = path.join(dillingerRoot, 'storage', 'games', job.gameId, 'installers');
     } else if (cacheMode === 'custom_volume' && downloadSettings.installerCacheVolumeId) {

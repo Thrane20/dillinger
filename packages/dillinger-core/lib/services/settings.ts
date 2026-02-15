@@ -4,10 +4,10 @@ import fs from 'fs-extra';
 import path from 'path';
 import type { ScraperSettings, StreamingSettings, RetroarchSettings } from '@dillinger/shared';
 
-// Use the same DILLINGER_ROOT logic as storage service
-// This MUST point to the dillinger_root Docker volume mount point
-export const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const SETTINGS_PATH = path.join(DILLINGER_ROOT, 'storage', 'settings.json');
+// Use the same DILLINGER_CORE_PATH logic as storage service
+// This MUST point to the dillinger_core Docker volume mount point
+export const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const SETTINGS_PATH = path.join(DILLINGER_CORE_PATH, 'storage', 'settings.json');
 
 export interface AudioSettings {
   defaultSink?: string; // PulseAudio sink identifier (e.g., "alsa_output.pci-0000_03_00.1.hdmi-stereo-extra1")

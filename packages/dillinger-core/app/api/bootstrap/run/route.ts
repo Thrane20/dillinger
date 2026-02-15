@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 
-import { ensureDillingerRootScaffold } from '@/lib/services/bootstrap';
+import { ensureDillingerCoreScaffold } from '@/lib/services/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
-    await ensureDillingerRootScaffold();
+    await ensureDillingerCoreScaffold();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

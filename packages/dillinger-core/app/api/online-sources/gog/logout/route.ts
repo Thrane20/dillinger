@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
 
 function getGOGTokensPath(): string {
-  return path.join(DILLINGER_ROOT, 'storage', 'online-sources', 'gog-tokens.json');
+  return path.join(DILLINGER_CORE_PATH, 'storage', 'online-sources', 'gog-tokens.json');
 }
 
 // POST /api/online-sources/gog/logout - Log out from GOG

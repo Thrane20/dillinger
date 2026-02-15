@@ -59,8 +59,8 @@ export interface DxvkVersionIndex {
 }
 
 // Storage paths
-export const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-export const DXVK_VERSIONS_DIR = path.join(DILLINGER_ROOT, 'storage', 'dxvk-versions');
+export const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+export const DXVK_VERSIONS_DIR = path.join(DILLINGER_CORE_PATH, 'storage', 'dxvk-versions');
 export const DXVK_VERSIONS_INDEX = path.join(DXVK_VERSIONS_DIR, 'index.json');
 
 // Bundled paths (pre-installed in runner containers)

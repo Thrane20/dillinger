@@ -1,58 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import path from 'path';
-import fs from 'fs/promises';
-
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const VOLUME_METADATA_FILE = path.join(DILLINGER_ROOT, 'storage', 'volume-metadata.json');
-
-// Metadata stored for each volume, keyed by mount path
-export interface VolumeMetadata {
-  friendlyName?: string;
-  storageType?: 'ssd' | 'platter' | 'archive';
-}
-
-export interface VolumeMetadataStore {
-  // Keyed by mount path (e.g., "/data", "/mnt/games")
-  volumes: Record<string, VolumeMetadata>;
-  defaults: {
-    installers: string | null; // mount path
-    downloads: string | null;
-    installed: string | null;
-    roms: string | null;
-  };
-}
-
-type DefaultType = 'installers' | 'downloads' | 'installed' | 'roms';
-
-async function getVolumeMetadata(): Promise<VolumeMetadataStore> {
-  try {
-    const content = await fs.readFile(VOLUME_METADATA_FILE, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return {
-      volumes: {},
-      defaults: {
-        installers: null,
-        downloads: null,
-        installed: null,
-        roms: null,
-      },
-    };
-  }
-}
-
-async function saveVolumeMetadata(data: VolumeMetadataStore): Promise<void> {
-  const dir = path.dirname(VOLUME_METADATA_FILE);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(VOLUME_METADATA_FILE, JSON.stringify(data, null, 2));
-}
+import {
+  getVolumeMetadataStore,
+  saveVolumeMetadataStore,
+  type VolumeMetadataStore,
+} from '@/lib/services/volume-manager';
 
 /**
  * GET /api/volumes/metadata - Get all volume metadata
  */
 export async function GET() {
   try {
-    const data = await getVolumeMetadata();
+    const data = await getVolumeMetadataStore();
     return NextResponse.json({
       success: true,
       data,
@@ -72,13 +30,11 @@ export async function GET() {
  * - mountPath: string (required) - the path to update
  * - friendlyName?: string - custom name for the volume
  * - storageType?: 'ssd' | 'platter' | 'archive' | null - storage type
- * - setAsDefault?: DefaultType - set this volume as default for a purpose
- * - clearDefault?: DefaultType - clear this volume as default for a purpose
  */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { mountPath, friendlyName, storageType, setAsDefault, clearDefault } = body;
+    const { mountPath, friendlyName, storageType } = body;
 
     if (!mountPath) {
       return NextResponse.json(
@@ -87,7 +43,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const data = await getVolumeMetadata();
+    const data = await getVolumeMetadataStore();
 
     // Ensure volume entry exists
     if (!data.volumes[mountPath]) {
@@ -112,24 +68,12 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    // Set as default
-    if (setAsDefault && ['installers', 'downloads', 'installed', 'roms'].includes(setAsDefault)) {
-      data.defaults[setAsDefault as DefaultType] = mountPath;
-    }
-
-    // Clear as default
-    if (clearDefault && ['installers', 'downloads', 'installed', 'roms'].includes(clearDefault)) {
-      if (data.defaults[clearDefault as DefaultType] === mountPath) {
-        data.defaults[clearDefault as DefaultType] = null;
-      }
-    }
-
     // Clean up empty volume entries
     if (Object.keys(data.volumes[mountPath]).length === 0) {
       delete data.volumes[mountPath];
     }
 
-    await saveVolumeMetadata(data);
+    await saveVolumeMetadataStore(data as VolumeMetadataStore);
 
     return NextResponse.json({
       success: true,

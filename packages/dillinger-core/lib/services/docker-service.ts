@@ -3,7 +3,6 @@ import path from 'path';
 import { existsSync, statSync, readFileSync, readdirSync } from 'fs';
 import type { Game, Platform } from '@dillinger/shared';
 import { JSONStorageService } from './storage';
-import { getDefaultVolume } from './volume-defaults';
 import { SettingsService } from './settings';
 import { logger } from './logger';
 
@@ -174,24 +173,37 @@ export class DockerService {
     return null;
   }
 
+  private getInstalledVolumeBinds(): string[] {
+    if (!this.mounts || this.mounts.length === 0) {
+      return [];
+    }
+
+    const binds: string[] = [];
+    for (const mount of this.mounts) {
+      if (mount.Type !== 'volume') continue;
+      const volumeName = mount.Name || mount.Source;
+      if (!volumeName || !volumeName.startsWith('dillinger_installed_')) continue;
+      const suffix = volumeName.substring('dillinger_installed_'.length);
+      if (!suffix) continue;
+      binds.push(`${volumeName}:/installed/${suffix}:rw`);
+    }
+
+    return binds;
+  }
+
   /**
    * Build the ROM bind mount and container path, handling devcontainer volume mounts.
    */
   private async resolveRomMount(romPath: string): Promise<{ bind: string; containerPath: string }> {
-    let normalizedRomPath = romPath;
     if (romPath === '/roms' || romPath.startsWith('/roms/')) {
-      const { volume } = await getDefaultVolume('roms');
-      if (volume?.hostPath) {
-        const relative = romPath.replace(/^\/roms\/?/, '');
-        normalizedRomPath = relative ? path.posix.join(volume.hostPath, relative) : volume.hostPath;
-        logger.info(`  Normalized ROM path ${romPath} -> ${normalizedRomPath} (roms default volume)`);
-      } else {
-        logger.warn('  ROM path uses /roms but no default ROM volume is configured');
-      }
+      return {
+        bind: 'dillinger_roms:/roms:ro',
+        containerPath: romPath,
+      };
     }
 
-    const romDir = path.posix.dirname(normalizedRomPath);
-    const romFilename = path.posix.basename(normalizedRomPath);
+    const romDir = path.posix.dirname(romPath);
+    const romFilename = path.posix.basename(romPath);
     const stripLeadingSlash = (value: string) => value.replace(/^\/+/, '');
 
     const volumeMount = this.getVolumeMountForPath(romDir);
@@ -219,15 +231,6 @@ export class DockerService {
     // lives under a well-known mount (e.g. /roms/c64/GAME.D64).  Instead of
     // mounting the immediate parent dir, find the top-level mount and keep
     // the relative path within the container.
-    const hostRomRoot = this.resolveHostPath('/roms');
-    if (hostRomRoot !== '/roms' && normalizedRomPath.startsWith('/roms/')) {
-      // resolveHostPath found a real host path for /roms
-      const relativeInRoms = normalizedRomPath.slice('/roms/'.length); // e.g. c64/RAIDONBB.D64
-      const containerPath = path.posix.join('/roms', relativeInRoms);
-      logger.info(`  Fallback ROM mount: ${hostRomRoot}:/roms:ro, path: ${containerPath}`);
-      return { bind: `${hostRomRoot}:/roms:ro`, containerPath };
-    }
-
     return { bind: `${hostRomDir}:/roms:ro`, containerPath: path.posix.join('/roms', romFilename) };
   }
 
@@ -1301,7 +1304,7 @@ export class DockerService {
     const env = [
       `GAME_ID=${game.id}`,
       `SESSION_ID=${sessionId}`,
-      `SAVES_PATH=/data/saves/${game.id}`, // Game-specific saves directory in dillinger_root
+      `SAVES_PATH=/data/saves/${game.id}`, // Game-specific saves directory in dillinger_core
       ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
     ];
 
@@ -1750,9 +1753,12 @@ export class DockerService {
     }
 
     // Build volume binds
+    await this.detectHostPath();
+
     const binds = [
-      `dillinger_root:/data:rw`, // Mount dillinger_root volume for saves/state
-      `dillinger_installers:/installers:rw`, // Helper volume for finding installers
+      `dillinger_core:/data:rw`,
+      `dillinger_cache:/cache:rw`,
+      ...this.getInstalledVolumeBinds(),
     ];
     
     // For Wine games, mount the Wine prefix from the appropriate volume
@@ -1898,7 +1904,7 @@ export class DockerService {
          logger.info(`  Mounting BIOS directory: ${hostBiosPath} -> /bios`);
       }
 
-      // PSX BIOS: Since dillinger_root:/data is already mounted, BIOS files are available
+      // PSX BIOS: Since dillinger_core:/data is already mounted, BIOS files are available
       // at /data/bios/psx inside the container. Pass this path via environment variable.
       if (game.platformId === 'psx') {
          const dillingerRoot = this.storage.getDillingerRoot();
@@ -1912,9 +1918,9 @@ export class DockerService {
            logger.warn(`Could not ensure PSX BIOS directory exists: ${biosPath}`, err);
          }
 
-         // Tell RetroArch where to find BIOS files (path inside container via dillinger_root volume)
+         // Tell RetroArch where to find BIOS files (path inside container via dillinger_core volume)
          env.push(`RETROARCH_SYSTEM_DIR=/data/bios/psx`);
-         logger.info(`  PSX BIOS directory: /data/bios/psx (via dillinger_root volume)`);
+         logger.info(`  PSX BIOS directory: /data/bios/psx (via dillinger_core volume)`);
       }
 
       // Mount per-game save directories for RetroArch
@@ -1942,7 +1948,7 @@ export class DockerService {
            logger.warn(`Could not ensure save directories exist:`, err);
          }
 
-         // Mount save directories (dillinger_root is already mounted at /data)
+         // Mount save directories (dillinger_core is already mounted at /data)
          // RetroArch will use these paths for saves
          env.push(`RETROARCH_SAVES_DIR=/data/saves/${gameId}/sram`);
          env.push(`RETROARCH_STATES_DIR=/data/saves/${gameId}/states`);
@@ -2196,7 +2202,8 @@ export class DockerService {
 
     // Setup volume binds
     const binds = [
-      `dillinger_root:/data:rw`,
+      `dillinger_core:/data:rw`,
+      ...this.getInstalledVolumeBinds(),
       ...displayConfig.volumes
     ];
     
@@ -2552,22 +2559,29 @@ export class DockerService {
     logger.info(`  Game slug: ${game.slug || game.id}`);
 
     // Determine how to mount the installer based on its location
-    const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-    const installerIsInInstallersVolume = typeof installerPath === 'string' && installerPath.startsWith('/installers/');
-    const installerIsInDillingerRoot = typeof installerPath === 'string' && installerPath.startsWith(DILLINGER_ROOT + '/');
+    const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+    const installerIsInInstallersVolume = typeof installerPath === 'string' && installerPath.startsWith('/cache/');
+    const installerIsInDillingerCore = typeof installerPath === 'string' && installerPath.startsWith(DILLINGER_CORE_PATH + '/');
     
-    // installPath is now passed in as a direct host path (e.g., /mnt/m2fast/game-slug)
     const hostInstallPath = installPath;
 
-    // Check if the install path is within a configured Docker volume
-    // This is important because bind-mounting a non-existent subdirectory fails,
-    // but we can mount the parent volume and create the subdirectory inside the container
     const installVolumeInfo = await this.findVolumeForPath(hostInstallPath);
     let installBindMount: string;
     let installContainerPath: string;
     let winePrefixContainerPath: string;
-    
-    if (installVolumeInfo) {
+
+    if (hostInstallPath.startsWith('/installed/')) {
+      const [, , suffix, ...rest] = hostInstallPath.split('/');
+      if (!suffix) {
+        throw new Error('Invalid /installed path, expected /installed/<suffix>/...');
+      }
+      const rel = rest.join('/');
+      installBindMount = `dillinger_installed_${suffix}:/installed/${suffix}:rw`;
+      installContainerPath = rel ? `/installed/${suffix}/${rel}` : `/installed/${suffix}`;
+      winePrefixContainerPath = installContainerPath;
+      logger.info(`  Install volume: dillinger_installed_${suffix}`);
+      logger.info(`  Install path in container: ${installContainerPath}`);
+    } else if (installVolumeInfo) {
       // Install path is within a managed Docker volume - mount the volume and use relative path
       installBindMount = `${installVolumeInfo.volume.dockerVolumeName}:/mnt/install_volume:rw`;
       installContainerPath = `/mnt/install_volume${installVolumeInfo.relativePath}`;
@@ -2597,13 +2611,13 @@ export class DockerService {
     // Determine the installer container path based on where the installer is located
     let installerContainerPath: string;
     if (installerIsInInstallersVolume) {
-      // Installer is in /installers/ volume - use as-is
+      // Installer is in /cache volume - use as-is
       installerContainerPath = installerPath;
-      logger.info(`  Installer source: /installers volume`);
-    } else if (installerIsInDillingerRoot) {
-      // Installer is within DILLINGER_ROOT (/data) - mount dillinger_root volume and use same path
+      logger.info(`  Installer source: /cache volume`);
+    } else if (installerIsInDillingerCore) {
+      // Installer is within DILLINGER_CORE_PATH (/data) - mount dillinger_core volume and use same path
       installerContainerPath = installerPath; // Path stays the same since we mount to same location
-      logger.info(`  Installer source: dillinger_root volume (${DILLINGER_ROOT})`);
+      logger.info(`  Installer source: dillinger_core volume (${DILLINGER_CORE_PATH})`);
     } else {
       // Legacy: direct file path - mount as individual file
       installerContainerPath = `/installer/${path.basename(installerPath)}`;
@@ -2735,10 +2749,10 @@ export class DockerService {
       // Build the bind mounts based on installer location
       const installerBinds: string[] = [];
       if (installerIsInInstallersVolume) {
-        // Installer is in /installers/ volume - already mounted below
-      } else if (installerIsInDillingerRoot) {
-        // Installer is in dillinger_root - mount the volume to same path
-        installerBinds.push(`dillinger_root:${DILLINGER_ROOT}:ro`);
+        // Installer is in /cache volume - already mounted below
+      } else if (installerIsInDillingerCore) {
+        // Installer is in dillinger_core - mount the volume to same path
+        installerBinds.push(`dillinger_core:${DILLINGER_CORE_PATH}:ro`);
       } else {
         // Legacy: direct bind mount - need to translate to host path
         await this.detectHostPath();
@@ -2756,7 +2770,7 @@ export class DockerService {
           Binds: [
             ...installerBinds,
             installBindMount, // Mount installation target (either volume or direct bind)
-            `dillinger_installers:/installers:rw`, // Helper volume for finding installers
+            `dillinger_cache:/cache:rw`,
             ...displayConfig.volumes
           ],
           Devices: displayConfig.devices,
@@ -3908,9 +3922,9 @@ export class DockerService {
   /**
    * NOTE: Save volumes are no longer used
    * 
-   * Game saves are now stored in dillinger_root at /data/saves/<gameId>
+  * Game saves are now stored in dillinger_core at /data/saves/<gameId>
    * This eliminates the need for per-game or per-session save volumes.
-   * All save data is centralized in the dillinger_root volume.
+  * All save data is centralized in the dillinger_core volume.
    * 
    * Any old dillinger_saves_* volumes can be safely deleted manually.
    */
@@ -4048,7 +4062,7 @@ export class DockerService {
 
       // Remove orphaned volumes (except system volumes)
       const removed: string[] = [];
-      const protectedVolumes = ['dillinger_root', 'dillinger_installers'];
+      const protectedVolumes = ['dillinger_core', 'dillinger_cache'];
 
       for (const vol of allVolumes) {
         const volumeName = vol.Name;
@@ -4185,7 +4199,7 @@ export class DockerService {
       `DILLINGER_API_PORT=${apiPort}`,
       'WOLF_CFG_FOLDER=/data/wolf',
       // Persist Wolf state (per-client app state folders, etc.) across container restarts/rebuilds.
-      // This lives inside the persisted dillinger_root volume.
+      // This lives inside the persisted dillinger_core volume.
       'HOST_APPS_STATE_FOLDER=/data/wolf/apps',
     ];
 
@@ -4193,7 +4207,7 @@ export class DockerService {
       env.push(`PULSE_SINK=${pulseSink}`);
     }
 
-    const binds: string[] = ['dillinger_root:/data:rw'];
+    const binds: string[] = ['dillinger_core:/data:rw'];
 
     const useSharedRuntime = reason === 'game';
     if (useSharedRuntime) {

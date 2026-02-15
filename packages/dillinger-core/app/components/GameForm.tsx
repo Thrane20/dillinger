@@ -154,11 +154,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [volumeDefaults, setVolumeDefaults] = useState<{
-    defaults: { installers: string | null; downloads: string | null; installed: string | null; roms: string | null };
-    volumeMetadata: Record<string, { storageType?: string }>;
-  } | null>(null);
-  const [configuredVolumes, setConfiguredVolumes] = useState<Array<{ id: string; name: string; hostPath: string }>>([]);
   const stripNullTerminators = (value: string): string => value.replace(/\u0000/g, '').trim();
   const sanitizeStringArray = (values: unknown): string[] => {
     if (!Array.isArray(values)) return [];
@@ -287,33 +282,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
 
   // Display paths as-is since they are now direct host paths on configured volumes
   const formatInstalledPathForDisplay = (p: string) => p;
-
-  // Load volume defaults for ROM browsing
-  useEffect(() => {
-    const loadVolumeDefaults = async () => {
-      try {
-        // Load volume defaults
-        const defaultsResponse = await fetch('/api/volumes/defaults');
-        if (defaultsResponse.ok) {
-          const defaultsData = await defaultsResponse.json();
-          if (defaultsData.success) {
-            setVolumeDefaults(defaultsData.data);
-          }
-        }
-        // Load configured volumes
-        const volumesResponse = await fetch('/api/volumes');
-        if (volumesResponse.ok) {
-          const volumesData = await volumesResponse.json();
-          if (volumesData.data) {
-            setConfiguredVolumes(volumesData.data);
-          }
-        }
-      } catch {
-        // non-fatal
-      }
-    };
-    loadVolumeDefaults();
-  }, []);
 
   // Auto-open Wine Installation Monitor when installation is in progress
   useEffect(() => {
@@ -997,16 +965,9 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     setShowFileExplorer(true);
   };
 
-  // Get the initial path for ROM file browser (uses 'roms' default volume)
+  // First-class volume convention: ROM browsing always starts at /roms
   const getRomsBrowsePath = (): string | undefined => {
-    const romsVolumeId = volumeDefaults?.defaults.roms;
-    if (romsVolumeId) {
-      const volume = configuredVolumes.find(v => v.id === romsVolumeId);
-      if (volume) {
-        return volume.hostPath;
-      }
-    }
-    return undefined; // Let FileExplorer use its default
+    return '/roms';
   };
 
   const handleFileExplorerSelect = (path: string) => {

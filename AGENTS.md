@@ -65,8 +65,10 @@ pnpm test
 
 ## Docker Volumes
 
-- `dillinger_root` - Application data, Wolf config, settings
-- `dillinger_library` - Game library metadata (JSON files with GUID linking)
+- `dillinger_core` - Application core data mounted at `/data` (configs, saves, sessions, metadata)
+- `dillinger_roms` - ROM library root mounted at `/roms`
+- `dillinger_cache` - Installer/download cache mounted at `/cache`
+- `dillinger_installed_*` - Wine install roots mounted at `/installed/<suffix>`
 
 ## Key Configuration Files
 
@@ -114,7 +116,7 @@ export GST_PLUGIN_SYSTEM_PATH=""
 1. Check Wolf logs: `docker logs <container>`
 2. Verify encoder: Look for "Using H264 encoder" in logs
 3. Test GStreamer: `gst-inspect-1.0 vah264enc`
-4. Clear Wolf config: `docker run --rm -v dillinger_root:/data --entrypoint rm alpine -f /data/wolf/config.toml`
+4. Clear Wolf config: `docker run --rm -v dillinger_core:/data --entrypoint rm alpine -f /data/wolf/config.toml`
 
 ### Rebuilding After entrypoint.sh Changes
 entrypoint.sh is copied at build time, so use `--no-cache`:

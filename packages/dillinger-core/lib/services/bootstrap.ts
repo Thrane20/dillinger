@@ -12,27 +12,27 @@ const DEFAULT_DOWNLOAD_STATE = {
 
 const BOOTSTRAP_MARKER_RELATIVE_PATH = path.join('storage', '.dillinger_bootstrap_complete');
 
-export async function ensureDillingerRootScaffold(): Promise<void> {
+export async function ensureDillingerCoreScaffold(): Promise<void> {
   const storage = JSONStorageService.getInstance();
   await storage.ensureDirectories();
 
-  const dillingerRoot = storage.getDillingerRoot();
+  const dillingerCorePath = storage.getDillingerCorePath();
 
   await Promise.all([
-    fs.ensureDir(path.join(dillingerRoot, 'bios')),
-    fs.ensureDir(path.join(dillingerRoot, 'logs')),
-    fs.ensureDir(path.join(dillingerRoot, 'saves')),
-    fs.ensureDir(path.join(dillingerRoot, 'storage', 'cache')),
-    fs.ensureDir(path.join(dillingerRoot, 'storage', 'installer_cache')),
-    fs.ensureDir(path.join(dillingerRoot, 'storage', 'online-sources')),
-    fs.ensureDir(path.join(dillingerRoot, 'storage', 'platform-configs', 'arcade')),
+    fs.ensureDir(path.join(dillingerCorePath, 'bios')),
+    fs.ensureDir(path.join(dillingerCorePath, 'logs')),
+    fs.ensureDir(path.join(dillingerCorePath, 'saves')),
+    fs.ensureDir(path.join(dillingerCorePath, 'storage', 'cache')),
+    fs.ensureDir(path.join(dillingerCorePath, 'storage', 'installer_cache')),
+    fs.ensureDir(path.join(dillingerCorePath, 'storage', 'online-sources')),
+    fs.ensureDir(path.join(dillingerCorePath, 'storage', 'platform-configs', 'arcade')),
   ]);
 
   // Ensure settings.json exists (and is valid JSON).
   await SettingsService.getInstance().initialize();
 
   // Ensure download-state.json exists so the UI can rely on it being present.
-  const downloadStatePath = path.join(dillingerRoot, 'storage', 'download-state.json');
+  const downloadStatePath = path.join(dillingerCorePath, 'storage', 'download-state.json');
   if (!(await fs.pathExists(downloadStatePath))) {
     await fs.writeJson(downloadStatePath, DEFAULT_DOWNLOAD_STATE, { spaces: 2 });
   }
@@ -40,7 +40,7 @@ export async function ensureDillingerRootScaffold(): Promise<void> {
   // Seed RetroArch master config if missing.
   // The template is baked into the image at packages/dillinger-core/assets/defaults/retroarch.cfg.
   const retroarchConfigPath = path.join(
-    dillingerRoot,
+    dillingerCorePath,
     'storage',
     'platform-configs',
     'arcade',
@@ -82,13 +82,13 @@ export async function ensureDillingerRootScaffold(): Promise<void> {
 
   // Write an explicit marker so the UI can reliably detect completion even if
   // other services create directories like /data/logs during startup.
-  const markerPath = path.join(dillingerRoot, BOOTSTRAP_MARKER_RELATIVE_PATH);
+  const markerPath = path.join(dillingerCorePath, BOOTSTRAP_MARKER_RELATIVE_PATH);
   await fs.ensureDir(path.dirname(markerPath));
   await fs.writeFile(markerPath, new Date().toISOString(), 'utf8');
 }
 
 export function getScaffoldPreview(): { directories: string[]; files: string[] } {
-  // Paths are relative to DILLINGER_ROOT (typically /data in the container)
+  // Paths are relative to DILLINGER_CORE_PATH (typically /data in the container)
   return {
     directories: [
       'storage/games',
@@ -114,10 +114,18 @@ export function getScaffoldPreview(): { directories: string[]; files: string[] }
   };
 }
 
-export async function isDillingerRootInitialized(): Promise<boolean> {
+export async function isDillingerCoreInitialized(): Promise<boolean> {
   const storage = JSONStorageService.getInstance();
-  const dillingerRoot = storage.getDillingerRoot();
+  const dillingerCorePath = storage.getDillingerCorePath();
 
-  const markerPath = path.join(dillingerRoot, BOOTSTRAP_MARKER_RELATIVE_PATH);
+  const markerPath = path.join(dillingerCorePath, BOOTSTRAP_MARKER_RELATIVE_PATH);
   return fs.pathExists(markerPath);
+}
+
+export async function ensureDillingerRootScaffold(): Promise<void> {
+  return ensureDillingerCoreScaffold();
+}
+
+export async function isDillingerRootInitialized(): Promise<boolean> {
+  return isDillingerCoreInitialized();
 }

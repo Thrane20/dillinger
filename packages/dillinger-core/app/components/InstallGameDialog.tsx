@@ -4,23 +4,9 @@ import { useState, useEffect } from 'react';
 import FileExplorer from './FileExplorer';
 import type { InstallGameRequest, InstallGameResponse } from '@dillinger/shared';
 
-interface Volume {
-  id: string;
+interface InstalledMount {
   name: string;
-  dockerVolumeName: string;
-  hostPath: string;
-}
-
-interface VolumeDefaults {
-  defaults: {
-    installers: string | null;
-    downloads: string | null;
-    installed: string | null;
-    roms: string | null;
-  };
-  volumeMetadata: Record<string, {
-    storageType?: 'ssd' | 'platter' | 'archive';
-  }>;
+  mountPath: string;
 }
 
 interface WineVersion {
@@ -86,9 +72,8 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
   const [showFileExplorer, setShowFileExplorer] = useState<'installer' | 'location' | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [availableVolumes, setAvailableVolumes] = useState<Volume[]>([]);
+  const [installedMounts, setInstalledMounts] = useState<InstalledMount[]>([]);
   const [selectedVolume, setSelectedVolume] = useState<string | null>(null);
-  const [volumeDefaults, setVolumeDefaults] = useState<VolumeDefaults | null>(null);
   
   // Install mode selection (null = not chosen yet)
   const [installMode, setInstallMode] = useState<'lutris' | 'standard' | null>(null);
@@ -197,26 +182,23 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
     loadGameData();
   }, [gameId, platformId]);
 
-  // Fetch available volumes and defaults on mount
+  // Fetch available volumes and first-class installed mounts on mount
   useEffect(() => {
     const loadData = async () => {
       try {
-        // Load configured volumes (bind mounts)
-        const volumesResponse = await fetch('/api/volumes');
-        if (volumesResponse.ok) {
-          const volumesData = await volumesResponse.json();
-          setAvailableVolumes(volumesData.data || []);
-        }
-
-        // Load volume defaults
-        const defaultsResponse = await fetch('/api/volumes/defaults');
-        if (defaultsResponse.ok) {
-          const defaultsData = await defaultsResponse.json();
-          if (defaultsData.success) {
-            setVolumeDefaults(defaultsData.data);
-            // Pre-select the default "installed" volume if set
-            if (defaultsData.data.defaults.installed) {
-              setSelectedVolume(defaultsData.data.defaults.installed);
+        const detectedResponse = await fetch('/api/volumes/detected');
+        if (detectedResponse.ok) {
+          const detectedData = await detectedResponse.json();
+          if (detectedData.success && detectedData.data?.volumes) {
+            const mounted = detectedData.data.volumes
+              .filter((v: any) => typeof v.mountPath === 'string' && v.mountPath.startsWith('/installed'))
+              .map((v: any) => ({
+                name: v.dockerVolumeName || v.mountPath,
+                mountPath: v.mountPath,
+              }));
+            setInstalledMounts(mounted);
+            if (mounted[0]) {
+              setSelectedVolume(mounted[0].mountPath);
             }
           }
         }
@@ -238,50 +220,23 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
     loadData();
   }, [isWinePlatform]);
 
-  // Get the volume object by ID
-  const getVolumeById = (id: string) => availableVolumes.find(v => v.id === id);
-
-  // Check if a volume is the default for a purpose
-  const isDefaultFor = (volumeId: string, purpose: keyof VolumeDefaults['defaults']) => {
-    return volumeDefaults?.defaults[purpose] === volumeId;
-  };
-
-  // Get the initial path for installer browser (uses download cache path if available, else 'installers' default volume)
+  // Get the initial path for installer browser (cache-first convention)
   const getInstallersBrowsePath = (): string | undefined => {
     // First priority: use the download cache path from the game
     if (downloadCachePath) {
       return downloadCachePath;
     }
-    // Fallback: use the installers default volume
-    const installersVolumeId = volumeDefaults?.defaults.installers;
-    if (installersVolumeId) {
-      const volume = getVolumeById(installersVolumeId);
-      if (volume) {
-        return volume.hostPath;
-      }
-    }
-    return undefined; // Let FileExplorer use its default
+    return '/cache';
   };
 
-  // Get the initial path for install location browser (uses 'installed' default volume)
+  // Get the initial path for install location browser
   const getInstallLocationBrowsePath = (): string | undefined => {
-    const installedVolumeId = volumeDefaults?.defaults.installed;
-    if (installedVolumeId) {
-      const volume = getVolumeById(installedVolumeId);
-      if (volume) {
-        return volume.hostPath;
-      }
-    }
-    return undefined; // Let FileExplorer use its default
+    return installedMounts[0]?.mountPath || '/installed';
   };
 
-  const handleVolumeSelect = (volumeId: string) => {
-    setSelectedVolume(volumeId);
-    const volume = getVolumeById(volumeId);
-    if (volume) {
-      // Use the volume's host path as base
-      setInstallPath(`${volume.hostPath}/${gameId}`);
-    }
+  const handleVolumeSelect = (mountPath: string) => {
+    setSelectedVolume(mountPath);
+    setInstallPath(`${mountPath}/${gameId}`);
   };
 
   const handleInstallerSelect = (path: string) => {
@@ -646,31 +601,29 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                     📦 Quick Select Volume
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    {availableVolumes.length > 0 ? (
-                      availableVolumes.map((vol) => (
+                    {installedMounts.length > 0 ? (
+                      installedMounts.map((vol) => (
                         <button
-                          key={vol.id}
+                          key={vol.mountPath}
                           type="button"
-                          onClick={() => handleVolumeSelect(vol.id)}
+                          onClick={() => handleVolumeSelect(vol.mountPath)}
                           className={`px-3 py-2 rounded-md text-sm transition-colors ${
-                            selectedVolume === vol.id
+                            selectedVolume === vol.mountPath
                               ? 'bg-green-600 text-white'
                               : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200'
                           }`}
                         >
-                          {isDefaultFor(vol.id, 'installed') && '🎮 '}
                           {vol.name}
-                          {isDefaultFor(vol.id, 'installed') && ' ⭐'}
                         </button>
                       ))
                     ) : (
                       <p className="text-sm text-muted">
-                        No volumes configured. Add volumes in the Volume Manager on the left sidebar.
+                        No `/installed` mounts detected. Add `dillinger_installed_*` volumes and restart.
                       </p>
                     )}
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    Click a volume to set the install location. ⭐ indicates your default from Volume Manager.
+                    Click a mounted install root to set the install location quickly.
                   </p>
                 </div>
 

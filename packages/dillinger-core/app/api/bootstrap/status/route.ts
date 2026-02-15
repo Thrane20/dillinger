@@ -1,22 +1,22 @@
 import { NextResponse } from 'next/server';
 import { JSONStorageService } from '@/lib/services/storage';
-import { getScaffoldPreview, isDillingerRootInitialized } from '@/lib/services/bootstrap';
+import { getScaffoldPreview, isDillingerCoreInitialized } from '@/lib/services/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const storage = JSONStorageService.getInstance();
-  const dillingerRoot = storage.getDillingerRoot();
+  const dillingerCorePath = storage.getDillingerCorePath();
 
-  const initialized = await isDillingerRootInitialized();
+  const initialized = await isDillingerCoreInitialized();
 
   return NextResponse.json({
     initialized,
-    dillingerRoot,
+    dillingerCorePath,
     volume: {
-      name: 'dillinger_root',
+      name: 'dillinger_core',
       containerMount: '/data',
-      envVar: 'DILLINGER_ROOT',
+      envVar: 'DILLINGER_CORE_PATH',
     },
     preview: getScaffoldPreview(),
   });

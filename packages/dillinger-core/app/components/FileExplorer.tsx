@@ -13,6 +13,7 @@ interface FileItem {
 interface VolumeItem {
   name: string;
   mountpoint: string | null;
+  dockerVolumeName?: string;
   driver: string;
   createdAt?: string;
   hostPath?: string;  // For configured volumes
@@ -43,7 +44,6 @@ export default function FileExplorer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState('');
-  const [hostRoots, setHostRoots] = useState<string[]>([]);
   const [dockerVolumes, setDockerVolumes] = useState<VolumeItem[]>([]);
 
   // Load home directory on mount
@@ -79,25 +79,18 @@ export default function FileExplorer({
 
   async function loadVolumes() {
     try {
-      // Load host roots
-      const rootsResponse = await fetch('/api/filesystem/roots');
-      const rootsData = await rootsResponse.json();
-      if (rootsData.success) {
-        setHostRoots(rootsData.data.roots);
-      }
-
-      // Load configured volumes from storage (these are the volumes configured in the sidebar)
-      const configuredVolumesResponse = await fetch('/api/volumes');
-      const configuredVolumesData = await configuredVolumesResponse.json();
-      if (configuredVolumesData.success && configuredVolumesData.data) {
-        // Map configured volumes to VolumeItem format
-        const configuredVolumes: VolumeItem[] = configuredVolumesData.data.map((v: { name: string; hostPath: string; type: string; createdAt?: string }) => ({
-          name: v.name,
-          mountpoint: v.hostPath,
-          hostPath: v.hostPath,
-          driver: v.type || 'bind',
-          createdAt: v.createdAt,
-        }));
+      const response = await fetch('/api/volumes/detected');
+      const data = await response.json();
+      if (data.success && data.data?.volumes) {
+        const configuredVolumes: VolumeItem[] = data.data.volumes
+          .filter((v: { dockerVolumeName?: string }) => v.dockerVolumeName?.startsWith('dillinger_'))
+          .map((v: { dockerVolumeName?: string; mountPath: string; fsType: string }) => ({
+            name: v.dockerVolumeName || v.mountPath,
+            dockerVolumeName: v.dockerVolumeName,
+            mountpoint: v.mountPath,
+            hostPath: v.mountPath,
+            driver: v.fsType || 'volume',
+          }));
         setDockerVolumes(configuredVolumes);
       }
     } catch (err) {
@@ -196,64 +189,37 @@ export default function FileExplorer({
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Volumes Sidebar */}
-          {showVolumes && (hostRoots.length > 0 || dockerVolumes.length > 0) && (
+          {showVolumes && dockerVolumes.length > 0 && (
             <div className="w-56 border-r border-border p-4 overflow-y-auto bg-surface/50">
-              {/* Host Roots */}
-              {hostRoots.length > 0 && (
-                <div className="mb-4">
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Host</h3>
-                  <div className="space-y-1">
-                    {hostRoots.map((root) => (
-                      <button
-                        type="button"
-                        key={root}
-                        onClick={() => browsePath(root)}
-                        className="w-full text-left px-3 py-2 rounded text-sm text-text hover:bg-primary/10 hover:text-primary transition-colors"
-                      >
-                        <svg className="inline-block w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                        </svg>
-                        {root}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Docker Volumes */}
-              {dockerVolumes.length > 0 && (
-                <div>
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Volumes</h3>
-                  <div className="space-y-1">
-                    {dockerVolumes.map((volume) => (
-                      <button
-                        type="button"
-                        key={volume.name}
-                        onClick={() => volume.mountpoint && browsePath(volume.mountpoint)}
-                        disabled={!volume.mountpoint}
-                        className="w-full text-left px-3 py-2 rounded text-sm hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
-                        title={volume.mountpoint || 'No mount point available'}
-                      >
-                        <div className="flex items-start gap-2">
-                          <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-muted group-hover:text-primary transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-                          </svg>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-text group-hover:text-primary transition-colors truncate font-medium">
-                              {volume.name}
-                            </div>
-                            {volume.mountpoint && (
-                              <div className="text-xs text-muted truncate font-mono mt-0.5">
-                                {volume.mountpoint}
-                              </div>
-                            )}
-                          </div>
+              <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Volumes</h3>
+              <div className="space-y-1">
+                {dockerVolumes.map((volume) => (
+                  <button
+                    type="button"
+                    key={volume.name}
+                    onClick={() => volume.mountpoint && browsePath(volume.mountpoint)}
+                    disabled={!volume.mountpoint}
+                    className="w-full text-left px-3 py-2 rounded text-sm hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                    title={volume.mountpoint || 'No mount point available'}
+                  >
+                    <div className="flex items-start gap-2">
+                      <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-muted group-hover:text-primary transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+                      </svg>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-text group-hover:text-primary transition-colors truncate font-medium">
+                          {volume.name}
                         </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+                        {volume.mountpoint && (
+                          <div className="text-xs text-muted truncate font-mono mt-0.5">
+                            {volume.mountpoint}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

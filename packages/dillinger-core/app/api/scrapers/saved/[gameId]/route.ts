@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const METADATA_PATH = path.join(DILLINGER_ROOT, 'storage', 'metadata');
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const METADATA_PATH = path.join(DILLINGER_CORE_PATH, 'storage', 'metadata');
 
 // GET /api/scrapers/saved/[gameId] - Get specific saved game metadata
 export async function GET(

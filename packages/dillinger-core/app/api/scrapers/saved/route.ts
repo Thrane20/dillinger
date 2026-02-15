@@ -3,8 +3,8 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import type { SavedGameMetadata } from '@dillinger/shared';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const METADATA_PATH = path.join(DILLINGER_ROOT, 'storage', 'metadata');
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const METADATA_PATH = path.join(DILLINGER_CORE_PATH, 'storage', 'metadata');
 
 // GET /api/scrapers/saved - Get all saved game metadata
 export async function GET() {

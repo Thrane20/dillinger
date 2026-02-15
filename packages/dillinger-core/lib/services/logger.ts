@@ -29,9 +29,9 @@ export class LoggerService extends EventEmitter {
 
   private constructor() {
     super();
-    // Determine log directory: use DILLINGER_ROOT/logs if available, otherwise ./logs
-    const dillingerRoot = process.env.DILLINGER_ROOT || process.cwd();
-    this.logDirectory = path.join(dillingerRoot, 'logs');
+    // Determine log directory: use DILLINGER_CORE_PATH/logs if available, otherwise ./logs
+    const dillingerCorePath = process.env.DILLINGER_CORE_PATH || process.cwd();
+    this.logDirectory = path.join(dillingerCorePath, 'logs');
 
     // Ensure log directory exists
     if (!fs.existsSync(this.logDirectory)) {

@@ -2,7 +2,7 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import { DILLINGER_ROOT } from './settings';
+import { DILLINGER_CORE_PATH } from './settings';
 
 export interface GameSessionEntry {
   id: string; // UUID of the session
@@ -38,7 +38,7 @@ export class GameSessionsService {
    * Get the path to a game's sessions.json file
    */
   private getSessionsPath(gameId: string): string {
-    return path.join(DILLINGER_ROOT, 'storage', 'metadata', gameId, 'sessions.json');
+    return path.join(DILLINGER_CORE_PATH, 'storage', 'metadata', gameId, 'sessions.json');
   }
 
   /**

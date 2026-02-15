@@ -8,7 +8,7 @@ export const GOG_TOKEN_URL = 'https://auth.gog.com/token';
 export const GOG_API_URL = 'https://embed.gog.com';
 export const GOG_CDN_URL = 'https://cdn.gog.com';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
 
 export interface GOGTokenData {
   access_token: string;
@@ -208,7 +208,7 @@ function normalizeGogImageUrl(url: string | undefined | null, sizeSuffix: number
 }
 
 export function getGOGTokensPath(): string {
-  return path.join(DILLINGER_ROOT, 'storage', 'online-sources', 'gog-tokens.json');
+  return path.join(DILLINGER_CORE_PATH, 'storage', 'online-sources', 'gog-tokens.json');
 }
 
 export async function getStoredTokens(): Promise<GOGTokenData | null> {

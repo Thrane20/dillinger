@@ -80,10 +80,10 @@ pnpm dev
 ```
 
 By default, dev mode writes data and logs under `packages/dillinger-core/data`.
-To override the dev data root, set `DILLINGER_ROOT_DEV`:
+To override the dev data root, set `DILLINGER_CORE_PATH_DEV`:
 
 ```bash
-DILLINGER_ROOT_DEV=/data pnpm dev
+DILLINGER_CORE_PATH_DEV=/data pnpm dev
 ```
 
 This runs the core application in development mode with:

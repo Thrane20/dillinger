@@ -38,7 +38,7 @@ ARG VERSION=unknown
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production \
     PORT=3010 \
-    DILLINGER_ROOT=/data
+    DILLINGER_CORE_PATH=/data
 
 # Add version label
 LABEL version="${VERSION}" \
@@ -46,8 +46,9 @@ LABEL version="${VERSION}" \
       org.opencontainers.image.title="Dillinger Core" \
       org.opencontainers.image.description="Dillinger Gaming Platform - Core Application"
 
-# Install Node.js LTS, pulseaudio-utils (for pactl), and docker CLI, clean up package cache
-RUN pacman -Sy --noconfirm --needed nodejs pulseaudio docker && \
+# Install Node.js LTS, pulseaudio-utils (for pactl), and docker CLI.
+# Use -Syu to avoid partial-upgrade conflicts on rolling Arch images.
+RUN pacman -Syu --noconfirm --needed nodejs pulseaudio docker && \
     pacman -Scc --noconfirm
 
 # Create a user/group that can access the Docker socket
@@ -74,7 +75,7 @@ RUN mkdir -p ./packages/dillinger-core/public
 COPY --from=builder /app/packages/dillinger-core/assets ./packages/dillinger-core/assets
 
 # Create data directory for persistent JSON storage
-RUN mkdir -p "$DILLINGER_ROOT"
+RUN mkdir -p "$DILLINGER_CORE_PATH"
 VOLUME ["/data"]
 
 EXPOSE 3010

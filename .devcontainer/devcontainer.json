@@ -24,9 +24,10 @@
     "--device=/dev/bus/usb"
   ],
   "mounts": [
-    "source=/mnt/linuxfast/dillinger_root,target=/data,type=bind",
+    "source=dillinger_core,target=/data,type=volume",
     "source=dillinger_roms,target=/roms,type=volume",
-    "source=dillinger_installers,target=/installers,type=volume",
+    "source=dillinger_cache,target=/cache,type=volume",
+    "source=dillinger_installed_dev,target=/installed/dev,type=volume",
     "source=dillinger-pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
@@ -55,10 +56,10 @@
     }
   },
   "postCreateCommand": "pnpm install",
-  "postStartCommand": "sudo chown -R $(id -u):$(id -g) /data /installers /home/node/.local/share/pnpm/store 2>/dev/null || true && sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
+  "postStartCommand": "sudo chown -R $(id -u):$(id -g) /data /cache /installed /home/node/.local/share/pnpm/store 2>/dev/null || true && sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
   "containerEnv": {
     "PNPM_HOME": "/home/node/.local/share/pnpm",
-    "DILLINGER_ROOT": "/data",
+    "DILLINGER_CORE_PATH": "/data",
     "PUID": "1000",
     "PGID": "1000",
     "DISPLAY": "${localEnv:DISPLAY}",

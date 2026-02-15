@@ -20,7 +20,7 @@ REST API for launching and stopping games inside the compositor.
 
 ## Persistence
 To preserve Moonlight pairing and stable server identity across sidecar rebuilds,
-mount `dillinger_root` to `/data` and keep these files in `/data/wolf`:
+mount `dillinger_core` to `/data` and keep these files in `/data/wolf`:
 
 - `key.pem` / `cert.pem` (server identity)
 - `paired_clients.json` (paired Moonlight clients)

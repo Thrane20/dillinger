@@ -27,8 +27,8 @@ export async function register() {
     // If the user hasn't approved first-run scaffolding yet, skip initialization
     // to avoid creating settings/download state before onboarding completes.
     try {
-      const { isDillingerRootInitialized } = await import('./lib/services/bootstrap');
-      const initialized = await isDillingerRootInitialized();
+      const { isDillingerCoreInitialized } = await import('./lib/services/bootstrap');
+      const initialized = await isDillingerCoreInitialized();
       if (!initialized) {
         console.log('[Instrumentation] Setup not completed yet; skipping service initialization');
         return;

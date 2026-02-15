@@ -4,17 +4,15 @@
  * where to save files based on user-configured volume preferences.
  */
 
-import path from 'path';
-import fs from 'fs/promises';
 import { JSONStorageService } from './storage';
 import type { Volume } from '@dillinger/shared';
 
 export interface VolumeDefaults {
   defaults: {
-    installers: string | null;
-    downloads: string | null;
-    installed: string | null;
-    roms: string | null;
+    installers: string;
+    downloads: string;
+    installed: string;
+    roms: string;
   };
   volumeMetadata: Record<string, {
     storageType?: 'ssd' | 'platter' | 'archive';
@@ -23,28 +21,19 @@ export interface VolumeDefaults {
 
 export type DefaultType = 'installers' | 'downloads' | 'installed' | 'roms';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const DEFAULTS_FILE = path.join(DILLINGER_ROOT, 'storage', 'volume-defaults.json');
-
 /**
  * Get the current volume defaults configuration
  */
 export async function getVolumeDefaults(): Promise<VolumeDefaults> {
-  try {
-    const content = await fs.readFile(DEFAULTS_FILE, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    // Return empty defaults if file doesn't exist
-    return {
-      defaults: {
-        installers: null,
-        downloads: null,
-        installed: null,
-        roms: null,
-      },
-      volumeMetadata: {},
-    };
-  }
+  return {
+    defaults: {
+      installers: '/cache',
+      downloads: '/cache',
+      installed: '/installed',
+      roms: '/roms',
+    },
+    volumeMetadata: {},
+  };
 }
 
 /**
@@ -72,25 +61,8 @@ export async function resolveDefaultPath(
   defaultType: DefaultType,
   fallbackPath: string
 ): Promise<string> {
-  try {
-    const defaults = await getVolumeDefaults();
-    const volumeId = defaults.defaults[defaultType];
-    
-    if (!volumeId) {
-      return fallbackPath;
-    }
-    
-    const volume = await getVolumeById(volumeId);
-    if (!volume) {
-      console.warn(`[VolumeDefaults] Volume ${volumeId} not found for ${defaultType}, using fallback`);
-      return fallbackPath;
-    }
-    
-    return volume.hostPath;
-  } catch (error) {
-    console.error(`[VolumeDefaults] Error resolving ${defaultType} path:`, error);
-    return fallbackPath;
-  }
+  const defaults = await getVolumeDefaults();
+  return defaults.defaults[defaultType] || fallbackPath;
 }
 
 /**
@@ -100,20 +72,11 @@ export async function resolveDefaultPath(
 export async function getDefaultVolume(
   defaultType: DefaultType
 ): Promise<{ volumeId: string | null; volume: Volume | null }> {
-  try {
-    const defaults = await getVolumeDefaults();
-    const volumeId = defaults.defaults[defaultType];
-    
-    if (!volumeId) {
-      return { volumeId: null, volume: null };
-    }
-    
-    const volume = await getVolumeById(volumeId);
-    return { volumeId, volume };
-  } catch (error) {
-    console.error(`[VolumeDefaults] Error getting ${defaultType} volume:`, error);
-    return { volumeId: null, volume: null };
-  }
+  const defaults = await getVolumeDefaults();
+  return {
+    volumeId: defaults.defaults[defaultType] || null,
+    volume: null,
+  };
 }
 
 /**

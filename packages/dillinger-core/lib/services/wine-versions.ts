@@ -53,8 +53,8 @@ interface WineVersionIndex {
 }
 
 // Storage paths
-export const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-export const WINE_VERSIONS_DIR = path.join(DILLINGER_ROOT, 'storage', 'wine-versions');
+export const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+export const WINE_VERSIONS_DIR = path.join(DILLINGER_CORE_PATH, 'storage', 'wine-versions');
 export const WINE_VERSIONS_INDEX = path.join(WINE_VERSIONS_DIR, 'index.json');
 
 // Cache duration: 1 hour

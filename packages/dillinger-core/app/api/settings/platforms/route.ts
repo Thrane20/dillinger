@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-const SETTINGS_FILE = path.join(DILLINGER_ROOT, 'storage', 'settings.json');
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+const SETTINGS_FILE = path.join(DILLINGER_CORE_PATH, 'storage', 'settings.json');
 
 // Platform settings type definitions
 export interface NesSettings {

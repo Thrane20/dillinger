@@ -315,7 +315,7 @@ export default function GamesPage() {
         <div className="w-full max-w-3xl bg-surface border border-border rounded-xl p-6">
           <h1 className="text-2xl font-semibold">Oh hi there… looks like you’re new here…</h1>
           <p className="mt-3 text-sm text-muted">
-            Your <span className="font-mono">dillinger_root</span> volume is configured and mounted, but it looks empty.
+            Your <span className="font-mono">dillinger_core</span> volume is configured and mounted, but it looks empty.
             When you click OK, Dillinger will scaffold the base folders and config files it needs, then start fresh.
           </p>
 
@@ -345,7 +345,7 @@ export default function GamesPage() {
             <h2 className="text-sm font-semibold text-text">Already have a Dillinger database?</h2>
             <p className="mt-2 text-sm text-muted">
               If you expected your library to show up, please double-check your volume / file mapping.
-              Dillinger expects the host data directory to be mounted as the <span className="font-mono">dillinger_root</span> volume at <span className="font-mono">/data</span> in the container.
+              Dillinger expects the host data directory to be mounted as the <span className="font-mono">dillinger_core</span> volume at <span className="font-mono">/data</span> in the container.
             </p>
             <pre className="mt-3 text-xs overflow-auto p-3 rounded-md bg-surface border border-border">
 docker volume create \\
@@ -353,9 +353,9 @@ docker volume create \\
   --opt type=none \\
   --opt device=/path/to/your/dillinger/data \\
   --opt o=bind \\
-  dillinger_root
+  dillinger_core
 
-docker run -p 3010:3010 -v dillinger_root:/data dillinger-core:latest
+docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
             </pre>
           </div>
 

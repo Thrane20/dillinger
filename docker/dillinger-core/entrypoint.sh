@@ -8,7 +8,7 @@ set -e
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 APP_USER="dillinger"
-DATA_DIR="${DILLINGER_ROOT:-/data}"
+DATA_DIR="${DILLINGER_CORE_PATH:-/data}"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Dillinger Core - Starting"

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
-const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
+const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
 
 // GET /api/settings/platforms/[platformId]/config - Get platform master configuration
 export async function GET(
@@ -14,7 +14,7 @@ export async function GET(
     
     let configPath = '';
     if (platformId === 'arcade') {
-      configPath = path.join(DILLINGER_ROOT, 'storage', 'platform-configs', 'arcade', 'retroarch.cfg');
+      configPath = path.join(DILLINGER_CORE_PATH, 'storage', 'platform-configs', 'arcade', 'retroarch.cfg');
     } else {
       return NextResponse.json(
         { success: false, message: `Configuration not supported for platform: ${platformId}` },
@@ -63,7 +63,7 @@ export async function POST(
     
     let configPath = '';
     if (platformId === 'arcade') {
-      configPath = path.join(DILLINGER_ROOT, 'storage', 'platform-configs', 'arcade', 'retroarch.cfg');
+      configPath = path.join(DILLINGER_CORE_PATH, 'storage', 'platform-configs', 'arcade', 'retroarch.cfg');
     } else {
       return NextResponse.json(
         { success: false, message: `Configuration not supported for platform: ${platformId}` },

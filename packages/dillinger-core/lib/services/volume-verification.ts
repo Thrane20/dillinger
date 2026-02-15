@@ -5,17 +5,17 @@ import Docker from 'dockerode';
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 export class VolumeVerificationService {
-  private static readonly REQUIRED_VOLUME = 'dillinger_root';
+  private static readonly REQUIRED_VOLUME = 'dillinger_core';
 
   /**
-   * Verify that the required dillinger_root volume exists and is accessible
+  * Verify that the required dillinger_core volume exists and is accessible
    * This is the foundational volume that all Dillinger JSON data sits on
    */
   static async verifyRequiredVolumes(): Promise<void> {
     console.log('🔍 Verifying required Docker volumes...');
     
     try {
-      // Check if dillinger_root volume exists
+      // Check if dillinger_core volume exists
       const volume = docker.getVolume(this.REQUIRED_VOLUME);
       const volumeInfo = await volume.inspect();
       
@@ -41,8 +41,8 @@ export class VolumeVerificationService {
         console.error('');
         console.error('💡 To fix this issue:');
         console.error('');
-        console.error('   1. Create the dillinger_root volume:');
-        console.error('      docker volume create dillinger_root');
+        console.error('   1. Create the dillinger_core volume:');
+        console.error('      docker volume create dillinger_core');
         console.error('');
         console.error('   2. Or create as a bind mount to a host directory:');
         console.error('      docker volume create \\');
@@ -50,7 +50,7 @@ export class VolumeVerificationService {
         console.error('        --opt type=none \\');
         console.error('        --opt device=/path/to/your/dillinger/data \\');
         console.error('        --opt o=bind \\');
-        console.error('        dillinger_root');
+        console.error('        dillinger_core');
         console.error('');
         console.error('   3. For development, you can use:');
         console.error('      docker volume create \\');
@@ -58,22 +58,22 @@ export class VolumeVerificationService {
         console.error('        --opt type=none \\');
         console.error('        --opt device=$(pwd)/packages/dillinger-core/data \\');
         console.error('        --opt o=bind \\');
-        console.error('        dillinger_root');
+        console.error('        dillinger_core');
         console.error('');
         
-        throw new Error(`You must have a volume mounted "dillinger_root" for the dillinger core to run`);
+        throw new Error(`You must have a volume mounted "dillinger_core" for the dillinger core to run`);
       }
       
       // Re-throw other Docker errors (connection issues, etc.)
-      throw new Error(`Failed to verify dillinger_root volume: ${error.message}`);
+      throw new Error(`Failed to verify dillinger_core volume: ${error.message}`);
     }
   }
 
   /**
-   * Get the mount point of the dillinger_root volume
-   * This can be used to ensure DILLINGER_ROOT environment variable points to the right place
+  * Get the mount point of the dillinger_core volume
+    * This can be used to ensure DILLINGER_CORE_PATH environment variable points to the right place
    */
-  static async getDillingerRootPath(): Promise<string> {
+    static async getDillingerCorePath(): Promise<string> {
     try {
       const volume = docker.getVolume(this.REQUIRED_VOLUME);
       const volumeInfo = await volume.inspect();
@@ -87,15 +87,15 @@ export class VolumeVerificationService {
       return volumeInfo.Mountpoint;
       
     } catch (error) {
-      throw new Error(`Cannot determine dillinger_root path: ${error}`);
+      throw new Error(`Cannot determine dillinger_core path: ${error}`);
     }
   }
 
   /**
-   * Create the dillinger_root volume if it doesn't exist (development helper)
+  * Create the dillinger_core volume if it doesn't exist (development helper)
    * This is used in development mode to auto-create the volume
    */
-  static async createDillingerRootVolume(hostPath?: string): Promise<void> {
+  static async createDillingerCoreVolume(hostPath?: string): Promise<void> {
     console.log(`🏗️  Creating ${this.REQUIRED_VOLUME} volume...`);
     
     try {

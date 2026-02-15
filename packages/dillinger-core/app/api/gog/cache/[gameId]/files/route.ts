@@ -147,12 +147,12 @@ export async function GET(
     await scanForInstallers(defaultDownloadsPath);
     
     // Check the "with_game" location - installers stored alongside game metadata
-    const dillingerRoot = process.env.DILLINGER_ROOT || '/data';
-    const gameInstallerPath = path.join(dillingerRoot, 'storage', 'games', gameId, 'installers');
+    const dillingerCorePath = process.env.DILLINGER_CORE_PATH || '/data';
+    const gameInstallerPath = path.join(dillingerCorePath, 'storage', 'games', gameId, 'installers');
     await scanForInstallers(gameInstallerPath);
     
     // Also check the legacy installer_cache path
-    const installerCachePath = path.join(dillingerRoot, 'storage', 'installer_cache');
+    const installerCachePath = path.join(dillingerCorePath, 'storage', 'installer_cache');
     await scanForInstallers(installerCachePath);
     
     // Also check any configured downloads volume

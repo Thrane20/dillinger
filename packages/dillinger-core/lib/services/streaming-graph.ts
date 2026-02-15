@@ -6,9 +6,9 @@ import { parseVersionedData, serializeVersionedData } from '@dillinger/shared';
 import type { StreamingGraphStore } from '@dillinger/shared';
 import { DEFAULT_STREAMING_GRAPH_STORE } from '@dillinger/shared';
 
-// Use the same DILLINGER_ROOT logic as settings/storage
-export const DILLINGER_ROOT = process.env.DILLINGER_ROOT || '/data';
-export const STREAMING_GRAPH_PATH = path.join(DILLINGER_ROOT, 'storage', 'streaming-graph.json');
+// Use the same DILLINGER_CORE_PATH logic as settings/storage
+export const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+export const STREAMING_GRAPH_PATH = path.join(DILLINGER_CORE_PATH, 'storage', 'streaming-graph.json');
 
 export class StreamingGraphService {
   private static instance: StreamingGraphService;

@@ -4,7 +4,7 @@ export const DEFAULTS = {
   port: 3010,
   imageName: 'ghcr.io/thrane20/dillinger/core',
   autoUpdate: true,
-  volumeName: 'dillinger_root',
+  volumeName: 'dillinger_core',
   containerName: 'dillinger',
 } as const;
 

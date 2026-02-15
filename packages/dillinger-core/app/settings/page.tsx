@@ -20,6 +20,7 @@ import 'reactflow/dist/style.css';
 import {
   DEFAULT_STREAMING_GRAPH_STORE,
 } from '@dillinger/shared';
+import VolumesSettings from '@/app/components/VolumesSettings';
 import type {
   GetScraperSettingsResponse,
   UpdateScraperSettingsRequest,
@@ -39,15 +40,14 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 // Settings sections for navigation
 const SETTINGS_SECTIONS = [
-  { id: 'igdb', label: 'IGDB', icon: '🎮' },
-  { id: 'scrapers', label: 'Other Scrapers', icon: '🔍' },
-  { id: 'ai', label: 'AI Assistant', icon: '🤖' },
-  { id: 'audio', label: 'Audio', icon: '🔊' },
-  { id: 'platforms', label: 'Platforms', icon: '🎯' },
-  { id: 'retroarch', label: 'RetroArch', icon: '🕹️' },
   { id: 'docker', label: 'Docker', icon: '🐳' },
+  { id: 'volumes', label: 'Docker Volumes', icon: '💾' },
+  { id: 'platforms', label: 'Platforms', icon: '🎯' },
+  { id: 'scrapers', label: 'Scrapers', icon: '🔍' },
   { id: 'gpu', label: 'GPU', icon: '💻' },
+  { id: 'audio', label: 'Audio', icon: '🔊' },
   { id: 'streaming', label: 'Streaming', icon: '📺' },
+  { id: 'ai', label: 'AI Assistant', icon: '🤖' },
   { id: 'downloads', label: 'Downloads', icon: '📥' },
   { id: 'maintenance', label: 'Maintenance', icon: '🔧' },
   { id: 'ui', label: 'UI Settings', icon: '🎨' },
@@ -166,7 +166,7 @@ export default function SettingsPage() {
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Active section for sidebar highlight
-  const [activeSection, setActiveSection] = useState('igdb');
+  const [activeSection, setActiveSection] = useState('docker');
 
   const [igdbClientId, setIgdbClientId] = useState('');
   const [igdbClientSecret, setIgdbClientSecret] = useState('');
@@ -181,11 +181,6 @@ export default function SettingsPage() {
   // GPU settings
   const [gpuVendor, setGpuVendor] = useState<'auto' | 'amd' | 'nvidia'>('auto');
 
-  // RetroArch settings (MAME defaults)
-  const [retroarchMameAspect, setRetroarchMameAspect] = useState<'4:3' | 'auto'>('auto');
-  const [retroarchMameIntegerScale, setRetroarchMameIntegerScale] = useState(true);
-  const [retroarchMameBorderlessFullscreen, setRetroarchMameBorderlessFullscreen] = useState(true);
-  
   // Download settings
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
   const [installerCacheMode, setInstallerCacheMode] = useState<'with_game' | 'custom_volume'>('with_game');
@@ -330,7 +325,6 @@ export default function SettingsPage() {
     loadAudioSettings();
     loadDockerSettings();
     loadGpuSettings();
-    loadRetroarchSettings();
     loadDownloadSettings();
     loadJoystickSettings();
     loadAiSettings();
@@ -448,23 +442,6 @@ export default function SettingsPage() {
       }
     } catch (error) {
       console.error('Failed to load GPU settings:', error);
-    }
-  };
-
-  const loadRetroarchSettings = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/settings/retroarch`);
-      if (!response.ok) {
-        throw new Error('Failed to load RetroArch settings');
-      }
-      const data = await response.json();
-      const mame = data.settings?.mame || {};
-      const aspect = mame.aspect;
-      setRetroarchMameAspect(aspect === '4:3' ? '4:3' : 'auto');
-      setRetroarchMameIntegerScale(mame.integerScale !== false);
-      setRetroarchMameBorderlessFullscreen(mame.borderlessFullscreen !== false);
-    } catch (error) {
-      console.error('Failed to load RetroArch settings:', error);
     }
   };
 
@@ -1674,38 +1651,6 @@ export default function SettingsPage() {
     }
   };
 
-  const saveRetroarchSettings = async () => {
-    try {
-      setSaving(true);
-      setMessage(null);
-
-      const response = await fetch(`${API_BASE_URL}/api/settings/retroarch`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          mame: {
-            aspect: retroarchMameAspect,
-            integerScale: retroarchMameIntegerScale,
-            borderlessFullscreen: retroarchMameBorderlessFullscreen,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save RetroArch settings');
-      }
-
-      showSaveIndicator('retroarch', 'RetroArch settings saved!');
-    } catch (error) {
-      console.error('Failed to save RetroArch settings:', error);
-      setMessage({ type: 'error', text: 'Failed to save RetroArch settings' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const saveDownloadSettings = async () => {
     try {
       setSaving(true);
@@ -1937,7 +1882,7 @@ export default function SettingsPage() {
 
       {/* Main Content Area */}
       <div className="flex-1 h-full overflow-y-auto pl-6">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+        <div className="p-1">
           {message && (
             <div
               className={`mb-6 p-4 rounded-lg ${
@@ -1951,16 +1896,16 @@ export default function SettingsPage() {
           )}
 
           {/* Single column layout for settings sections */}
-          <div className="space-y-6">
+          <div className="flex flex-col gap-6">
             {/* IGDB Settings */}
             <div 
-              id="igdb" 
-              ref={(el) => { sectionRefs.current['igdb'] = el; }}
-              className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+              id="scrapers" 
+              ref={(el) => { sectionRefs.current['scrapers'] = el; }}
+              className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[4]"
             >
             <SaveIndicator show={!!savedSections['igdb']} message={savedSections['igdb'] || ''} />
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">🎮 IGDB</h2>
+              <h2 className="text-xl font-semibold">🔍 Scrapers</h2>
               <span
                 className={`px-3 py-1 rounded-full text-sm ${
                   (settings?.settings as any)?.igdb?.configured
@@ -2029,26 +1974,29 @@ export default function SettingsPage() {
               {saving ? 'Saving...' : 'Save IGDB Settings'}
             </button>
           </form>
+
+          <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 className="text-lg font-medium mb-2">Other scrapers</h3>
+            <p className="text-gray-600 dark:text-gray-400">
+              Additional scraper integrations (SteamGridDB, Giant Bomb, etc.) will be available in future updates.
+            </p>
+          </div>
           </div>
 
-          {/* Future scrapers can be added here */}
-          <div 
-            id="scrapers" 
-            ref={(el) => { sectionRefs.current['scrapers'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+          <div
+            id="volumes"
+            ref={(el) => { sectionRefs.current['volumes'] = el; }}
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[2]"
           >
-            <h2 className="text-xl font-semibold mb-4">🔍 Other Scrapers</h2>
-            <p className="text-gray-600 dark:text-gray-400">
-              Additional scraper integrations (SteamGridDB, Giant Bomb, etc.) will be available in
-              future updates.
-            </p>
+            <h2 className="text-xl font-semibold mb-4">💾 Docker Volumes</h2>
+            <VolumesSettings />
           </div>
 
           {/* AI Assistant Settings */}
           <div 
             id="ai" 
             ref={(el) => { sectionRefs.current['ai'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[8]"
           >
             <SaveIndicator show={!!savedSections['ai']} message={savedSections['ai'] || ''} />
             <div className="flex items-center justify-between mb-4">
@@ -2125,7 +2073,7 @@ export default function SettingsPage() {
           <div 
             id="audio" 
             ref={(el) => { sectionRefs.current['audio'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[6]"
           >
             <SaveIndicator show={!!savedSections['audio']} message={savedSections['audio'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🔊 Audio Settings</h2>
@@ -2200,7 +2148,7 @@ export default function SettingsPage() {
           <div 
             id="platforms" 
             ref={(el) => { sectionRefs.current['platforms'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[3]"
           >
             <SaveIndicator show={!!savedSections['platforms']} message={savedSections['platforms'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🎯 Configure Platforms</h2>
@@ -2276,7 +2224,7 @@ export default function SettingsPage() {
           <div 
             id="docker" 
             ref={(el) => { sectionRefs.current['docker'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[1]"
           >
             <SaveIndicator show={!!savedSections['docker']} message={savedSections['docker'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🐳 Docker Settings</h2>
@@ -2319,7 +2267,7 @@ export default function SettingsPage() {
           <div 
             id="gpu" 
             ref={(el) => { sectionRefs.current['gpu'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[5]"
           >
             <SaveIndicator show={!!savedSections['gpu']} message={savedSections['gpu'] || ''} />
             <h2 className="text-xl font-semibold mb-4">💻 GPU Settings</h2>
@@ -2357,89 +2305,11 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* RetroArch Settings */}
-          <div
-            id="retroarch"
-            ref={(el) => { sectionRefs.current['retroarch'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
-          >
-            <SaveIndicator show={!!savedSections['retroarch']} message={savedSections['retroarch'] || ''} />
-            <h2 className="text-xl font-semibold mb-4">🕹️ RetroArch Settings</h2>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Defaults for RetroArch MAME games. You can override these per game in the editor.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="retroarchMameAspect" className="block text-sm font-medium mb-2">
-                  MAME Aspect Ratio
-                </label>
-                <select
-                  id="retroarchMameAspect"
-                  value={retroarchMameAspect}
-                  onChange={(e) => setRetroarchMameAspect(e.target.value as '4:3' | 'auto')}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="4:3">4:3 (Arcade)</option>
-                  <option value="auto">Auto (Core Default)</option>
-                </select>
-              </div>
-
-              <div className="flex items-start">
-                <div className="flex items-center h-5">
-                  <input
-                    id="retroarchMameIntegerScale"
-                    type="checkbox"
-                    checked={retroarchMameIntegerScale}
-                    onChange={(e) => setRetroarchMameIntegerScale(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                  />
-                </div>
-                <div className="ml-3 text-sm">
-                  <label htmlFor="retroarchMameIntegerScale" className="font-medium text-gray-900 dark:text-gray-100">
-                    Integer Scale
-                  </label>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Keeps pixels crisp with integer scaling in MAME.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start">
-                <div className="flex items-center h-5">
-                  <input
-                    id="retroarchMameBorderlessFullscreen"
-                    type="checkbox"
-                    checked={retroarchMameBorderlessFullscreen}
-                    onChange={(e) => setRetroarchMameBorderlessFullscreen(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                  />
-                </div>
-                <div className="ml-3 text-sm">
-                  <label htmlFor="retroarchMameBorderlessFullscreen" className="font-medium text-gray-900 dark:text-gray-100">
-                    Borderless Fullscreen
-                  </label>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Uses windowed fullscreen to avoid mode switches.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={saveRetroarchSettings}
-                disabled={saving}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {saving ? 'Saving...' : 'Save RetroArch Settings'}
-              </button>
-            </div>
-          </div>
-
           {/* Streaming Settings */}
           <div 
             id="streaming" 
             ref={(el) => { sectionRefs.current['streaming'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[7]"
           >
             <SaveIndicator show={!!savedSections['streaming']} message={savedSections['streaming'] || ''} />
             <h2 className="text-xl font-semibold mb-4">📺 Streaming Settings</h2>
@@ -3507,7 +3377,7 @@ export default function SettingsPage() {
           <div 
             id="downloads" 
             ref={(el) => { sectionRefs.current['downloads'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[9]"
           >
             <SaveIndicator show={!!savedSections['downloads']} message={savedSections['downloads'] || ''} />
             <h2 className="text-xl font-semibold mb-4">📥 Download Settings</h2>
@@ -3556,7 +3426,7 @@ export default function SettingsPage() {
                     <div className="flex-1">
                       <div className="font-medium text-gray-900 dark:text-gray-100">Store with game data</div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Installers are stored in <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">dillinger_root/storage/games/&lt;game-id&gt;/installers/</code>
+                        Installers are stored in <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">dillinger_core/storage/games/&lt;game-id&gt;/installers/</code>
                       </div>
                       <div className="text-xs text-green-600 dark:text-green-400 mt-1">
                         ✓ Recommended - Automatically found during installation
@@ -3601,7 +3471,7 @@ export default function SettingsPage() {
                       </select>
                       {availableVolumes.length === 0 && (
                         <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                          No volumes configured. Use the Volume Manager to add volumes first.
+                          No volumes configured. Use the Docker Volumes section to configure mounts and metadata first.
                         </p>
                       )}
                     </div>
@@ -3611,8 +3481,8 @@ export default function SettingsPage() {
 
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  💡 <strong>Tip:</strong> Default install locations for games are configured per-volume.
-                  Use the Volume Manager in the left sidebar and click the pencil icon to configure a volume as the default for each purpose.
+                  💡 <strong>Tip:</strong> Default install/download paths follow first-class volume conventions.
+                  Use the Docker Volumes section to verify and tag storage types for placement workflows.
                 </p>
               </div>
 
@@ -3630,7 +3500,7 @@ export default function SettingsPage() {
           <div 
             id="maintenance" 
             ref={(el) => { sectionRefs.current['maintenance'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[10]"
           >
             <h2 className="text-xl font-semibold mb-4">🔧 Maintenance</h2>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
@@ -3661,7 +3531,7 @@ export default function SettingsPage() {
               </button>
 
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                ⚠️ System volumes (dillinger_root, dillinger_installers) are protected and will not be removed.
+                ⚠️ System volumes (dillinger_core, dillinger_cache) are protected and will not be removed.
               </p>
             </div>
           </div>
@@ -3670,7 +3540,7 @@ export default function SettingsPage() {
           <div 
             id="ui" 
             ref={(el) => { sectionRefs.current['ui'] = el; }}
-            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[11]"
           >
             <SaveIndicator show={!!savedSections['ui']} message={savedSections['ui'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🎨 UI Settings</h2>
@@ -3717,7 +3587,7 @@ export default function SettingsPage() {
           <div 
             id="danger" 
             ref={(el) => { sectionRefs.current['danger'] = el; }}
-            className="relative p-6 rounded-lg border-2 border-red-500"
+            className="relative p-6 rounded-lg border-2 border-red-500 bg-white dark:bg-gray-800 shadow-md order-[12]"
           >
             <h2 className="text-xl font-semibold mb-4 text-red-600 dark:text-red-400">⚠️ Danger Zone</h2>
             
