@@ -5,6 +5,7 @@ import type { Game, Platform } from '@dillinger/shared';
 import { JSONStorageService } from './storage';
 import { SettingsService } from './settings';
 import { logger } from './logger';
+import { buildLaunchEnvironmentVariables } from './launch-env';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -189,6 +190,44 @@ export class DockerService {
     }
 
     return binds;
+  }
+
+  private normalizeWineRegistrySettings(settings: Array<{
+    path: string;
+    name: string;
+    type?: string;
+    value: string;
+  }>): Array<{ path: string; name: string; type: string; value: string }> {
+    return (settings || []).map((entry) => {
+      const type = (entry.type || 'REG_SZ').toUpperCase();
+      let value = String(entry.value ?? '').trim();
+
+      if (type === 'REG_BINARY') {
+        if (/^0x[0-9a-f]+$/i.test(value)) {
+          const hex = value.slice(2);
+          const bigintValue = BigInt(`0x${hex || '0'}`);
+          const bytesNeeded = Math.max(4, Math.ceil(Math.max(hex.length, 1) / 2));
+          const paddedHex = bigintValue.toString(16).padStart(bytesNeeded * 2, '0');
+          const bytes = paddedHex.match(/../g) || ['00'];
+          value = bytes.reverse().join('');
+        } else {
+          value = value.replace(/[^0-9a-f]/gi, '');
+          if (value.length % 2 === 1) {
+            value = `0${value}`;
+          }
+          if (!value) {
+            value = '00';
+          }
+        }
+      }
+
+      return {
+        path: entry.path,
+        name: entry.name,
+        type,
+        value,
+      };
+    });
   }
 
   /**
@@ -391,6 +430,42 @@ export class DockerService {
   }
 
   /**
+   * Run a command inside a temporary container with a host bind mounted.
+   */
+  private async runInBindPath(hostPath: string, mountPoint: string, command: string): Promise<{ exitCode: number; output: string }> {
+    const container = await docker.createContainer({
+      Image: 'alpine:3.20',
+      Cmd: ['sh', '-lc', command],
+      Tty: true,
+      HostConfig: {
+        AutoRemove: false,
+        Binds: [`${hostPath}:${mountPoint}:ro`],
+      },
+    } as any);
+
+    await container.start();
+    const wait = await container.wait();
+
+    let output = '';
+    try {
+      const logsBuffer = await container.logs({
+        stdout: true,
+        stderr: true,
+        follow: false,
+      });
+      output = logsBuffer.toString('utf8');
+    } finally {
+      try {
+        await container.remove({ force: true });
+      } catch {
+        // ignore
+      }
+    }
+
+    return { exitCode: wait.StatusCode ?? 1, output };
+  }
+
+  /**
    * Find a file path with case-insensitive matching within a volume.
    * Returns the actual path if found (with correct case), or null if not found.
    * 
@@ -472,6 +547,179 @@ export class DockerService {
       logger.warn(`Case-insensitive path check failed for ${relativePath}:`, error);
       return { exists: false, actualPath: null };
     }
+  }
+
+  /**
+   * Find the first executable candidate by basename within a mounted Wine prefix volume.
+   * Returns a path relative to the volume root when found.
+   */
+  private async findExecutableByBasenameInVolume(
+    dockerVolumeName: string,
+    executableBasename: string
+  ): Promise<string | null> {
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const command = `find /mnt/vol/drive_c -type f -iname ${shQuote(executableBasename)} -print -quit 2>/dev/null`;
+    const { exitCode, output } = await this.runInVolume(dockerVolumeName, '/mnt/vol', command);
+    if (exitCode !== 0) {
+      return null;
+    }
+
+    const foundPath = output.trim().split('\n')[0]?.trim();
+    if (!foundPath) {
+      return null;
+    }
+
+    if (foundPath.startsWith('/mnt/vol/')) {
+      return foundPath.substring('/mnt/vol/'.length);
+    }
+    if (foundPath.startsWith('/mnt/vol')) {
+      return foundPath.substring('/mnt/vol'.length).replace(/^\/+/, '');
+    }
+    return foundPath.replace(/^\/+/, '');
+  }
+
+  /**
+   * List a few .exe files near the requested directory to improve error messages.
+   */
+  private async listNearbyExecutablesInVolume(
+    dockerVolumeName: string,
+    expectedRelativeExecutablePath: string
+  ): Promise<string[]> {
+    const expectedDir = path.posix.dirname(expectedRelativeExecutablePath);
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const command = [
+      `if [ -d /mnt/vol/${shQuote(expectedDir)} ]; then`,
+      `  find /mnt/vol/${shQuote(expectedDir)} -maxdepth 2 -type f \\(`,
+      `    -iname '*.exe' -o -iname '*.bat' -o -iname '*.com' \\) -print | head -10;`,
+      `else`,
+      `  find /mnt/vol/drive_c -maxdepth 5 -type f -iname '*.exe' -print | head -10;`,
+      `fi`,
+    ].join(' ');
+
+    const { output } = await this.runInVolume(dockerVolumeName, '/mnt/vol', command);
+    return output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => (line.startsWith('/mnt/vol/') ? line.substring('/mnt/vol/'.length) : line));
+  }
+
+  private async isRegularFileInVolume(
+    dockerVolumeName: string,
+    relativePath: string
+  ): Promise<boolean> {
+    const clean = relativePath.replace(/^\/+/, '');
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const { exitCode } = await this.runInVolume(
+      dockerVolumeName,
+      '/mnt/vol',
+      `[ -f /mnt/vol/${shQuote(clean)} ]`
+    );
+    return exitCode === 0;
+  }
+
+  private async findExecutableInsideDirectoryInVolume(
+    dockerVolumeName: string,
+    directoryRelativePath: string
+  ): Promise<string | null> {
+    const clean = directoryRelativePath.replace(/^\/+/, '');
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const command = `if [ -d /mnt/vol/${shQuote(clean)} ]; then find /mnt/vol/${shQuote(clean)} -maxdepth 2 -type f -iname '*.exe' -print -quit 2>/dev/null; fi`;
+    const { exitCode, output } = await this.runInVolume(dockerVolumeName, '/mnt/vol', command);
+    if (exitCode !== 0) {
+      return null;
+    }
+    const found = output.trim().split('\n')[0]?.trim();
+    if (!found) {
+      return null;
+    }
+    return found.startsWith('/mnt/vol/') ? found.substring('/mnt/vol/'.length) : found.replace(/^\/+/, '');
+  }
+
+  /**
+   * Find executable by basename in a directly bind-mounted Wine prefix.
+   */
+  private async findExecutableByBasenameInBindPath(
+    hostPrefixPath: string,
+    executableBasename: string
+  ): Promise<string | null> {
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const command = `find /mnt/vol/drive_c -type f -iname ${shQuote(executableBasename)} -print -quit 2>/dev/null`;
+    const { exitCode, output } = await this.runInBindPath(hostPrefixPath, '/mnt/vol', command);
+    if (exitCode !== 0) {
+      return null;
+    }
+
+    const foundPath = output.trim().split('\n')[0]?.trim();
+    if (!foundPath) {
+      return null;
+    }
+
+    if (foundPath.startsWith('/mnt/vol/')) {
+      return foundPath.substring('/mnt/vol/'.length);
+    }
+    if (foundPath.startsWith('/mnt/vol')) {
+      return foundPath.substring('/mnt/vol'.length).replace(/^\/+/, '');
+    }
+    return foundPath.replace(/^\/+/, '');
+  }
+
+  /**
+   * List nearby executable candidates in a directly bind-mounted Wine prefix.
+   */
+  private async listNearbyExecutablesInBindPath(
+    hostPrefixPath: string,
+    expectedRelativeExecutablePath: string
+  ): Promise<string[]> {
+    const expectedDir = path.posix.dirname(expectedRelativeExecutablePath);
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const command = [
+      `if [ -d /mnt/vol/${shQuote(expectedDir)} ]; then`,
+      `  find /mnt/vol/${shQuote(expectedDir)} -maxdepth 2 -type f \\(`,
+      `    -iname '*.exe' -o -iname '*.bat' -o -iname '*.com' \\) -print | head -10;`,
+      `else`,
+      `  find /mnt/vol/drive_c -maxdepth 5 -type f -iname '*.exe' -print | head -10;`,
+      `fi`,
+    ].join(' ');
+
+    const { output } = await this.runInBindPath(hostPrefixPath, '/mnt/vol', command);
+    return output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => (line.startsWith('/mnt/vol/') ? line.substring('/mnt/vol/'.length) : line));
+  }
+
+  private async isRegularFileInBindPath(
+    hostPrefixPath: string,
+    relativePath: string
+  ): Promise<boolean> {
+    const clean = relativePath.replace(/^\/+/, '');
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const { exitCode } = await this.runInBindPath(
+      hostPrefixPath,
+      '/mnt/vol',
+      `[ -f /mnt/vol/${shQuote(clean)} ]`
+    );
+    return exitCode === 0;
+  }
+
+  private async findExecutableInsideDirectoryInBindPath(
+    hostPrefixPath: string,
+    directoryRelativePath: string
+  ): Promise<string | null> {
+    const clean = directoryRelativePath.replace(/^\/+/, '');
+    const shQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+    const command = `if [ -d /mnt/vol/${shQuote(clean)} ]; then find /mnt/vol/${shQuote(clean)} -maxdepth 2 -type f -iname '*.exe' -print -quit 2>/dev/null; fi`;
+    const { exitCode, output } = await this.runInBindPath(hostPrefixPath, '/mnt/vol', command);
+    if (exitCode !== 0) {
+      return null;
+    }
+    const found = output.trim().split('\n')[0]?.trim();
+    if (!found) {
+      return null;
+    }
+    return found.startsWith('/mnt/vol/') ? found.substring('/mnt/vol/'.length) : found.replace(/^\/+/, '');
   }
 
   /**
@@ -1301,12 +1549,7 @@ export class DockerService {
     }
 
     // Prepare environment variables
-    const env = [
-      `GAME_ID=${game.id}`,
-      `SESSION_ID=${sessionId}`,
-      `SAVES_PATH=/data/saves/${game.id}`, // Game-specific saves directory in dillinger_core
-      ...Object.entries(environment).map(([key, value]) => `${key}=${value}`)
-    ];
+    const env = buildLaunchEnvironmentVariables(game.id, sessionId, environment);
 
     // Apply streaming graph preset selection
     if (isStreamingMode) {
@@ -1348,7 +1591,12 @@ export class DockerService {
         joystickPlatform = 'arcade';
       } else if (platformType === 'console' || ['nes', 'snes', 'genesis', 'psx', 'n64'].includes(game.platformId || '')) {
         joystickPlatform = 'console';
-      } else if (platformType === 'computer' || ['c64', 'amiga', 'dos', 'pc'].includes(game.platformId || '')) {
+      } else if (
+        platformType === 'computer' ||
+        platformType === 'wine' ||
+        (game.platformId || '').includes('wine') ||
+        ['c64', 'amiga', 'dos', 'pc'].includes(game.platformId || '')
+      ) {
         joystickPlatform = 'computer';
       }
 
@@ -1458,10 +1706,16 @@ export class DockerService {
     // Add custom registry settings
     if (wineConfig?.registrySettings && wineConfig.registrySettings.length > 0) {
       // Pass as JSON string for the entrypoint to parse
-      const registryJson = JSON.stringify(wineConfig.registrySettings);
+      const normalizedRegistrySettings = this.normalizeWineRegistrySettings(wineConfig.registrySettings as Array<{
+        path: string;
+        name: string;
+        type?: string;
+        value: string;
+      }>);
+      const registryJson = JSON.stringify(normalizedRegistrySettings);
       env.push(`WINE_REGISTRY_SETTINGS=${registryJson}`);
-      logger.info(`  Custom registry settings: ${wineConfig.registrySettings.length} entries`);
-      for (const setting of wineConfig.registrySettings) {
+      logger.info(`  Custom registry settings: ${normalizedRegistrySettings.length} entries`);
+      for (const setting of normalizedRegistrySettings) {
         logger.info(`    ${setting.path}\\${setting.name} = ${setting.value} (${setting.type})`);
       }
     }
@@ -1584,9 +1838,11 @@ export class DockerService {
       // Users should enable gamescope for fullscreen support instead
       
       // Add xrandr resolution setting if requested
-      if (useXrandr) {
+      if (useXrandr && !isStreamingMode) {
         env.push(`XRANDR_MODE=${xrandrMode}`);
         logger.info(`  xrandr mode will be set to: ${xrandrMode}`);
+      } else if (useXrandr && isStreamingMode) {
+        logger.warn('  ⚠ xrandr is ignored in streaming mode (sidecar display path)');
       }
       
       logger.info(`  WINEDEBUG=${wineDebug}`);
@@ -1603,9 +1859,11 @@ export class DockerService {
       }
     }
 
+    const useXrandrLaunch = Boolean(game.settings?.launch?.useXrandr);
     const preferX11ForVice = !isStreamingMode &&
       (Boolean(game.platformId && viceEmulators[game.platformId]) ||
-        Boolean(platform.configuration.containerImage?.includes('runner-vice')));
+        Boolean(platform.configuration.containerImage?.includes('runner-vice')) ||
+        useXrandrLaunch);
 
     // Get display forwarding configuration
     const displayConfig = isStreamingMode
@@ -1619,6 +1877,7 @@ export class DockerService {
     // Wine prefix == installation directory (contains drive_c/)
     const gameIdentifier = game.slug || game.id;
     let winePrefixPath: string | null = null;
+    let winePrefixHostPath: string | null = null;
     let winePrefixVolume: { name: string; dockerVolumeName: string; hostPath: string } | null = null;
     let emulatorHomePath: string | null = null;
     
@@ -1649,6 +1908,10 @@ export class DockerService {
           logger.warn(`  ⚠ Install path not on a configured volume: ${configuredInstallPath}`);
           logger.warn(`    Will attempt direct bind mount`);
           winePrefixPath = configuredInstallPath;
+          winePrefixHostPath = this.getHostPath(configuredInstallPath);
+          if (winePrefixHostPath !== configuredInstallPath) {
+            logger.info(`    Resolved host bind path: ${winePrefixHostPath}`);
+          }
         }
       } else {
         logger.warn(`  ⚠ No install path configured for Wine game: ${gameIdentifier}`);
@@ -1793,19 +2056,26 @@ export class DockerService {
         }
       } else {
         // Direct bind mount (path not on a configured volume)
-        binds.push(`${winePrefixPath}:/wineprefix:rw`);
+        const bindSource = winePrefixHostPath || winePrefixPath;
+        const containerPrefixPath = winePrefixPath;
+        binds.push(`${bindSource}:${containerPrefixPath}:rw`);
         
-        // Update WINEPREFIX env var
+        // Update WINEPREFIX and GAME_EXECUTABLE env vars to the installed path mapping
         for (let i = 0; i < env.length; i++) {
           const entry = env[i];
           if (!entry) continue;
 
           if (entry.startsWith('WINEPREFIX=')) {
-            env[i] = `WINEPREFIX=/wineprefix`;
+            env[i] = `WINEPREFIX=${containerPrefixPath}`;
+            continue;
+          }
+          if (entry.startsWith('GAME_EXECUTABLE=/wineprefix/')) {
+            const rel = entry.substring('GAME_EXECUTABLE=/wineprefix'.length);
+            env[i] = `GAME_EXECUTABLE=${containerPrefixPath}${rel}`;
           }
         }
         
-        logger.info(`  Direct bind mount: ${winePrefixPath} -> /wineprefix`);
+        logger.info(`  Direct bind mount: ${bindSource} -> ${containerPrefixPath}`);
       }
 
       // Preflight: ensure the target executable exists within the selected prefix.
@@ -1823,19 +2093,142 @@ export class DockerService {
               winePrefixVolume.dockerVolumeName,
               relPath
             );
+            let discoveredFromDirectory = false;
+            const resolvedRelativePath = actualPath || relPath;
+            const regularFileExists = exists
+              ? await this.isRegularFileInVolume(winePrefixVolume.dockerVolumeName, resolvedRelativePath)
+              : false;
             
-            if (!exists) {
-              logger.error(`  ✗ Executable not found in Wine prefix:`);
-              logger.error(`    GAME_EXECUTABLE: ${gameExecutable}`);
-              logger.error(`    Host path: ${winePrefixPath}`);
-              throw new Error('Executable not found in Wine prefix (prefix is likely wrong or install is incomplete)');
+            if (!exists || !regularFileExists) {
+              const dirDiscoveredRelativePath = await this.findExecutableInsideDirectoryInVolume(
+                winePrefixVolume.dockerVolumeName,
+                resolvedRelativePath
+              );
+              if (dirDiscoveredRelativePath) {
+                const discoveredPath = `/mnt/game_volume/${dirDiscoveredRelativePath}`;
+                logger.warn(`  ⚠ GAME_EXECUTABLE pointed to a directory/missing path; using discovered exe:`);
+                logger.warn(`    Requested: ${gameExecutable}`);
+                logger.warn(`    Discovered: ${discoveredPath}`);
+                env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+                discoveredFromDirectory = true;
+              }
+
+              if (!discoveredFromDirectory) {
+                const basename = path.posix.basename(relPath);
+                const discoveredRelativePath = await this.findExecutableByBasenameInVolume(
+                  winePrefixVolume.dockerVolumeName,
+                  basename
+                );
+
+                if (discoveredRelativePath) {
+                  const discoveredPath = `/mnt/game_volume/${discoveredRelativePath}`;
+                  logger.warn(`  ⚠ Executable missing at configured path, but discovered by basename:`);
+                  logger.warn(`    Requested: ${gameExecutable}`);
+                  logger.warn(`    Discovered: ${discoveredPath}`);
+                  env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+                } else {
+                  const nearbyExecutables = await this.listNearbyExecutablesInVolume(
+                    winePrefixVolume.dockerVolumeName,
+                    relPath
+                  );
+
+                  logger.error(`  ✗ Executable not found in Wine prefix:`);
+                  logger.error(`    GAME_EXECUTABLE: ${gameExecutable}`);
+                  logger.error(`    Host path: ${winePrefixPath}`);
+                  if (nearbyExecutables.length > 0) {
+                    logger.error(`    Nearby executable candidates:`);
+                    for (const candidate of nearbyExecutables.slice(0, 5)) {
+                      logger.error(`      - ${candidate}`);
+                    }
+                  }
+
+                  const hints = nearbyExecutables.length > 0
+                    ? ` Candidates: ${nearbyExecutables.slice(0, 3).join(', ')}`
+                    : '';
+                  throw new Error(
+                    `Wine launch preflight failed: configured executable does not exist in prefix. ` +
+                    `Expected '${gameExecutable}' under install path '${winePrefixPath}'.${hints} ` +
+                    `Verify the game's launch command path and installation directory.`
+                  );
+                }
+              }
             }
-            
+
             // If the actual path differs from requested (case mismatch), update the env
-            if (actualPath && actualPath !== relPath) {
+            if (!discoveredFromDirectory && actualPath && actualPath !== relPath) {
               const correctedPath = `/mnt/game_volume/${actualPath}`;
               logger.info(`  ℹ️ Corrected executable path case: "${gameExecutable}" -> "${correctedPath}"`);
               env[execEnvIndex] = `GAME_EXECUTABLE=${correctedPath}`;
+            }
+          }
+        } else if (execEnvIndex !== -1 && winePrefixPath) {
+          const maybeGameExecutable = env[execEnvIndex];
+          const gameExecutable = maybeGameExecutable.substring('GAME_EXECUTABLE='.length);
+          const directBindPrefixPath = winePrefixPath;
+          const directBindPrefixHostPath = winePrefixHostPath || winePrefixPath;
+
+          if (gameExecutable.startsWith('/wineprefix/') || gameExecutable.startsWith(`${directBindPrefixPath}/`)) {
+            const relPath = gameExecutable.startsWith('/wineprefix/')
+              ? gameExecutable.substring('/wineprefix/'.length)
+              : gameExecutable.substring(`${directBindPrefixPath}/`.length);
+            const hostExecutablePath = path.posix.join(directBindPrefixHostPath, relPath);
+            const exists = await this.hostPathExists(hostExecutablePath);
+            const regularFileExists = exists
+              ? await this.isRegularFileInBindPath(directBindPrefixHostPath, relPath)
+              : false;
+
+            if (!exists || !regularFileExists) {
+              const dirDiscoveredRelativePath = await this.findExecutableInsideDirectoryInBindPath(
+                directBindPrefixHostPath,
+                relPath
+              );
+              if (dirDiscoveredRelativePath) {
+                const discoveredPath = `${directBindPrefixPath}/${dirDiscoveredRelativePath}`;
+                logger.warn(`  ⚠ GAME_EXECUTABLE pointed to a directory/missing path; using discovered exe:`);
+                logger.warn(`    Requested: ${gameExecutable}`);
+                logger.warn(`    Discovered: ${discoveredPath}`);
+                env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+              }
+
+              if (!dirDiscoveredRelativePath) {
+                const basename = path.posix.basename(relPath);
+                const discoveredRelativePath = await this.findExecutableByBasenameInBindPath(
+                  directBindPrefixHostPath,
+                  basename
+                );
+
+                if (discoveredRelativePath) {
+                  const discoveredPath = `${directBindPrefixPath}/${discoveredRelativePath}`;
+                  logger.warn(`  ⚠ Executable missing at configured path, but discovered by basename:`);
+                  logger.warn(`    Requested: ${gameExecutable}`);
+                  logger.warn(`    Discovered: ${discoveredPath}`);
+                  env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+                } else {
+                  const nearbyExecutables = await this.listNearbyExecutablesInBindPath(
+                    directBindPrefixHostPath,
+                    relPath
+                  );
+
+                  logger.error(`  ✗ Executable not found in direct-bind Wine prefix:`);
+                  logger.error(`    GAME_EXECUTABLE: ${gameExecutable}`);
+                  logger.error(`    Host path: ${directBindPrefixHostPath}`);
+                  if (nearbyExecutables.length > 0) {
+                    logger.error(`    Nearby executable candidates:`);
+                    for (const candidate of nearbyExecutables.slice(0, 5)) {
+                      logger.error(`      - ${candidate}`);
+                    }
+                  }
+
+                  const hints = nearbyExecutables.length > 0
+                    ? ` Candidates: ${nearbyExecutables.slice(0, 3).join(', ')}`
+                    : '';
+                  throw new Error(
+                    `Wine launch preflight failed: configured executable does not exist in direct-bind prefix. ` +
+                    `Expected '${gameExecutable}' under install path '${directBindPrefixPath}'.${hints} ` +
+                    `Verify the game's launch command path and installation directory.`
+                  );
+                }
+              }
             }
           }
         }
@@ -1858,7 +2251,7 @@ export class DockerService {
         const volumeMatch = await this.findVolumeForPath(winePrefixPath!);
         containerWorkingDir = volumeMatch ? `/mnt/game_volume${volumeMatch.relativePath}` : '/mnt/game_volume';
       } else {
-        containerWorkingDir = '/wineprefix';
+        containerWorkingDir = winePrefixPath || '/wineprefix';
       }
     } 
     else if (platform.type === 'wine' && !winePrefixPath) {
@@ -2008,6 +2401,12 @@ export class DockerService {
         // Container doesn't exist — that's fine
       }
 
+      const supplementalGroupIds = this.getSupplementalGroupIds([
+        '/dev/input',
+        '/dev/uinput',
+        '/dev/snd',
+      ]);
+
       // Create and start the container
       const containerConfig: any = {
         Image: resolvedImage,
@@ -2024,6 +2423,7 @@ export class DockerService {
           AutoRemove: autoRemove,
           Binds: binds,
           Devices: displayConfig.devices,
+          GroupAdd: supplementalGroupIds.length > 0 ? supplementalGroupIds : undefined,
           DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
@@ -2173,7 +2573,8 @@ export class DockerService {
     // Setup display configuration
     const preferX11ForVice =
       Boolean(game.platformId && viceEmulators[game.platformId]) ||
-      Boolean(platform.configuration.containerImage?.includes('runner-vice'));
+      Boolean(platform.configuration.containerImage?.includes('runner-vice')) ||
+      Boolean(game.settings?.launch?.useXrandr);
     const displayConfig = await this.getDisplayConfiguration({ preferX11: preferX11ForVice });
     
     // Base environment
@@ -2236,6 +2637,7 @@ export class DockerService {
           AutoRemove: false,
           Binds: binds,
           Devices: displayConfig.devices,
+          GroupAdd: this.getSupplementalGroupIds(['/dev/input', '/dev/uinput', '/dev/snd']),
           DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
@@ -2268,8 +2670,7 @@ export class DockerService {
   }
 
   /**
-   * Run registry setup scripts for Wine games
-   * Detects .cmd/.bat files with REG ADD commands and converts them to .reg format
+   * Launch Wine regedit for an installed Wine game using its existing prefix.
    */
   async runRegistrySetup(options: { game: Game; platform: Platform }): Promise<{ success: boolean; message: string }> {
     const { game, platform } = options;
@@ -2283,201 +2684,257 @@ export class DockerService {
       return { success: false, message: 'No install path configured for this game' };
     }
 
-    // Use the install path directly (it's the Wine prefix)
-    const winePrefixPath = configuredInstallPath;
-    
-    // The game files are inside the Wine prefix at drive_c/GOG Games/<game>/
-    // We need to extract the game directory from the launch command
-    const launchCommand = game.settings?.launch?.command || '';
-    const windowsPath = launchCommand.replace(/^[A-Za-z]:/, ''); // Remove C:
-    const gameDirPath = path.dirname(windowsPath.replace(/\\/g, '/')); // Get directory
-    const gameInstallPath = path.posix.join(winePrefixPath, 'drive_c', gameDirPath.substring(1)); // Remove leading /
+    await this.detectHostPath();
 
-    logger.info(`Looking for registry files in: ${gameInstallPath}`);
+    let bindSource: string;
+    let containerPrefixPath: string;
 
-    // Look for registry setup files
-    const { readdir, readFile, writeFile } = await import('fs/promises');
-    
+    const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
+    if (volumeMatch) {
+      bindSource = volumeMatch.volume.dockerVolumeName;
+      containerPrefixPath = `/mnt/game_volume${volumeMatch.relativePath}`;
+    } else {
+      bindSource = this.getHostPath(configuredInstallPath);
+      containerPrefixPath = configuredInstallPath;
+    }
+
+    const displayConfig = await this.getDisplayConfiguration();
+    const wineDebug = this.buildWineDebug(game);
+    const wineVersionId = game.settings?.wine?.version || game.installation?.wineVersionId || 'system';
+
+    const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
+    const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+
+    const binds = volumeMatch
+      ? [`${bindSource}:/mnt/game_volume:rw`, ...displayConfig.volumes]
+      : [`${bindSource}:${containerPrefixPath}:rw`, ...displayConfig.volumes];
+
+    const containerConfig: any = {
+      Image: resolvedImage,
+      Cmd: ['bash', '-lc', 'wine regedit'],
+      Env: [
+        `WINEPREFIX=${containerPrefixPath}`,
+        `WINEDEBUG=${wineDebug}`,
+        `WINE_VERSION_ID=${wineVersionId}`,
+        ...displayConfig.env,
+      ],
+      WorkingDir: containerPrefixPath,
+      HostConfig: {
+        AutoRemove: true,
+        Binds: binds,
+        Devices: displayConfig.devices,
+        DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
+        GroupAdd: this.getSupplementalGroupIds(['/dev/input', '/dev/uinput', '/dev/snd']),
+        IpcMode: displayConfig.ipcMode,
+        SecurityOpt: displayConfig.securityOpt,
+        NetworkMode: displayConfig.networkMode,
+      },
+    };
+
+    logger.info(`Launching Wine regedit for ${game.title}`);
+    logger.info(`  WINEPREFIX=${containerPrefixPath}`);
+
     try {
-      const files = await readdir(gameInstallPath);
-      const regSetupFiles = files.filter(f => 
-        (f.toLowerCase().endsWith('.cmd') || f.toLowerCase().endsWith('.bat')) &&
-        (f.toLowerCase().includes('reg') || f.toLowerCase().includes('setup'))
-      );
-
-      if (regSetupFiles.length === 0) {
-        return { success: false, message: 'No registry setup files found (looking for .cmd/.bat files with "reg" or "setup" in name)' };
-      }
-
-      logger.info(`Found registry setup files: ${regSetupFiles.join(', ')}`);
-
-      // Process the first registry file found
-      const regFile = regSetupFiles[0];
-      if (!regFile) {
-        return { success: false, message: 'No registry file found in array' };
-      }
-      
-      const cmdFilePath = path.join(gameInstallPath, regFile);
-      const cmdContent = await readFile(cmdFilePath, 'utf-8');
-
-      // Convert CMD format to REG format
-      const regContent = this.convertCmdToReg(cmdContent);
-      
-      // Write the .reg file
-      const regFilePath = path.join(gameInstallPath, 'dillinger_setup.reg');
-      await writeFile(regFilePath, regContent, 'utf-8');
-      
-      logger.info(`Converted ${regFile} to dillinger_setup.reg`);
-
-      // Run wine regedit in a temporary container
-      const displayConfig = await this.getDisplayConfiguration();
-      
-      // Build WINEDEBUG from game settings (though registry setup usually doesn't need verbose debug)
-      const wineDebug = this.buildWineDebug(game);
-      
-      // Note: WINEARCH should NOT be set when using an existing prefix
-      // Wine will auto-detect the architecture from the existing prefix
-      // Resolve the actual installed runner image
-      const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
-      const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
-
-      const containerConfig: any = {
-        Image: resolvedImage,
-        Entrypoint: ['/bin/bash', '-c'],
-        Cmd: [`cd /game && WINEPREFIX=/wineprefix wine regedit /S dillinger_setup.reg`],
-        Env: [
-          'WINEPREFIX=/wineprefix',
-          `WINEDEBUG=${wineDebug}`,
-          ...displayConfig.env,
-        ],
-        HostConfig: {
-          AutoRemove: true,
-          Binds: [
-            `${winePrefixPath}:/wineprefix:rw`,
-            `${gameInstallPath}:/game:ro`,
-          ],
-          Devices: displayConfig.devices,
-        },
-        WorkingDir: '/game',
-      };
-
-      logger.info(`Running: wine regedit /S dillinger_setup.reg (WINEDEBUG=${wineDebug})`);
-      
       const container = await docker.createContainer(containerConfig);
-      
       await container.start();
-      const result = await container.wait();
-
-      if (result.StatusCode === 0) {
-        logger.info(`✓ Successfully imported registry settings from ${regFile}`);
-        return { success: true, message: `Registry settings imported from ${regFile}` };
-      } else {
-        logger.error(`Failed to import registry settings, exit code: ${result.StatusCode}`);
-        return { success: false, message: `Failed to import registry settings (exit code: ${result.StatusCode})` };
-      }
-
+      return { success: true, message: 'Wine regedit started for this game prefix.' };
     } catch (error: any) {
-      logger.error('Error running registry setup:', error);
-      return { success: false, message: `Error: ${error.message}` };
+      logger.error('Error launching Wine regedit:', error);
+      return { success: false, message: `Failed to launch regedit: ${error.message}` };
     }
   }
 
   /**
-   * Convert Windows CMD registry script to .reg file format
+   * Apply explicit registry settings to an installed Wine prefix.
    */
-  private convertCmdToReg(cmdContent: string): string {
-    const lines = cmdContent.split('\n');
-    let regContent = 'Windows Registry Editor Version 5.00\n\n';
-    let currentKey = '';
-    
-    // Extract regpath variable if defined
-    let regpathValue = '';
-    for (const line of lines) {
-      const regpathMatch = line.match(/SET\s+regpath=["']([^"']+)["']/i);
-      if (regpathMatch && regpathMatch[1]) {
-        regpathValue = regpathMatch[1];
-        break;
-      }
+  async applyWineRegistrySettings(options: {
+    game: Game;
+    platform: Platform;
+    registrySettings: Array<{
+      path: string;
+      name: string;
+      type?: string;
+      value: string;
+    }>;
+  }): Promise<{ success: boolean; message: string; appliedCount?: number }> {
+    const { game, platform } = options;
+
+    if (platform.type !== 'wine') {
+      return { success: false, message: 'Registry settings are only supported for Wine games' };
     }
-    
-    logger.info(`Found regpath variable: ${regpathValue}`);
-    logger.info(`Total lines in CMD file: ${lines.length}`);
-    
-    let processedCount = 0;
-    let skippedCount = 0;
-    let matchedCount = 0;
-    
-    for (const line of lines) {
-      let trimmed = line.trim();
-      
-      // Skip empty lines, comments, and SET commands
-      if (!trimmed || trimmed.startsWith('::') || trimmed.startsWith('@') || trimmed.startsWith('SET ') || trimmed === 'exit') {
-        skippedCount++;
-        continue;
-      }
-      
-      processedCount++;
-      const originalLine = trimmed;
-      
-      // Replace %regpath% with actual value
-      if (regpathValue) {
-        trimmed = trimmed.replace(/%regpath%/gi, `"${regpathValue}"`);
-      }
-      
-      logger.debug(`[${processedCount}] Original: ${originalLine.substring(0, 80)}`);
-      logger.debug(`[${processedCount}] After replace: ${trimmed.substring(0, 100)}`);
-      
-      // Parse REG ADD commands - more flexible pattern
-      // Matches: REG ADD "path" /v "name" /t TYPE /d "data" /f [/reg:32]
-      const regAddMatch = trimmed.match(/REG\s+ADD\s+"([^"]+)"\s+\/v\s+"([^"]+)"\s+\/t\s+(\S+)\s+\/d\s+(.+?)(?:\s+\/f|\s+$)/i);
-      
-      if (regAddMatch) {
-        matchedCount++;
-        logger.debug(`[${processedCount}] MATCHED!`);
-        const keyPath = regAddMatch[1];
-        const valueName = regAddMatch[2];
-        const valueType = regAddMatch[3];
-        let valueData = regAddMatch[4]?.trim();
-        
-        if (!keyPath || !valueName || !valueType || !valueData) {
-          logger.debug(`Skipping line - missing data: ${trimmed}`);
-          continue;
-        }
-        
-        // Remove quotes from valueData if present
-        if (valueData.startsWith('"') && valueData.includes('"')) {
-          valueData = valueData.match(/"([^"]*)"/)?.[1] || valueData;
-        }
-        
-        // Add key header if it changed
-        if (keyPath !== currentKey) {
-          currentKey = keyPath;
-          regContent += `\n[${keyPath}]\n`;
-        }
-        
-        // Convert value based on type
-        if (valueType === 'REG_SZ') {
-          regContent += `"${valueName}"="${valueData}"\n`;
-        } else if (valueType === 'REG_DWORD') {
-          const hexValue = parseInt(valueData).toString(16).padStart(8, '0');
-          regContent += `"${valueName}"=dword:${hexValue}\n`;
-        } else if (valueType === 'REG_BINARY') {
-          // Convert binary data (e.g., "01000000" to "01,00,00,00")
-          const hexBytes = valueData.match(/.{2}/g)?.join(',') || valueData;
-          regContent += `"${valueName}"=hex:${hexBytes}\n`;
-        }
-      }
+
+    const configuredInstallPath = game.installation?.installPath;
+    if (!configuredInstallPath) {
+      return { success: false, message: 'No install path configured for this game' };
     }
-    
-    logger.info(`\n=== CMD Parsing Summary ===`);
-    logger.info(`Total lines: ${lines.length}`);
-    logger.info(`Skipped: ${skippedCount}`);
-    logger.info(`Processed: ${processedCount}`);
-    logger.info(`Matched: ${matchedCount}`);
-    logger.info(`===========================\n`);
-    
-    logger.info(`Generated .reg file with ${regContent.split('\n').length} lines`);
-    return regContent;
+
+    const normalizedSettings = this.normalizeWineRegistrySettings((options.registrySettings || [])
+      .filter((entry) => entry && typeof entry.path === 'string' && typeof entry.name === 'string')
+      .map((entry) => ({
+        path: entry.path.trim(),
+        name: entry.name.trim(),
+        type: entry.type || 'REG_SZ',
+        value: String(entry.value ?? ''),
+      }))
+      .filter((entry) => entry.path.length > 0 && entry.name.length > 0));
+
+    if (normalizedSettings.length === 0) {
+      return { success: false, message: 'No registry settings configured to apply' };
+    }
+
+    await this.detectHostPath();
+
+    let bindSource: string;
+    let containerPrefixPath: string;
+
+    const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
+    if (volumeMatch) {
+      bindSource = volumeMatch.volume.dockerVolumeName;
+      containerPrefixPath = `/mnt/game_volume${volumeMatch.relativePath}`;
+    } else {
+      bindSource = this.getHostPath(configuredInstallPath);
+      containerPrefixPath = configuredInstallPath;
+    }
+
+    const displayConfig = await this.getDisplayConfiguration();
+    const wineDebug = this.buildWineDebug(game);
+    const wineVersionId = game.settings?.wine?.version || game.installation?.wineVersionId || 'system';
+
+    const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
+    const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+
+    const binds = volumeMatch
+      ? [`${bindSource}:/mnt/game_volume:rw`, ...displayConfig.volumes]
+      : [`${bindSource}:${containerPrefixPath}:rw`, ...displayConfig.volumes];
+
+    const pythonRegistryApplyScript = [
+      'import json, os, subprocess, sys',
+      'def normalize_path(value):',
+      '    text = (value or "").strip()',
+      '    upper = text.upper()',
+      '    if upper.startswith("HKEY_CURRENT_USER\\\\"):',
+      '        return "HKCU\\\\" + text[len("HKEY_CURRENT_USER\\\\"):]',
+      '    if upper.startswith("HKEY_LOCAL_MACHINE\\\\"):',
+      '        return "HKLM\\\\" + text[len("HKEY_LOCAL_MACHINE\\\\"):]',
+      '    if upper.startswith("HKEY_CLASSES_ROOT\\\\"):',
+      '        return "HKCR\\\\" + text[len("HKEY_CLASSES_ROOT\\\\"):]',
+      '    if upper.startswith("HKEY_USERS\\\\"):',
+      '        return "HKU\\\\" + text[len("HKEY_USERS\\\\"):]',
+      '    if upper.startswith("HKEY_CURRENT_CONFIG\\\\"):',
+      '        return "HKCC\\\\" + text[len("HKEY_CURRENT_CONFIG\\\\"):]',
+      '    return text',
+      'settings = json.loads(os.environ.get("DILLINGER_REGISTRY_SETTINGS", "[]"))',
+      'user = os.environ.get("UNAME", "gameuser")',
+      'as_root = (os.geteuid() == 0)',
+      'def wine_cmd(*args):',
+      '    if as_root:',
+      '        return ["gosu", user, "wine", *args]',
+      '    return ["wine", *args]',
+      'errors = []',
+      'for index, setting in enumerate(settings):',
+      '    path = normalize_path(str(setting.get("path", "")).strip())',
+      '    name = str(setting.get("name", "")).strip()',
+      '    reg_type = str(setting.get("type", "REG_SZ") or "REG_SZ").upper()',
+      '    value = str(setting.get("value", "")).strip()',
+      '    if not path or not name:',
+      '        errors.append(f"[{index}] missing path/name")',
+      '        continue',
+      '    if reg_type == "REG_DWORD" and value.lower().startswith("0x"):',
+      '        try:',
+      '            value = str(int(value, 16))',
+      '        except ValueError:',
+      '            errors.append(f"[{index}] invalid DWORD hex value: {value}")',
+      '            continue',
+      '    if reg_type == "REG_BINARY":',
+      '        value = "".join(ch for ch in value if ch.lower() in "0123456789abcdef")',
+      '        if len(value) % 2 == 1:',
+      '            value = "0" + value',
+      '        if not value:',
+      '            value = "00"',
+      '    add_cmd = wine_cmd("reg", "add", path, "/v", name, "/t", reg_type, "/d", value, "/f")',
+      '    add_result = subprocess.run(add_cmd, capture_output=True, text=True)',
+      '    if add_result.returncode != 0:',
+      '        stderr = (add_result.stderr or "").strip()',
+      '        stdout = (add_result.stdout or "").strip()',
+      '        errors.append(f"[{index}] reg add failed for {path}\\\\{name}: {stderr or stdout or \'unknown error\'}")',
+      '        continue',
+      '    query_cmd = wine_cmd("reg", "query", path, "/v", name)',
+      '    query_result = subprocess.run(query_cmd, capture_output=True, text=True)',
+      '    if query_result.returncode != 0:',
+      '        stderr = (query_result.stderr or "").strip()',
+      '        stdout = (query_result.stdout or "").strip()',
+      '        errors.append(f"[{index}] reg query failed for {path}\\\\{name}: {stderr or stdout or \'unknown error\'}")',
+      'if errors:',
+      '    print("Registry apply errors:")',
+      '    for error in errors:',
+      '        print(error)',
+      '    sys.exit(1)',
+      'print(f"Registry settings applied: {len(settings)}")',
+    ].join('\n');
+
+    const containerConfig: any = {
+      Image: resolvedImage,
+      Cmd: ['python3', '-c', pythonRegistryApplyScript],
+      Env: [
+        `WINEPREFIX=${containerPrefixPath}`,
+        `WINEDEBUG=${wineDebug}`,
+        `WINE_VERSION_ID=${wineVersionId}`,
+      `DILLINGER_REGISTRY_SETTINGS=${JSON.stringify(normalizedSettings)}`,
+        ...displayConfig.env,
+      ],
+      WorkingDir: containerPrefixPath,
+      HostConfig: {
+      AutoRemove: false,
+        Binds: binds,
+        Devices: displayConfig.devices,
+        DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
+        GroupAdd: this.getSupplementalGroupIds(['/dev/input', '/dev/uinput', '/dev/snd']),
+        IpcMode: displayConfig.ipcMode,
+        SecurityOpt: displayConfig.securityOpt,
+        NetworkMode: displayConfig.networkMode,
+      },
+    };
+
+    logger.info(`Applying ${normalizedSettings.length} registry setting(s) for ${game.title}`);
+    logger.info(`  WINEPREFIX=${containerPrefixPath}`);
+
+    try {
+      const container = await docker.createContainer(containerConfig);
+      await container.start();
+      const result = await container.wait();
+      let logs = '';
+
+      try {
+        const logsBuffer = await container.logs({ stdout: true, stderr: true, follow: false });
+        logs = logsBuffer.toString('utf8').replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
+      } catch (logError) {
+        logger.warn('Could not read registry apply container logs:', logError);
+      }
+
+      try {
+        await container.remove({ force: true });
+      } catch (removeError) {
+        logger.warn('Could not remove registry apply container:', removeError);
+      }
+
+      if (result.StatusCode === 0) {
+        return {
+          success: true,
+          message: `Applied ${normalizedSettings.length} registry setting(s).`,
+          appliedCount: normalizedSettings.length,
+        };
+      }
+
+      return {
+        success: false,
+        message: logs
+          ? `Registry apply exited with code ${result.StatusCode}: ${logs.split('\n').slice(-4).join(' | ')}`
+          : `Registry apply exited with code ${result.StatusCode}`,
+      };
+    } catch (error: any) {
+      logger.error('Error applying Wine registry settings:', error);
+      return { success: false, message: `Failed to apply registry settings: ${error.message}` };
+    }
   }
 
   /**
@@ -3208,6 +3665,20 @@ export class DockerService {
       
       await container.stop();
       logger.info(`✓ Game container stopped: ${containerId}`);
+
+      // If container was not created with AutoRemove, remove it now and
+      // include anonymous volumes to avoid GUID volume accumulation.
+      try {
+        const stoppedInfo = await container.inspect();
+        if (!stoppedInfo?.HostConfig?.AutoRemove) {
+          await container.remove({ force: true, v: true });
+          logger.info(`✓ Game container removed after stop: ${containerId}`);
+        }
+      } catch (removeErr: any) {
+        if (removeErr?.statusCode !== 404) {
+          logger.warn(`Could not remove stopped container ${containerId}: ${removeErr?.message || removeErr}`);
+        }
+      }
       
       // Note: We don't clean up save volumes here anymore
       // Save volumes are game-based (dillinger_saves_<gameId>) and persist across sessions
@@ -3510,6 +3981,28 @@ export class DockerService {
   }
 
   /**
+   * Collect host device GIDs and pass them as supplemental groups to runner
+   * containers so non-root gameuser can access mounted device nodes.
+   */
+  private getSupplementalGroupIds(devicePaths: string[]): string[] {
+    const groupIds = new Set<string>();
+
+    for (const devicePath of devicePaths) {
+      try {
+        if (!existsSync(devicePath)) continue;
+        const stats = statSync(devicePath);
+        if (Number.isInteger(stats.gid) && stats.gid >= 0) {
+          groupIds.add(String(stats.gid));
+        }
+      } catch {
+        // Ignore unreadable/missing device paths
+      }
+    }
+
+    return Array.from(groupIds.values());
+  }
+
+  /**
    * Get display forwarding configuration based on host environment
    * Supports X11 and Wayland display protocols
     * Prefers Wayland when both are available; falls back to X11
@@ -3609,6 +4102,20 @@ export class DockerService {
       if (existsSync('/dev/uinput')) {
         devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
         logger.info(`  ✓ uinput device available`);
+      }
+
+      // Add hidraw devices for broader gamepad compatibility in Wine/SDL.
+      try {
+        const hidrawDevices = readdirSync('/dev').filter((name) => name.startsWith('hidraw'));
+        for (const hidrawName of hidrawDevices) {
+          const hidrawPath = `/dev/${hidrawName}`;
+          devices.push({ PathOnHost: hidrawPath, PathInContainer: hidrawPath, CgroupPermissions: 'rwm' });
+        }
+        if (hidrawDevices.length > 0) {
+          logger.info(`  ✓ hidraw devices available (${hidrawDevices.length})`);
+        }
+      } catch {
+        // ignore
       }
       
       const envVars = [
@@ -3750,6 +4257,20 @@ export class DockerService {
         devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
         logger.info(`  ✓ uinput device available`);
       }
+
+      // Add hidraw devices for broader gamepad compatibility in Wine/SDL.
+      try {
+        const hidrawDevices = readdirSync('/dev').filter((name) => name.startsWith('hidraw'));
+        for (const hidrawName of hidrawDevices) {
+          const hidrawPath = `/dev/${hidrawName}`;
+          devices.push({ PathOnHost: hidrawPath, PathInContainer: hidrawPath, CgroupPermissions: 'rwm' });
+        }
+        if (hidrawDevices.length > 0) {
+          logger.info(`  ✓ hidraw devices available (${hidrawDevices.length})`);
+        }
+      } catch {
+        // ignore
+      }
       
       // Get default PulseAudio sink from settings or environment variable
       // This allows directing audio to a specific output when multiple are available
@@ -3885,6 +4406,20 @@ export class DockerService {
     if (existsSync('/dev/uinput')) {
       devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
       logger.info(`  ✓ uinput device available`);
+    }
+
+    // Add hidraw devices for broader gamepad compatibility in Wine/SDL.
+    try {
+      const hidrawDevices = readdirSync('/dev').filter((name) => name.startsWith('hidraw'));
+      for (const hidrawName of hidrawDevices) {
+        const hidrawPath = `/dev/${hidrawName}`;
+        devices.push({ PathOnHost: hidrawPath, PathInContainer: hidrawPath, CgroupPermissions: 'rwm' });
+      }
+      if (hidrawDevices.length > 0) {
+        logger.info(`  ✓ hidraw devices available (${hidrawDevices.length})`);
+      }
+    } catch {
+      // ignore
     }
 
     // Allow directing audio to a specific sink (e.g. a null sink) so streaming audio

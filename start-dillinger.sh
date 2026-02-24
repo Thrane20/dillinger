@@ -5,7 +5,7 @@
 set -e
 
 # Script version (update this when publishing new versions)
-SCRIPT_VERSION="0.3.0"
+SCRIPT_VERSION="0.3.1"
 
 # Upstream URLs for update checks
 GITHUB_MAIN_RAW_BASE="https://raw.githubusercontent.com/Thrane20/dillinger/main"
@@ -25,6 +25,9 @@ IMAGE_TAG=""  # Will be set from versioning.env
 CONTAINER_NAME="dillinger"
 PORT="3010"
 VOLUME_NAME="dillinger_core"
+ROMS_VOLUME_NAME="dillinger_roms"
+CACHE_VOLUME_NAME="dillinger_cache"
+INSTALLED_VOLUME_PREFIX="dillinger_installed_"
 # Optional: bind a host directory directly to /data instead of using a Docker volume
 # Example: export DILLINGER_CORE_HOST_PATH=/mnt/linuxfast/dillinger_core
 DILLINGER_CORE_HOST_PATH="${DILLINGER_CORE_HOST_PATH:-}"
@@ -53,6 +56,35 @@ print_warning() {
 
 print_info() {
     echo -e "${BLUE}→ $1${NC}"
+}
+
+# Ensure local Docker clients can access the host X server for GUI passthrough.
+# This is often required after reboot/login because xhost permissions reset.
+ensure_x11_access() {
+    if [ -z "$DISPLAY" ]; then
+        return 0
+    fi
+
+    if ! command -v xhost &> /dev/null; then
+        print_warning "xhost not found; cannot auto-configure X11 access"
+        return 0
+    fi
+
+    # Prefer a narrower rule first (allow local root, used by Docker daemon path).
+    if xhost +SI:localuser:root > /dev/null 2>&1; then
+        print_success "X11 access granted for local Docker clients (SI:localuser:root)"
+        return 0
+    fi
+
+    # Fallback for setups where SI rules are unsupported.
+    if xhost +local:docker > /dev/null 2>&1; then
+        print_success "X11 access granted for local Docker clients (local:docker)"
+        return 0
+    fi
+
+    print_warning "Could not auto-configure X11 access via xhost"
+    print_warning "You may need to run manually: xhost +local:docker"
+    return 0
 }
 
 # Check if Docker is installed
@@ -397,6 +429,66 @@ check_image() {
     print_success "Will run version: $IMAGE_TAG"
 }
 
+# Emit expected mounts as: destination|type|source
+# - type=volume -> source is Docker volume name
+# - type=bind   -> source is host path
+get_expected_mounts() {
+    local data_source="${DATA_MOUNT_SPEC%:/data}"
+    echo "/data|$DATA_MOUNT_KIND|$data_source"
+
+    if docker volume inspect "$ROMS_VOLUME_NAME" &> /dev/null; then
+        echo "/roms|volume|$ROMS_VOLUME_NAME"
+    fi
+
+    if docker volume inspect "$CACHE_VOLUME_NAME" &> /dev/null; then
+        echo "/cache|volume|$CACHE_VOLUME_NAME"
+    fi
+
+    while IFS= read -r installed_volume; do
+        [ -z "$installed_volume" ] && continue
+        local suffix="${installed_volume#$INSTALLED_VOLUME_PREFIX}"
+        [ -z "$suffix" ] && continue
+        echo "/installed/$suffix|volume|$installed_volume"
+    done < <(docker volume ls --format '{{.Name}}' | grep "^${INSTALLED_VOLUME_PREFIX}" || true)
+}
+
+# Check whether a container already has all expected mounts
+container_has_expected_mounts() {
+    local container_name="$1"
+    local mounts
+
+    mounts=$(docker inspect "$container_name" --format '{{range .Mounts}}{{printf "%s|%s|%s|%s\n" .Destination .Type .Name .Source}}{{end}}' 2>/dev/null || true)
+    if [ -z "$mounts" ]; then
+        return 1
+    fi
+
+    while IFS='|' read -r expected_dest expected_type expected_source; do
+        [ -z "$expected_dest" ] && continue
+        local found=1
+
+        while IFS='|' read -r actual_dest actual_type actual_name actual_source; do
+            [ "$actual_dest" != "$expected_dest" ] && continue
+            [ "$actual_type" != "$expected_type" ] && continue
+
+            if [ "$expected_type" = "volume" ] && [ "$actual_name" = "$expected_source" ]; then
+                found=0
+                break
+            fi
+
+            if [ "$expected_type" = "bind" ] && [ "$actual_source" = "$expected_source" ]; then
+                found=0
+                break
+            fi
+        done <<< "$mounts"
+
+        if [ "$found" -ne 0 ]; then
+            return 1
+        fi
+    done < <(get_expected_mounts)
+
+    return 0
+}
+
 # Check if container already exists
 check_existing_container() {
     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
@@ -405,9 +497,34 @@ check_existing_container() {
         # Get the image/version the existing container is using
         local running_image=$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}' 2>/dev/null)
         local running_version=$(echo "$running_image" | sed 's/.*://')
+        local needs_mount_recreate=0
+        if ! container_has_expected_mounts "$CONTAINER_NAME"; then
+            needs_mount_recreate=1
+            print_warning "Existing container is missing one or more expected mounts"
+            print_info "Container must be recreated to apply current mount config (/roms, /cache, /installed/*)"
+        fi
         
         if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
             print_info "Container is running version: $running_version"
+
+            if [ "$needs_mount_recreate" -eq 1 ]; then
+                echo ""
+                read -p "Recreate running container to apply updated mounts? [Y/n] " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                    print_info "Stopping container..."
+                    docker stop "$CONTAINER_NAME" > /dev/null 2>&1
+                    print_info "Removing old container..."
+                    docker rm "$CONTAINER_NAME" > /dev/null 2>&1
+                    print_success "Ready to start with updated mounts"
+                    return 0
+                else
+                    print_warning "Keeping existing container without updated mounts"
+                    echo ""
+                    print_success "Dillinger is accessible at: http://localhost:$PORT"
+                    exit 0
+                fi
+            fi
             
             # Check if we want to run a different version
             if [ "$running_version" != "$IMAGE_TAG" ]; then
@@ -444,6 +561,27 @@ check_existing_container() {
         
         # Container exists but is stopped
         print_info "Container is stopped (was running version: $running_version)"
+
+        if [ "$needs_mount_recreate" -eq 1 ]; then
+            echo ""
+            read -p "Recreate container to apply updated mounts? [Y/n] " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                docker rm "$CONTAINER_NAME" > /dev/null 2>&1
+                print_success "Old container removed"
+                return 0  # Continue to start_container
+            else
+                print_warning "Starting existing container without updated mounts"
+                if docker start "$CONTAINER_NAME" > /dev/null 2>&1; then
+                    print_success "Container started"
+                    show_success_message
+                    exit 0
+                else
+                    print_error "Failed to start container"
+                    exit 1
+                fi
+            fi
+        fi
         
         if [ "$running_version" != "$IMAGE_TAG" ]; then
             echo ""
@@ -604,10 +742,41 @@ start_container() {
     DOCKER_ARGS="$DOCKER_ARGS -v /var/run/docker.sock:/var/run/docker.sock"
     DOCKER_ARGS="$DOCKER_ARGS -v $DATA_MOUNT_SPEC"
     DOCKER_ARGS="$DOCKER_ARGS --restart unless-stopped"
+
+    # Shared Dillinger library volumes
+    if docker volume inspect "$ROMS_VOLUME_NAME" &> /dev/null; then
+        DOCKER_ARGS="$DOCKER_ARGS -v $ROMS_VOLUME_NAME:/roms"
+        print_success "ROM library volume mounted ($ROMS_VOLUME_NAME -> /roms)"
+    else
+        print_warning "Volume '$ROMS_VOLUME_NAME' not found - /roms will be unavailable"
+    fi
+
+    if docker volume inspect "$CACHE_VOLUME_NAME" &> /dev/null; then
+        DOCKER_ARGS="$DOCKER_ARGS -v $CACHE_VOLUME_NAME:/cache"
+        print_success "Cache volume mounted ($CACHE_VOLUME_NAME -> /cache)"
+    else
+        print_warning "Volume '$CACHE_VOLUME_NAME' not found - /cache will be unavailable"
+    fi
+
+    local installed_count=0
+    while IFS= read -r installed_volume; do
+        [ -z "$installed_volume" ] && continue
+        local suffix="${installed_volume#$INSTALLED_VOLUME_PREFIX}"
+        [ -z "$suffix" ] && continue
+        DOCKER_ARGS="$DOCKER_ARGS -v $installed_volume:/installed/$suffix"
+        installed_count=$((installed_count + 1))
+    done < <(docker volume ls --format '{{.Name}}' | grep "^${INSTALLED_VOLUME_PREFIX}" || true)
+
+    if [ "$installed_count" -gt 0 ]; then
+        print_success "Installed game volumes mounted ($installed_count volume(s))"
+    else
+        print_warning "No volumes found matching '${INSTALLED_VOLUME_PREFIX}*'"
+    fi
     
     # X11 Display passthrough for GUI games
     if [ -n "$DISPLAY" ]; then
         print_info "Configuring X11 display passthrough..."
+        ensure_x11_access
         DOCKER_ARGS="$DOCKER_ARGS -e DISPLAY=$DISPLAY"
         DOCKER_ARGS="$DOCKER_ARGS -v /tmp/.X11-unix:/tmp/.X11-unix:rw"
         
@@ -723,6 +892,32 @@ show_success_message() {
         if [ -n "$VOLUME_DEVICE" ] && [ "$VOLUME_DEVICE" != "<no value>" ]; then
             echo "  (backing path: $VOLUME_DEVICE)"
         fi
+    fi
+    echo ""
+    echo "Shared library mounts:"
+    if docker volume inspect "$ROMS_VOLUME_NAME" &> /dev/null; then
+        echo "  /roms            <- $ROMS_VOLUME_NAME"
+    else
+        echo "  /roms            <- (missing volume: $ROMS_VOLUME_NAME)"
+    fi
+
+    if docker volume inspect "$CACHE_VOLUME_NAME" &> /dev/null; then
+        echo "  /cache           <- $CACHE_VOLUME_NAME"
+    else
+        echo "  /cache           <- (missing volume: $CACHE_VOLUME_NAME)"
+    fi
+
+    local installed_found=0
+    while IFS= read -r installed_volume; do
+        [ -z "$installed_volume" ] && continue
+        local suffix="${installed_volume#$INSTALLED_VOLUME_PREFIX}"
+        [ -z "$suffix" ] && continue
+        echo "  /installed/$suffix <- $installed_volume"
+        installed_found=1
+    done < <(docker volume ls --format '{{.Name}}' | grep "^${INSTALLED_VOLUME_PREFIX}" || true)
+
+    if [ "$installed_found" -eq 0 ]; then
+        echo "  /installed/*     <- (no volumes matching ${INSTALLED_VOLUME_PREFIX}*)"
     fi
     echo ""
     echo -e "${YELLOW}Need help? Visit: https://github.com/Thrane20/dillinger${NC}"

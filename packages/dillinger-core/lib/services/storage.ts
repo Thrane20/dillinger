@@ -145,7 +145,7 @@ export class JSONStorageService {
     await fs.ensureDir(DILLINGER_CORE_PATH);
     
     // Ensure storage subdirectories exist
-    const storageDirs = ['games', 'platforms', 'sessions', 'collections', 'metadata', 'volumes'];
+    const storageDirs = ['games', 'platforms', 'sessions', 'collections', 'metadata', 'volumes', 'makeitrun', 'cache', path.join('cache', 'compat')];
     await Promise.all(
       storageDirs.map((dir) => fs.ensureDir(path.join(DATA_PATH, dir)))
     );

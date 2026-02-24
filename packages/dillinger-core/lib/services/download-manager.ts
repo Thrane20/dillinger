@@ -167,7 +167,7 @@ export class DownloadManager extends EventEmitter {
     // Check settings for installer cache mode
     const settingsService = SettingsService.getInstance();
     const downloadSettings = await settingsService.getDownloadSettings();
-    const cacheMode = downloadSettings.installerCacheMode || 'with_game'; // Default to storing with game
+    const cacheMode = downloadSettings.installerCacheMode || 'custom_volume'; // Default to /cache-based flow
     
     let destinationDir: string;
     
@@ -183,15 +183,15 @@ export class DownloadManager extends EventEmitter {
         const gogSlug = job.gogId.replace(/^\d+-/, '') || job.gogId;
         destinationDir = path.join(volumePath, gogSlug, 'gog');
       } else {
-        // Fallback to with_game if volume not found
-        console.warn(`[DownloadManager] Custom volume ${downloadSettings.installerCacheVolumeId} not found, falling back to with_game mode`);
-        const dillingerRoot = this.storage.getDillingerRoot();
-        destinationDir = path.join(dillingerRoot, 'storage', 'games', job.gameId, 'installers');
+        // Fallback to first-class cache location if selected volume can't be resolved
+        console.warn(`[DownloadManager] Custom volume ${downloadSettings.installerCacheVolumeId} not found, falling back to /cache`);
+        const downloadsCachePath = await this.getDownloadsCachePath();
+        destinationDir = path.join(downloadsCachePath, job.gogId);
       }
     } else {
-      // Fallback: store with game
-      const dillingerRoot = this.storage.getDillingerRoot();
-      destinationDir = path.join(dillingerRoot, 'storage', 'games', job.gameId, 'installers');
+      // Fallback: first-class cache location
+      const downloadsCachePath = await this.getDownloadsCachePath();
+      destinationDir = path.join(downloadsCachePath, job.gogId);
     }
     
     await fs.ensureDir(destinationDir);
@@ -204,8 +204,12 @@ export class DownloadManager extends EventEmitter {
       const destinationPath = path.join(destinationDir, filename);
 
       if (await fs.pathExists(sourcePath)) {
-        await fs.move(sourcePath, destinationPath, { overwrite: true });
-        if (!primaryInstallerPath) primaryInstallerPath = destinationPath;
+        if (destinationDir !== job.downloadPath) {
+          await fs.move(sourcePath, destinationPath, { overwrite: true });
+          if (!primaryInstallerPath) primaryInstallerPath = destinationPath;
+        } else if (!primaryInstallerPath) {
+          primaryInstallerPath = sourcePath;
+        }
       }
     }
 

@@ -1,0 +1,102 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { JSONStorageService } from '@/lib/services/storage';
+import { DockerService } from '@/lib/services/docker-service';
+import type { Game, Platform } from '@dillinger/shared';
+import {
+  migrateGameToMultiPlatform,
+  getDefaultPlatformConfig,
+  getPlatformConfig,
+} from '@dillinger/shared';
+
+const storage = JSONStorageService.getInstance();
+const docker = DockerService.getInstance();
+
+async function findGameAndFileKey(id: string): Promise<{ game: Game | null; fileKey: string | null }> {
+  const directGame = await storage.readEntity<Game>('games', id);
+  if (directGame) {
+    return { game: directGame, fileKey: id };
+  }
+
+  const allGames = await storage.listEntities<Game>('games');
+  const foundGame = allGames.find((g) => g.id === id || g.slug === id);
+
+  if (!foundGame) {
+    return { game: null, fileKey: null };
+  }
+
+  return { game: foundGame, fileKey: foundGame.id };
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: gameId } = await params;
+    if (!gameId) {
+      return NextResponse.json({ error: 'Game ID required' }, { status: 400 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const requestedPlatformId = typeof body?.platformId === 'string' ? body.platformId : undefined;
+    const incomingRegistrySettings = Array.isArray(body?.registrySettings) ? body.registrySettings : undefined;
+
+    const { game } = await findGameAndFileKey(gameId);
+    if (!game) {
+      return NextResponse.json({ error: 'Game not found' }, { status: 404 });
+    }
+
+    const migratedGame = migrateGameToMultiPlatform(game);
+    const platformConfig = requestedPlatformId
+      ? getPlatformConfig(migratedGame, requestedPlatformId)
+      : getDefaultPlatformConfig(migratedGame);
+
+    if (!platformConfig) {
+      return NextResponse.json({ error: 'Game has no platform configured' }, { status: 400 });
+    }
+
+    if (platformConfig.installation?.status !== 'installed') {
+      return NextResponse.json({ error: 'Game must be installed first' }, { status: 400 });
+    }
+
+    const platform = await storage.readPlatform<Platform>(platformConfig.platformId);
+    if (!platform) {
+      return NextResponse.json({ error: 'Platform not found' }, { status: 404 });
+    }
+
+    const gameForAction: Game = {
+      ...game,
+      platformId: platformConfig.platformId,
+      filePath: platformConfig.filePath || game.filePath,
+      settings: platformConfig.settings,
+      installation: platformConfig.installation || game.installation,
+    };
+
+    const registrySettings = incomingRegistrySettings ?? gameForAction.settings?.wine?.registrySettings ?? [];
+
+    const result = await docker.applyWineRegistrySettings({
+      game: gameForAction,
+      platform,
+      registrySettings,
+    });
+
+    if (!result.success) {
+      return NextResponse.json({ success: false, message: result.message }, { status: 400 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: result.message,
+      appliedCount: result.appliedCount ?? 0,
+    });
+  } catch (error) {
+    console.error('Error in registry-apply endpoint:', error);
+    return NextResponse.json(
+      {
+        error: 'Failed to apply registry settings',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
+}

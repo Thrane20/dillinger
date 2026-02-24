@@ -7,3 +7,6 @@
 [submodule "third_party/gst-wayland-display"]
 	path = third_party/gst-wayland-display
 	url = https://github.com/thrane20/gst-wayland-display
+[submodule "third_party/umu-protonfixes"]
+	path = third_party/umu-protonfixes
+	url = https://github.com/Open-Wine-Components/umu-protonfixes.git

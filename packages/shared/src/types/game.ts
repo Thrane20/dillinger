@@ -196,6 +196,15 @@ export interface GamePlatformConfig {
   selectedLutrisInstallerId?: number;
 }
 
+export type WineGamePhase =
+  | 'needs_install'
+  | 'installing'
+  | 'install_failed'
+  | 'post_install'
+  | 'needs_configuration'
+  | 'ready'
+  | 'running';
+
 export interface Game extends VersionedData {
   id: string; // UUID v4
   slug?: string; // URL-friendly identifier (auto-generated from title or manually set)

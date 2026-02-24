@@ -120,3 +120,7 @@ docker-compose.local.yml
 # Test output
 test-results/
 playwright-report/
+
+# Generated compatibility assets
+packages/dillinger-core/assets/generated/*.json
+!packages/dillinger-core/assets/generated/.gitkeep

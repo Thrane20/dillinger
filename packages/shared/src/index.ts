@@ -8,6 +8,7 @@ export * from './types/schema-version.js';
 export * from './types/streaming.js';
 export * from './types/streaming-graph.js';
 export * from './types/retroarch.js';
+export * from './types/makeitrun.js';
 
 // Export runner types (previously @dillinger/runner-types)
 export * from './runner/api.js';

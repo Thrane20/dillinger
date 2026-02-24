@@ -48,6 +48,10 @@ export interface InstallGameRequest {
   platformId: string; // Platform to use for installation
   installerArgs?: string; // Optional installer arguments (e.g. /S, /VERYSILENT)
   debugMode?: boolean; // If true, keep container after exit for debugging
+  wineVersionId?: string; // Optional Wine version override
+  wineArch?: 'win32' | 'win64'; // Optional Wine architecture override
+  installMethod?: 'lutris' | 'standard' | 'manual'; // Wizard-selected install strategy
+  selectedLutrisInstallerId?: number; // Chosen Lutris installer when installMethod=lutris
 }
 
 export interface InstallGameResponse {

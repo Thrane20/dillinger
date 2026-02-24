@@ -2,151 +2,79 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { MagnifyingGlassIcon, FolderIcon, InformationCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
-import type { GamePlatformConfig, RetroarchMameSettings, RetroarchMameAspect } from '@dillinger/shared';
-import InstallGameDialog from './InstallGameDialog';
-import ShortcutSelectorDialog, { ShortcutInfo } from './ShortcutSelectorDialog';
-import FileExplorer from './FileExplorer';
-import ContainerLogsDialog from './ContainerLogsDialog';
-import WineVersionSelector from './WineVersionSelector';
-import DxvkVersionSelector from './DxvkVersionSelector';
-import WineInstallationMonitorModal from './WineInstallationMonitorModal';
-import Link from 'next/link';
-
-interface GameFormData {
-  id?: string;
-  title: string;
-  slug?: string;
-  platformId: string; // Currently selected platform ID
-  platforms: GamePlatformConfig[]; // All configured platforms
-  filePath?: string; // Current platform's file path (ROM/executable)
-  tags: string;
-  metadata: {
-    description?: string;
-    genre?: string;
-    developer?: string;
-    publisher?: string;
-    releaseDate?: string;
-    rating?: number;
-    igdbId?: number;
-    primaryImage?: string;
-    backdropImage?: string;
-  };
-  settings?: {
-    wine?: {
-      version?: string; // Wine version ID (e.g., "system", "ge-proton-10-27")
-      umuGameId?: string; // UMU Game ID for protonfixes
-      arch?: 'win32' | 'win64';
-      useDxvk?: boolean;
-      dxvkVersion?: string; // DXVK version ID (e.g., "dxvk-2.4")
-      useVkd3dProton?: boolean;
-      vkd3dVersion?: string;
-      renderer?: 'vulkan' | 'opengl' | 'gdi';
-      compatibilityMode?: 'none' | 'legacy' | 'win98' | 'winxp' | 'win7' | 'win10';
-      dlls?: Record<string, string>;
-      dllOverrides?: string; // WINEDLLOVERRIDES format (e.g., "quartz=disabled;wmvcore=disabled")
-      winetricks?: string[]; // Winetricks verbs to run before game launch
-      registrySettings?: Array<{
-        path: string;
-        name: string;
-        type: 'REG_SZ' | 'REG_DWORD' | 'REG_BINARY' | 'REG_MULTI_SZ' | 'REG_EXPAND_SZ';
-        value: string;
-      }>;
-      debug?: {
-        relay?: boolean;
-        seh?: boolean;
-        tid?: boolean;
-        timestamp?: boolean;
-        heap?: boolean;
-        file?: boolean;
-        module?: boolean;
-        win?: boolean;
-        d3d?: boolean;
-        opengl?: boolean;
-        all?: boolean;
-      };
-    };
-    launch?: {
-      command?: string;
-      arguments?: string[];
-      environment?: Record<string, string>;
-      workingDirectory?: string;
-      fullscreen?: boolean;
-      resolution?: string;
-      useXrandr?: boolean;
-      xrandrMode?: string;
-      useGamescope?: boolean;
-      gamescopeWidth?: number;
-      gamescopeHeight?: number;
-      gamescopeOutputWidth?: number;
-      gamescopeOutputHeight?: number;
-    };
-    gamescope?: {
-      enabled?: boolean;
-      width?: number;
-      height?: number;
-      refreshRate?: number;
-      fullscreen?: boolean;
-      upscaler?: 'auto' | 'fsr' | 'nis' | 'linear' | 'nearest';
-      inputWidth?: number;
-      inputHeight?: number;
-      borderless?: boolean;
-      limitFps?: number;
-    };
-    mangohud?: {
-      enabled?: boolean;
-    };
-    emulator?: {
-      core?: string;
-      settings?: {
-        mame?: RetroarchMameSettings;
-      };
-    };
-  };
-  // Store the full original game data to preserve scraper metadata
-  _originalGame?: any;
-}
-
-interface GameFormProps {
-  mode: 'add' | 'edit';
-  gameId?: string;
-  onSuccess?: () => void;
-  onCancel?: () => void;
-}
-
-interface SavedGameMetadata {
-  slug: string;
-  localImages: {
-    cover?: string;
-    screenshots: string[];
-    artworks: string[];
-  };
-}
-
-interface Screenshot {
-  filename: string;
-  path: string;
-  size: number;
-  modified: string;
-  modifiedTimestamp: number;
-}
-
-interface SaveFile {
-  filename: string;
-  type: 'sram' | 'state';
-  size: number;
-  modified: string;
-  modifiedTimestamp: number;
-  slot?: number;
-}
-
-// RetroArch-based platforms that support saves
-const RETROARCH_PLATFORMS = ['nes', 'snes', 'psx', 'mame'];
-const ROM_PLATFORMS = [
-  ...RETROARCH_PLATFORMS,
-  'c64', 'c128', 'vic20', 'plus4', 'pet',
-  'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32',
-];
+import { deriveWinePhase, type RetroarchMameSettings, type RetroarchMameAspect, type WineGamePhase, type GamePlatformConfig } from '@dillinger/shared';
+import { type ShortcutInfo } from './ShortcutSelectorDialog';
+import type {
+  GameFormData,
+  GameFormProps,
+  SavedGameMetadata,
+  Screenshot,
+  SaveFile,
+  MakeItRunCompatibilitySummary,
+} from './game-form-types';
+import WinePerformanceSection from './WinePerformanceSection';
+import WineRenderingSection from './WineRenderingSection';
+import WineMakeItRunSection from './WineMakeItRunSection';
+import InstallConfigurationSection from './InstallConfigurationSection';
+import GameInfoSection from './GameInfoSection';
+import DisplayImagesSection from './DisplayImagesSection';
+import ScrapeDataSection from './ScrapeDataSection';
+import RetroMediaSection from './RetroMediaSection';
+import BasicInformationSection from './BasicInformationSection';
+import WineStatusBanner from './WineStatusBanner';
+import GameFormActionButtons from './GameFormActionButtons';
+import GameFormDialogs from './GameFormDialogs';
+import GameFormHeader from './GameFormHeader';
+import GameFormSidebar from './GameFormSidebar';
+import ScraperDataPreservedNotice from './ScraperDataPreservedNotice';
+import {
+  stripNullTerminators,
+  sanitizeStringArray,
+  formatRelativeTime,
+  normalizeMameSettings,
+} from './game-form-utils';
+import {
+  switchPlatformState,
+  addPlatformState,
+  removePlatformState,
+} from './game-form-platform-utils';
+import {
+  ROMS_BROWSE_PATH,
+  applyShortcutSelection,
+  applyFileExplorerSelection,
+  applyRomFileSelection,
+} from './game-form-selection-utils';
+import {
+  RETROARCH_PLATFORMS,
+  ROM_PLATFORMS,
+  COMMON_WINETRICKS_VERBS,
+  getFormSections,
+} from './game-form-constants';
+import { useSectionNavigation } from './useSectionNavigation';
+import {
+  fetchLatestScraperData,
+  launchGameLocally,
+  mergeRefreshedScraperData,
+} from './game-form-async-actions';
+import {
+  applyConfiguredWineRegistrySettings,
+  applyCompatibilitySummary,
+  exportMakeItRunToml,
+  fetchCompatibilitySummary,
+  importMakeItRunToml,
+  runWineRegistrySetup,
+} from './game-form-makeitrun-actions';
+import {
+  applyDllQuickAddState,
+  buildSaveDownloadUrl,
+  selectImageState,
+  updateMameOverridesState,
+} from './game-form-mutation-utils';
+import {
+  buildGameSubmitPayload,
+  submitGamePayload,
+} from './game-form-submit-utils';
+import { applyInputChange } from './game-form-change-utils';
 
 export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameFormProps) {
   const router = useRouter();
@@ -154,13 +82,6 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const stripNullTerminators = (value: string): string => value.replace(/\u0000/g, '').trim();
-  const sanitizeStringArray = (values: unknown): string[] => {
-    if (!Array.isArray(values)) return [];
-    return values
-      .filter((v) => typeof v === 'string')
-      .map((v) => stripNullTerminators(v as string));
-  };
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [currentScreenshotIndex, setCurrentScreenshotIndex] = useState(0);
@@ -173,6 +94,10 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const [showLogsDialog, setShowLogsDialog] = useState(false);
   const [showWineMonitorModal, setShowWineMonitorModal] = useState(false);
   const [showAddPlatform, setShowAddPlatform] = useState(false);
+  const [makeItRunCompatLoading, setMakeItRunCompatLoading] = useState(false);
+  const [makeItRunCompatSummary, setMakeItRunCompatSummary] = useState<MakeItRunCompatibilitySummary | null>(null);
+  const [makeItRunIoLoading, setMakeItRunIoLoading] = useState(false);
+  const [winetricksVerbQuery, setWinetricksVerbQuery] = useState('');
   
   // Section navigation state for sidebar shortcuts
   const [activeSection, setActiveSection] = useState<string>('basic');
@@ -220,65 +145,34 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   // Convenience accessors for the currently selected platform config
   const activePlatformConfig = formData.platforms.find(p => p.platformId === formData.platformId);
   const activeInstallation = activePlatformConfig?.installation || formData._originalGame?.installation;
+  const winePhase: WineGamePhase = formData.platformId === 'windows-wine'
+    ? deriveWinePhase(
+        { slug: formData.slug, title: formData.title },
+        activePlatformConfig,
+        {
+          hasActiveSession: false,
+          hasMakeItRunConfig: undefined,
+        }
+      )
+    : 'ready';
   const mameAspectValue = (formData.settings?.emulator?.settings?.mame?.aspect ?? 'default') as RetroarchMameAspect | 'default';
   const mameIntegerScaleValue = formData.settings?.emulator?.settings?.mame?.integerScale;
   const mameIntegerScaleSelect = mameIntegerScaleValue === undefined ? 'default' : mameIntegerScaleValue ? 'true' : 'false';
   const mameBorderlessValue = formData.settings?.emulator?.settings?.mame?.borderlessFullscreen;
   const mameBorderlessSelect = mameBorderlessValue === undefined ? 'default' : mameBorderlessValue ? 'true' : 'false';
+  const filteredWinetricksVerbs = COMMON_WINETRICKS_VERBS
+    .filter((verb) => verb.toLowerCase().includes(winetricksVerbQuery.trim().toLowerCase()))
+    .filter((verb) => !(formData.settings?.wine?.winetricks || []).includes(verb))
+    .slice(0, 8);
 
   // Section definitions for sidebar navigation (Wine games only)
-  const WINE_SECTIONS = [
-    { id: 'basic', label: 'Basic Information', icon: '📋' },
-    { id: 'install', label: 'Installation', icon: '📦' },
-    { id: 'rendering', label: 'Rendering', icon: '🎨' },
-    { id: 'wine-advanced', label: 'Wine Advanced', icon: '🍷' },
-    { id: 'game-info', label: 'Game Information', icon: '📖' },
-  ];
-  
-  // Other platforms use simpler sections
-  const DEFAULT_SECTIONS = [
-    { id: 'basic', label: 'Basic Information', icon: '📋' },
-    { id: 'install', label: 'Configuration', icon: '⚙️' },
-    { id: 'game-info', label: 'Game Information', icon: '📖' },
-  ];
-  
-  const sections = formData.platformId === 'windows-wine' ? WINE_SECTIONS : DEFAULT_SECTIONS;
-  
-  // Scroll to section function
-  const scrollToSection = (sectionId: string) => {
-    const element = sectionRefs.current[sectionId];
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setActiveSection(sectionId);
-    }
-  };
-  
-  // IntersectionObserver to track active section based on scroll position
-  useEffect(() => {
-    const observers: IntersectionObserver[] = [];
-    
-    sections.forEach(section => {
-      const element = sectionRefs.current[section.id];
-      if (element) {
-        const observer = new IntersectionObserver(
-          (entries) => {
-            entries.forEach(entry => {
-              if (entry.isIntersecting) {
-                setActiveSection(section.id);
-              }
-            });
-          },
-          { threshold: 0.3, rootMargin: '-100px 0px -60% 0px' }
-        );
-        observer.observe(element);
-        observers.push(observer);
-      }
-    });
-    
-    return () => {
-      observers.forEach(observer => observer.disconnect());
-    };
-  }, [sections, formData.platformId]);
+  const canAccessWineAdvanced = activeInstallation?.status === 'installed';
+  const sections = getFormSections(formData.platformId, activeInstallation?.status, canAccessWineAdvanced);
+  const { scrollToSection } = useSectionNavigation({
+    sections,
+    sectionRefs,
+    setActiveSection,
+  });
 
   // Display paths as-is since they are now direct host paths on configured volumes
   const formatInstalledPathForDisplay = (p: string) => p;
@@ -307,7 +201,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
               
               // Determine active platform and settings
               const activePlatformId = game.defaultPlatformId || game.platformId || '';
-              let platforms = game.platforms || [];
+              let platforms: GamePlatformConfig[] = game.platforms || [];
               
               // Backwards compatibility: if no platforms array but we have legacy fields, create one
               if (platforms.length === 0 && game.platformId) {
@@ -319,7 +213,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                 }];
               }
               
-              const activePlatform = platforms.find((p: any) => p.platformId === activePlatformId) || platforms[0];
+              const activePlatform = platforms.find((platform) => platform.platformId === activePlatformId) || platforms[0];
               const activeSettings = activePlatform?.settings || game.settings;
               const activeFilePath = activePlatform?.filePath || game.filePath || '';
 
@@ -351,9 +245,19 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
                     umuGameId: activeSettings?.wine?.umuGameId,
                     arch: activeSettings?.wine?.arch || 'win64',
                     useDxvk: activeSettings?.wine?.useDxvk || false,
+                    dxvkVersion: activeSettings?.wine?.dxvkVersion,
+                    useVkd3dProton: activeSettings?.wine?.useVkd3dProton || false,
+                    vkd3dVersion: activeSettings?.wine?.vkd3dVersion,
                     renderer: activeSettings?.wine?.renderer || 'vulkan',
                     compatibilityMode: activeSettings?.wine?.compatibilityMode || 'none',
                     dlls: activeSettings?.wine?.dlls || {},
+                    dllOverrides: activeSettings?.wine?.dllOverrides || '',
+                    winetricks: Array.isArray(activeSettings?.wine?.winetricks)
+                      ? activeSettings.wine.winetricks
+                      : [],
+                    registrySettings: Array.isArray(activeSettings?.wine?.registrySettings)
+                      ? activeSettings.wine.registrySettings
+                      : [],
                     debug: activeSettings?.wine?.debug || {},
                   },
                   launch: {
@@ -439,14 +343,21 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     return undefined;
   }, [mode, gameId, activeInstallation?.status]);
 
-  // Handle reinstall - reset installation status and show install dialog
+  // Handle reinstall - confirm, clear install metadata, and route to wizard
   const handleReinstall = async () => {
     if (!gameId) return;
+
+    const confirmed = window.confirm(
+      'Reinstall this game? This clears current installation status and opens the install wizard.'
+    );
+    if (!confirmed) {
+      return;
+    }
     
     try {
-      // Reset the installation status via API
-      const response = await fetch(`/api/games/${gameId}`, {
-        method: 'PATCH',
+      // Reset the installation status via platform API
+      const response = await fetch(`/api/games/${gameId}/platforms/windows-wine`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           installation: {
@@ -470,17 +381,24 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
         ...prev,
         platforms: prev.platforms.map(p => 
           p.platformId === prev.platformId 
-            ? { ...p, installation: { status: 'not_installed' } }
+            ? {
+                ...p,
+                installation: {
+                  ...(p.installation || {}),
+                  status: 'not_installed',
+                  installPath: undefined,
+                  installerPath: undefined,
+                  installerArgs: undefined,
+                  containerId: undefined,
+                  installedAt: undefined,
+                  error: undefined,
+                },
+              }
             : p
         ),
-        _originalGame: prev._originalGame ? {
-          ...prev._originalGame,
-          installation: { status: 'not_installed' }
-        } : undefined,
       }));
 
-      // Show the install dialog
-      setShowInstallDialog(true);
+      router.push(`/games/${gameId}/install`);
     } catch (err) {
       console.error('Failed to reset installation:', err);
       setError('Failed to reset installation status');
@@ -617,43 +535,10 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
 
   const downloadSave = (filename: string, type: 'sram' | 'state') => {
     if (!gameId) return;
-    const url = `/api/games/${gameId}/saves/${encodeURIComponent(filename)}?type=${type}`;
+    const url = buildSaveDownloadUrl(gameId, filename, type);
     window.open(url, '_blank');
   };
 
-  const formatRelativeTime = (isoDate: string): string => {
-    const now = new Date();
-    const date = new Date(isoDate);
-    const diffMs = now.getTime() - date.getTime();
-    
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    const diffMonths = Math.floor(diffDays / 30);
-    const diffYears = Math.floor(diffDays / 365);
-    
-    if (diffYears > 0) {
-      const remainingMonths = Math.floor((diffDays % 365) / 30);
-      const remainingDays = diffDays % 30;
-      const parts = [`${diffYears} year${diffYears > 1 ? 's' : ''}`];
-      if (remainingMonths > 0) parts.push(`${remainingMonths} month${remainingMonths > 1 ? 's' : ''}`);
-      if (remainingDays > 0 && remainingMonths === 0) parts.push(`${remainingDays} day${remainingDays > 1 ? 's' : ''}`);
-      return parts.join(', ') + ' ago';
-    } else if (diffMonths > 0) {
-      const remainingDays = diffDays % 30;
-      const parts = [`${diffMonths} month${diffMonths > 1 ? 's' : ''}`];
-      if (remainingDays > 0) parts.push(`${remainingDays} day${remainingDays > 1 ? 's' : ''}`);
-      return parts.join(', ') + ' ago';
-    } else if (diffDays > 0) {
-      return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    } else if (diffHours > 0) {
-      return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    } else if (diffMinutes > 0) {
-      return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
-    } else {
-      return 'Just now';
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -662,94 +547,14 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     setSuccessMessage(null);
 
     try {
-      // Convert tags and genre strings to arrays
-      const tags = formData.tags
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0);
-
-      const genre = formData.metadata.genre
-        ? formData.metadata.genre
-            .split(',')
-            .map((g) => g.trim())
-            .filter((g) => g.length > 0)
-        : [];
-
-      // Preserve scraper metadata when updating
-      const preservedMetadata = formData._originalGame?.metadata || {};
-      
-      // Update the current platform in the platforms array before submitting
-      const platforms = [...formData.platforms];
-      const currentPlatformIndex = platforms.findIndex(p => p.platformId === formData.platformId);
-      
-      if (currentPlatformIndex >= 0) {
-        platforms[currentPlatformIndex] = {
-          ...platforms[currentPlatformIndex],
-          settings: formData.settings,
-          filePath: formData.filePath,
-        };
-      } else if (formData.platformId) {
-        platforms.push({
-          platformId: formData.platformId,
-          settings: formData.settings,
-          filePath: formData.filePath,
-        });
-      }
-
-      const payload = {
-        title: formData.title,
-        platforms,
-        defaultPlatformId: formData.platformId,
-        tags,
-        collectionIds: formData._originalGame?.collectionIds || [],
-        metadata: {
-          // Start with user-editable fields
-          description: formData.metadata.description,
-          genre,
-          developer: formData.metadata.developer,
-          publisher: formData.metadata.publisher,
-          releaseDate: formData.metadata.releaseDate,
-          rating: formData.metadata.rating,
-          igdbId: formData.metadata.igdbId,
-          primaryImage: formData.metadata.primaryImage,
-          backdropImage: formData.metadata.backdropImage,
-          // Preserve scraper-only metadata
-          similarGames: preservedMetadata.similarGames,
-          coverArt: preservedMetadata.coverArt,
-          screenshots: preservedMetadata.screenshots,
-          playTime: preservedMetadata.playTime,
-          lastPlayed: preservedMetadata.lastPlayed,
-        },
-        settings: formData.settings,
-        fileInfo: formData._originalGame?.fileInfo,
-        created: formData._originalGame?.created,
-      };
-
-      const url = mode === 'edit' ? `/api/games/${gameId}` : '/api/games';
-      const method = mode === 'edit' ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || `Failed to ${mode} game`);
-      }
-
-      // Success!
+      const payload = buildGameSubmitPayload(formData);
+      const { savedGameId } = await submitGamePayload(mode, gameId, payload);
       setSuccessMessage('Game saved successfully!');
       
       if (onSuccess) {
         onSuccess();
       } else {
-        const savedGameId = result.data?.id || gameId;
-        router.push(`/?scrollTo=${savedGameId}`);
+        router.push(`/?scrollTo=${savedGameId || gameId}`);
         router.refresh();
       }
     } catch (err) {
@@ -763,116 +568,120 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
-
-    if (name.startsWith('metadata.')) {
-      const metadataKey = name.split('.')[1] as keyof GameFormData['metadata'];
-      setFormData((prev) => ({
-        ...prev,
-        metadata: {
-          ...prev.metadata,
-          [metadataKey]: value,
-        },
-      }));
-    } else if (name.startsWith('settings.launch.')) {
-      const launchKey = name.split('.')[2];
-      setFormData((prev) => ({
-        ...prev,
-        settings: {
-          ...prev.settings,
-          launch: {
-            ...prev.settings?.launch,
-            [launchKey]: value,
-          },
-        },
-      }));
-    } else if (name.startsWith('settings.wine.')) {
-      const wineKey = name.split('.')[2];
-      setFormData((prev) => ({
-        ...prev,
-        settings: {
-          ...prev.settings,
-          wine: {
-            ...prev.settings?.wine,
-            [wineKey]: value,
-          },
-        },
-      }));
-    } else if (name.startsWith('settings.gamescope.')) {
-      const gamescopeKey = name.split('.')[2];
-      setFormData((prev) => ({
-        ...prev,
-        settings: {
-          ...prev.settings,
-          gamescope: {
-            ...prev.settings?.gamescope,
-            [gamescopeKey]: value,
-          },
-        },
-      }));
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-    }
-  };
-
-  const normalizeMameSettings = (settings: RetroarchMameSettings): RetroarchMameSettings => {
-    const normalized: RetroarchMameSettings = {};
-    if (settings.aspect) normalized.aspect = settings.aspect;
-    if (typeof settings.integerScale === 'boolean') normalized.integerScale = settings.integerScale;
-    if (typeof settings.borderlessFullscreen === 'boolean') {
-      normalized.borderlessFullscreen = settings.borderlessFullscreen;
-    }
-    return normalized;
+    setFormData((prev) => applyInputChange(prev, name, value));
   };
 
   const updateMameOverrides = (updates: Partial<RetroarchMameSettings>) => {
-    setFormData((prev) => {
-      const existing = prev.settings?.emulator?.settings?.mame || {};
-      const merged = normalizeMameSettings({ ...existing, ...updates });
-      const emulatorSettings = { ...(prev.settings?.emulator?.settings || {}) };
-
-      if (Object.keys(merged).length === 0) {
-        delete emulatorSettings.mame;
-      } else {
-        emulatorSettings.mame = merged;
-      }
-
-      return {
-        ...prev,
-        settings: {
-          ...prev.settings,
-          emulator: {
-            ...prev.settings?.emulator,
-            settings: emulatorSettings,
-          },
-        },
-      };
-    });
+    setFormData((prev) => updateMameOverridesState(prev, updates, normalizeMameSettings));
   };
 
-
-
   const selectImage = (imageUrl: string) => {
-    if (showImageSelector === 'primary') {
-      setFormData((prev) => ({
-        ...prev,
-        metadata: {
-          ...prev.metadata,
-          primaryImage: imageUrl,
-        },
-      }));
-    } else if (showImageSelector === 'backdrop') {
-      setFormData((prev) => ({
-        ...prev,
-        metadata: {
-          ...prev.metadata,
-          backdropImage: imageUrl,
-        },
-      }));
-    }
+    setFormData((prev) => selectImageState(prev, imageUrl, showImageSelector));
     setShowImageSelector(null);
+  };
+
+  const applyDllQuickAdd = (dllName: string, mode: string) => {
+    setFormData((prev) => applyDllQuickAddState(prev, dllName, mode));
+  };
+
+  const handleMakeItRunAutoDetect = async () => {
+    if (!gameId) {
+      setError('Save this game first before running compatibility auto-detect.');
+      return;
+    }
+
+    setMakeItRunCompatLoading(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const summary = await fetchCompatibilitySummary(gameId);
+
+      setMakeItRunCompatSummary(summary);
+      setFormData((prev) => applyCompatibilitySummary(prev, summary));
+
+      setSuccessMessage('Compatibility recommendations loaded into MakeItRun settings.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to auto-detect compatibility data');
+    } finally {
+      setMakeItRunCompatLoading(false);
+    }
+  };
+
+  const handleExportMakeItRunToml = async () => {
+    if (!gameId) {
+      setError('Save this game first before exporting MakeItRun TOML.');
+      return;
+    }
+
+    setMakeItRunIoLoading(true);
+    setError(null);
+
+    try {
+      const { slug, tomlContent } = await exportMakeItRunToml(gameId, formData.slug || gameId);
+      const blob = new Blob([tomlContent], { type: 'text/plain;charset=utf-8' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `${slug}.toml`;
+      a.click();
+      URL.revokeObjectURL(downloadUrl);
+
+      setSuccessMessage('MakeItRun TOML exported successfully.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export MakeItRun TOML');
+    } finally {
+      setMakeItRunIoLoading(false);
+    }
+  };
+
+  const handleImportMakeItRunToml = async (file: File) => {
+    if (!gameId) {
+      setError('Save this game first before importing MakeItRun TOML.');
+      return;
+    }
+
+    setMakeItRunIoLoading(true);
+    setError(null);
+
+    try {
+      const toml = await file.text();
+      await importMakeItRunToml(toml, formData.slug || gameId, gameId);
+
+      setSuccessMessage('MakeItRun TOML imported and applied. Reloading current form state...');
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import MakeItRun TOML');
+    } finally {
+      setMakeItRunIoLoading(false);
+    }
+  };
+
+  const handleRunWineRegistrySetup = async () => {
+    if (!gameId) {
+      setError('Save this game first before running Wine registry setup.');
+      throw new Error('Game ID required');
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+
+    const { message } = await runWineRegistrySetup(gameId);
+    setSuccessMessage(message);
+  };
+
+  const handleApplyConfiguredRegistrySettings = async () => {
+    if (!gameId) {
+      setError('Save this game first before applying registry settings.');
+      throw new Error('Game ID required');
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+
+    const registrySettings = formData.settings?.wine?.registrySettings || [];
+    const { message } = await applyConfiguredWineRegistrySettings(gameId, registrySettings, formData.platformId);
+    setSuccessMessage(message);
   };
 
   const handleRefreshFromScraper = async () => {
@@ -886,51 +695,13 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     setSuccessMessage(null);
 
     try {
-      // Get latest data from scraper
-      const scraperType = 'igdb'; // Default to IGDB
+      const scraperType = 'igdb';
       const scraperId = formData._originalGame.metadata.igdbId.toString();
-      
-      const response = await fetch(`/api/scrapers/game/${scraperType}/${scraperId}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch latest scraper data');
-      }
-
-      const result = await response.json();
-      const latestData = result.game;
-
-      // Merge with current form data, preserving user edits but updating scraper fields
-      setFormData((prev) => ({
-        ...prev,
-        metadata: {
-          // Preserve user-edited fields (keep current values)
-          description: prev.metadata.description,
-          genre: prev.metadata.genre,
-          developer: prev.metadata.developer,
-          publisher: prev.metadata.publisher,
-          releaseDate: prev.metadata.releaseDate,
-          rating: prev.metadata.rating,
-          igdbId: prev.metadata.igdbId,
-          primaryImage: prev.metadata.primaryImage,
-          backdropImage: prev.metadata.backdropImage,
-        },
-        _originalGame: {
-          ...prev._originalGame,
-          metadata: {
-            ...prev._originalGame?.metadata,
-            // Update scraper-only fields from latest data
-            similarGames: latestData.similarGames?.map((sg: any) => ({
-              title: typeof sg === 'string' ? sg : sg.title || sg,
-              slug: typeof sg === 'string' ? sg.toLowerCase().replace(/[^a-z0-9]+/g, '-') : sg.slug,
-              scraperId: typeof sg === 'object' && sg.scraperId ? sg.scraperId : undefined,
-              scraperType: scraperType,
-            })),
-          },
-        },
-      }));
+      const latestData = await fetchLatestScraperData(scraperType, scraperId);
+      setFormData((prev) => mergeRefreshedScraperData(prev, latestData, scraperType));
 
       setSuccessMessage('Successfully refreshed metadata from scraper!');
       
-      // Reload available images
       if (gameId) {
         await loadAvailableImages(gameId);
       }
@@ -942,21 +713,22 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
     }
   };
 
+  const handleQuickLaunch = async () => {
+    if (!gameId) return;
+
+    try {
+      setError(null);
+      setSuccessMessage(null);
+      await launchGameLocally(gameId);
+
+      setSuccessMessage('Game launch started. Check Sessions for status.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to launch game');
+    }
+  };
+
   const handleSelectShortcut = (shortcut: ShortcutInfo) => {
-    setFormData(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        launch: {
-          ...prev.settings?.launch,
-          command: stripNullTerminators(shortcut.target || prev.settings?.launch?.command || ''),
-          arguments: shortcut.arguments
-            ? [stripNullTerminators(shortcut.arguments)]
-            : sanitizeStringArray(prev.settings?.launch?.arguments),
-          workingDirectory: stripNullTerminators(shortcut.workingDirectory || prev.settings?.launch?.workingDirectory || ''),
-        }
-      }
-    }));
+    setFormData((prev) => applyShortcutSelection(prev, shortcut, stripNullTerminators, sanitizeStringArray));
     setShowShortcutDialog(false);
   };
 
@@ -966,34 +738,17 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   };
 
   // First-class volume convention: ROM browsing always starts at /roms
-  const getRomsBrowsePath = (): string | undefined => {
-    return '/roms';
+  const getRomsBrowsePath = (): string => {
+    return ROMS_BROWSE_PATH;
   };
 
   const handleFileExplorerSelect = (path: string) => {
-    // Set the selected file as launch command
-    setFormData(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        launch: {
-          ...prev.settings?.launch,
-          command: path,
-          workingDirectory: prev.settings?.launch?.workingDirectory || 
-            path.substring(0, path.lastIndexOf('/')) || '',
-        }
-      }
-    }));
+    setFormData((prev) => applyFileExplorerSelection(prev, path));
     setShowFileExplorer(false);
   };
 
   const handleRomFileSelect = (path: string) => {
-    // Update local state
-    setFormData(prev => ({
-      ...prev,
-      filePath: path,
-    }));
-    
+    setFormData((prev) => applyRomFileSelection(prev, path));
     setShowRomFileExplorer(false);
   };
 
@@ -1004,41 +759,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const switchPlatform = (newPlatformId: string) => {
     if (newPlatformId === formData.platformId) return;
 
-    setFormData(prev => {
-      // 1. Save current settings to the current platform in the platforms array
-      const updatedPlatforms = [...prev.platforms];
-      const currentPlatformIndex = updatedPlatforms.findIndex(p => p.platformId === prev.platformId);
-      
-      if (currentPlatformIndex >= 0) {
-        updatedPlatforms[currentPlatformIndex] = {
-          ...updatedPlatforms[currentPlatformIndex],
-          settings: prev.settings,
-          filePath: prev.filePath,
-        };
-      } else if (prev.platformId) {
-        // If current platform wasn't in the array (e.g. newly added), add it
-        updatedPlatforms.push({
-          platformId: prev.platformId,
-          settings: prev.settings,
-          filePath: prev.filePath,
-        });
-      }
-
-      // 2. Find new platform config
-      const newPlatformConfig = updatedPlatforms.find(p => p.platformId === newPlatformId);
-      
-      // 3. Return new state
-      return {
-        ...prev,
-        platforms: updatedPlatforms,
-        platformId: newPlatformId,
-        settings: newPlatformConfig?.settings || {
-          wine: { arch: 'win64', debug: {} },
-          launch: { command: '', arguments: [], environment: {}, workingDirectory: '' },
-        },
-        filePath: newPlatformConfig?.filePath || '',
-      };
-    });
+    setFormData((prev) => switchPlatformState(prev, newPlatformId));
   };
 
   const handleAddPlatform = (platformId: string) => {
@@ -1051,45 +772,7 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
       return;
     }
 
-    setFormData(prev => {
-      // Save current platform state first
-      const updatedPlatforms = [...prev.platforms];
-      const currentPlatformIndex = updatedPlatforms.findIndex(p => p.platformId === prev.platformId);
-      
-      if (currentPlatformIndex >= 0) {
-        updatedPlatforms[currentPlatformIndex] = {
-          ...updatedPlatforms[currentPlatformIndex],
-          settings: prev.settings,
-          filePath: prev.filePath,
-        };
-      } else if (prev.platformId) {
-        updatedPlatforms.push({
-          platformId: prev.platformId,
-          settings: prev.settings,
-          filePath: prev.filePath,
-        });
-      }
-
-      // Add new platform
-      const newPlatform: GamePlatformConfig = {
-        platformId,
-        settings: {
-          wine: { arch: 'win64', debug: {} },
-          launch: { command: '', arguments: [], environment: {}, workingDirectory: '' },
-        },
-        filePath: '',
-      };
-      
-      updatedPlatforms.push(newPlatform);
-
-      return {
-        ...prev,
-        platforms: updatedPlatforms,
-        platformId,
-        settings: newPlatform.settings,
-        filePath: newPlatform.filePath || '',
-      };
-    });
+    setFormData((prev) => addPlatformState(prev, platformId));
     
     setShowAddPlatform(false);
   };
@@ -1097,2089 +780,219 @@ export default function GameForm({ mode, gameId, onSuccess, onCancel }: GameForm
   const handleRemovePlatform = (platformId: string) => {
     if (!confirm('Are you sure you want to remove this platform configuration?')) return;
 
-    setFormData(prev => {
-      const updatedPlatforms = prev.platforms.filter(p => p.platformId !== platformId);
-      
-      // If we removed the current platform, switch to another one
-      let newPlatformId = prev.platformId;
-      let newSettings = prev.settings;
-      let newFilePath = prev.filePath;
-      
-      if (prev.platformId === platformId) {
-        if (updatedPlatforms.length > 0) {
-          newPlatformId = updatedPlatforms[0].platformId;
-          newSettings = updatedPlatforms[0].settings;
-          newFilePath = updatedPlatforms[0].filePath;
-        } else {
-          newPlatformId = '';
-          newSettings = {
-            wine: { arch: 'win64', debug: {} },
-            launch: { command: '', arguments: [], environment: {}, workingDirectory: '' },
-          };
-          newFilePath = '';
-        }
-      }
-      
-      return {
-        ...prev,
-        platforms: updatedPlatforms,
-        platformId: newPlatformId,
-        settings: newSettings,
-        filePath: newFilePath,
-      };
-    });
-  };
-
-  const getPlatformName = (id: string) => {
-    const names: Record<string, string> = {
-      'linux-native': 'Native (Linux)',
-      'windows-wine': 'Wine (Windows)',
-      'proton': 'Proton',
-      'dosbox': 'DOSBox',
-      'scummvm': 'ScummVM',
-      'nes': 'Nintendo (NES)',
-      'snes': 'Super Nintendo (SNES)',
-      'psx': 'PlayStation 1',
-      'c64': 'Commodore 64',
-      'c128': 'Commodore 128',
-      'vic20': 'VIC-20',
-      'plus4': 'Plus/4',
-      'pet': 'PET',
-      'amiga': 'Amiga',
-      'amiga500': 'Amiga 500',
-      'amiga500plus': 'Amiga 500+',
-      'amiga600': 'Amiga 600',
-      'amiga1200': 'Amiga 1200',
-      'amiga3000': 'Amiga 3000',
-      'amiga4000': 'Amiga 4000',
-      'cd32': 'Amiga CD32',
-      'mame': 'Arcade (MAME)',
-    };
-    return names[id] || id;
+    setFormData((prev) => removePlatformState(prev, platformId));
   };
 
   return (
     <form onSubmit={handleSubmit} className="max-w-7xl mx-auto">
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg">
-        {/* Header */}
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-text">
-              {mode === 'edit' ? 'Edit Game' : 'Add New Game'}
-            </h2>
-            
-            {/* Refresh from Scraper Button */}
-            {mode === 'edit' && formData._originalGame?.metadata?.igdbId && (
-              <button
-                type="button"
-                onClick={handleRefreshFromScraper}
-                disabled={isRefreshing}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                {isRefreshing ? 'Refreshing...' : 'Refresh from Scraper'}
-              </button>
-            )}
+        <GameFormHeader
+          mode={mode}
+          hasIgdbId={Boolean(formData._originalGame?.metadata?.igdbId)}
+          isRefreshing={isRefreshing}
+          onRefreshFromScraper={handleRefreshFromScraper}
+          error={error}
+          successMessage={successMessage}
+        />
+
+        {formData.platformId === 'windows-wine' && (
+          <div className="px-6 pt-6">
+            <WineStatusBanner
+              phase={winePhase}
+              gameId={gameId}
+              onOpenMonitor={() => setShowWineMonitorModal(true)}
+              onLaunch={handleQuickLaunch}
+            />
           </div>
-
-          {error && (
-            <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md">
-              <p className="text-red-800 dark:text-red-200 text-sm">{error}</p>
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-md">
-              <p className="text-green-800 dark:text-green-200 text-sm">{successMessage}</p>
-            </div>
-          )}
-        </div>
+        )}
 
         {/* Main content with sidebar */}
         <div className="flex">
-          {/* Sidebar Navigation */}
-          <nav className="w-56 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 p-4 sticky top-0 self-start max-h-screen overflow-y-auto hidden lg:block">
-            <ul className="space-y-1">
-              {sections.map((section) => (
-                <li key={section.id}>
-                  <button
-                    type="button"
-                    onClick={() => scrollToSection(section.id)}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                      activeSection === section.id
-                        ? 'bg-blue-600 text-white'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-text'
-                    }`}
-                  >
-                    <span>{section.icon}</span>
-                    <span className="text-sm">{section.label}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <GameFormSidebar
+            sections={sections}
+            activeSection={activeSection}
+            onScrollToSection={scrollToSection}
+          />
 
           {/* Main Content Area */}
           <div className="flex-1 p-6 overflow-y-auto">
 
-        {/* Info about preserved scraper data */}
-        {mode === 'edit' && formData._originalGame?.metadata?.similarGames && (
-          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-md">
-            <div className="flex items-start gap-2">
-              <svg className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div>
-                <p className="text-blue-800 dark:text-blue-200 text-sm font-medium">Scraper Data Preserved</p>
-                <p className="text-blue-700 dark:text-blue-300 text-xs mt-1">
-                  This game has {formData._originalGame.metadata.similarGames.length} similar titles and other scraper metadata that will be automatically preserved when saving your changes.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+          <ScraperDataPreservedNotice
+            similarGamesCount={mode === 'edit' ? formData._originalGame?.metadata?.similarGames?.length : undefined}
+          />
 
-        {/* Basic Information */}
-        <div 
-          id="basic"
-          ref={(el) => { sectionRefs.current['basic'] = el; }}
-          className="space-y-4 mb-6"
-        >
-          <h3 className="text-lg font-semibold text-text border-b pb-2">Basic Information</h3>
-          
-          {/* Title */}
-          <div>
-            <label htmlFor="title" className="block text-sm font-medium text-muted mb-2">
-              Title *
-            </label>
-            <input
-              type="text"
-              id="title"
-              name="title"
-              required
-              value={formData.title}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="Enter game title"
-            />
-          </div>
+          <BasicInformationSection
+            formData={formData}
+            handleChange={handleChange}
+            switchPlatform={switchPlatform}
+            handleRemovePlatform={handleRemovePlatform}
+            showAddPlatform={showAddPlatform}
+            setShowAddPlatform={setShowAddPlatform}
+            handleAddPlatform={handleAddPlatform}
+            sectionRef={(el) => {
+              sectionRefs.current['basic'] = el;
+            }}
+          />
 
-          {/* Slug */}
-          <div>
-            <label htmlFor="slug" className="block text-sm font-medium text-muted mb-2">
-              Slug <span className="text-xs text-gray-500">(URL-friendly identifier, auto-generated if empty)</span>
-            </label>
-            <input
-              type="text"
-              id="slug"
-              name="slug"
-              value={formData.slug}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-              placeholder="e.g., my-game-title"
-            />
-          </div>
+          <InstallConfigurationSection
+            mode={mode}
+            gameId={gameId}
+            formData={formData}
+            setFormData={setFormData}
+            handleChange={handleChange}
+            sectionRef={(el) => {
+              sectionRefs.current['install'] = el;
+            }}
+            romPlatforms={ROM_PLATFORMS}
+            mameAspectValue={mameAspectValue}
+            mameIntegerScaleSelect={mameIntegerScaleSelect}
+            mameBorderlessSelect={mameBorderlessSelect}
+            updateMameOverrides={updateMameOverrides}
+            onOpenRomExplorer={() => setShowRomFileExplorer(true)}
+            activeInstallation={activeInstallation}
+            selectedLutrisInstallerId={activePlatformConfig?.selectedLutrisInstallerId}
+            formatInstalledPathForDisplay={formatInstalledPathForDisplay}
+            onOpenWineMonitor={() => setShowWineMonitorModal(true)}
+            onOpenLogs={() => setShowLogsDialog(true)}
+            onCancelInstallation={handleCancelInstallation}
+            onReinstall={handleReinstall}
+            onOpenShortcutSelector={() => setShowShortcutDialog(true)}
+            onOpenFileExplorer={() => setShowFileExplorer(true)}
+          />
 
-          {/* Platforms */}
-          <div>
-            <label className="block text-sm font-medium text-muted mb-2">
-              Platforms
-            </label>
-            
-            <div className="space-y-3">
-              {/* List of configured platforms */}
-              <div className="flex flex-wrap gap-2">
-                {formData.platforms.map(p => (
-                  <div key={p.platformId} className="relative group">
-                    <button
-                      type="button"
-                      onClick={() => switchPlatform(p.platformId)}
-                      className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                        formData.platformId === p.platformId
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      {getPlatformName(p.platformId)}
-                    </button>
-                    {formData.platforms.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemovePlatform(p.platformId);
-                        }}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                        title="Remove platform"
-                      >
-                        <TrashIcon className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                
-                {/* Add Platform Button */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddPlatform(!showAddPlatform)}
-                    className="px-3 py-2 border border-dashed border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-500 hover:text-blue-600 hover:border-blue-500 transition-colors flex items-center gap-1"
-                  >
-                    <PlusIcon className="w-4 h-4" />
-                    Add Platform
-                  </button>
-                  
-                  {/* Add Platform Dropdown */}
-                  {showAddPlatform && (
-                    <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 z-20 max-h-60 overflow-y-auto">
-                      <div className="p-2 space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => handleAddPlatform('linux-native')}
-                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          Native (Linux)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddPlatform('windows-wine')}
-                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          Wine (Windows)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddPlatform('mame')}
-                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          Arcade (MAME)
-                        </button>
-                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
-                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Nintendo</p>
-                        <button
-                          type="button"
-                          onClick={() => handleAddPlatform('nes')}
-                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          Nintendo (NES)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddPlatform('snes')}
-                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          Super Nintendo (SNES)
-                        </button>
-                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
-                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Sony</p>
-                        <button
-                          type="button"
-                          onClick={() => handleAddPlatform('psx')}
-                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                        >
-                          PlayStation 1
-                        </button>
-                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
-                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Commodore</p>
-                        {['c64', 'c128', 'vic20', 'plus4', 'pet'].map(id => (
-                          <button
-                            key={id}
-                            type="button"
-                            onClick={() => handleAddPlatform(id)}
-                            className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            {getPlatformName(id)}
-                          </button>
-                        ))}
-                        <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
-                        <p className="px-3 py-1 text-xs font-semibold text-gray-500">Amiga</p>
-                        {['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].map(id => (
-                          <button
-                            key={id}
-                            type="button"
-                            onClick={() => handleAddPlatform(id)}
-                            className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            {getPlatformName(id)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              {formData.platforms.length === 0 && (
-                <p className="text-sm text-red-500">
-                  Please add at least one platform configuration.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>{/* End Basic Information section */}
-
-          {/* Game Screenshots */}
-          {mode === 'edit' && (
-            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">📸 Screenshots</h3>
-
-              {screenshots.length === 0 ? (
-                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-6 text-center">
-                  <p className="text-muted">No screenshots captured yet.</p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Use the emulator screenshot hotkey (RetroArch default: F8) to capture screenshots.
-                  </p>
-                </div>
-              ) : (
-                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                  {/* Carousel */}
-                  <div className="relative aspect-video rounded-lg overflow-hidden bg-black">
-                    <img
-                      src={screenshots[currentScreenshotIndex]?.path}
-                      alt={`Screenshot ${currentScreenshotIndex + 1}`}
-                      className="w-full h-full object-contain"
-                    />
-
-                    {screenshots.length > 1 && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCurrentScreenshotIndex(
-                              (prev) => (prev - 1 + screenshots.length) % screenshots.length
-                            )
-                          }
-                          className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
-                          title="Previous"
-                        >
-                          ‹
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCurrentScreenshotIndex(
-                              (prev) => (prev + 1) % screenshots.length
-                            )
-                          }
-                          className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
-                          title="Next"
-                        >
-                          ›
-                        </button>
-                      </>
-                    )}
-
-                    <div className="absolute bottom-2 right-2 px-2 py-1 text-xs bg-black/60 text-white rounded">
-                      {currentScreenshotIndex + 1} / {screenshots.length}
-                    </div>
-                  </div>
-
-                  {/* Thumbnails */}
-                  <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
-                    {screenshots.map((screenshot, index) => (
-                      <button
-                        key={screenshot.filename}
-                        type="button"
-                        onClick={() => setCurrentScreenshotIndex(index)}
-                        className={`flex-shrink-0 border rounded overflow-hidden ${
-                          index === currentScreenshotIndex
-                            ? 'border-blue-500 ring-2 ring-blue-400'
-                            : 'border-gray-300 dark:border-gray-600'
-                        }`}
-                      >
-                        <img
-                          src={screenshot.path}
-                          alt={`Screenshot ${index + 1}`}
-                          className="h-16 w-24 object-cover"
-                        />
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const current = screenshots[currentScreenshotIndex];
-                        if (!current) return;
-                        setFormData((prev) => ({
-                          ...prev,
-                          metadata: { ...prev.metadata, primaryImage: current.path },
-                        }));
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                    >
-                      Use as Cover
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const current = screenshots[currentScreenshotIndex];
-                        if (current) window.open(current.path, '_blank');
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-                    >
-                      View Full Size
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Install Configuration section */}
-          {mode === 'edit' && (
-            <div
-              id="install"
-              ref={(el) => { sectionRefs.current['install'] = el; }}
-              className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
-            >
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-semibold text-text border-b pb-2">Install Configuration</h3>
-                {formData.platformId === 'windows-wine' && activeInstallation?.status !== 'installed' && (
-                  <span className="text-xs text-purple-500 dark:text-purple-400">
-                    — available when you install
-                  </span>
-                )}
-              </div>
-              <div className="space-y-4">
-                {/* ROM Selection for emulator platforms */}
-                {ROM_PLATFORMS.includes(formData.platformId) && (
-                  <div>
-                    <label htmlFor="filePath" className="block text-sm font-medium text-muted mb-2">
-                      ROM File
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        id="filePath"
-                        name="filePath"
-                        value={formData.filePath || ''}
-                        onChange={handleChange}
-                        className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        placeholder="Select a ROM file"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowRomFileExplorer(true)}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
-                      >
-                        <FolderIcon className="w-4 h-4" />
-                        Select ROM
-                      </button>
-                    </div>
-                    {formData.filePath && (
-                      <p className="text-xs text-muted mt-2 break-all">
-                        Selected: {formData.filePath}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {formData.platformId === 'mame' && (
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900 space-y-4">
-                    <div>
-                      <div className="text-sm font-semibold text-text">MAME Display Overrides</div>
-                      <div className="text-xs text-muted">
-                        Leave as Use Global to follow the RetroArch defaults in Settings.
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label htmlFor="mameAspectOverride" className="block text-sm font-medium text-muted mb-2">
-                          Aspect Ratio
-                        </label>
-                        <select
-                          id="mameAspectOverride"
-                          value={mameAspectValue}
-                          onChange={(e) => {
-                            const value = e.target.value as RetroarchMameAspect | 'default';
-                            updateMameOverrides({ aspect: value === 'default' ? undefined : value });
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        >
-                          <option value="default">Use Global</option>
-                          <option value="4:3">4:3</option>
-                          <option value="auto">Auto</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label htmlFor="mameIntegerScaleOverride" className="block text-sm font-medium text-muted mb-2">
-                          Integer Scale
-                        </label>
-                        <select
-                          id="mameIntegerScaleOverride"
-                          value={mameIntegerScaleSelect}
-                          onChange={(e) => {
-                            const value = e.target.value as 'default' | 'true' | 'false';
-                            updateMameOverrides({
-                              integerScale: value === 'default' ? undefined : value === 'true',
-                            });
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        >
-                          <option value="default">Use Global</option>
-                          <option value="true">Enabled</option>
-                          <option value="false">Disabled</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label htmlFor="mameBorderlessOverride" className="block text-sm font-medium text-muted mb-2">
-                          Borderless Fullscreen
-                        </label>
-                        <select
-                          id="mameBorderlessOverride"
-                          value={mameBorderlessSelect}
-                          onChange={(e) => {
-                            const value = e.target.value as 'default' | 'true' | 'false';
-                            updateMameOverrides({
-                              borderlessFullscreen: value === 'default' ? undefined : value === 'true',
-                            });
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        >
-                          <option value="default">Use Global</option>
-                          <option value="true">Enabled</option>
-                          <option value="false">Disabled</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-              {/* Wine Version Selection - only show for Wine platform */}
-              {formData.platformId === 'windows-wine' && (
-                <WineVersionSelector
-                  value={formData.settings?.wine?.version || 'default'}
-                  umuGameId={formData.settings?.wine?.umuGameId || ''}
-                  gameSlug={formData.slug || ''}
-                  onChange={(versionId, umuGameId) => {
-                    setFormData(prev => ({
-                      ...prev,
-                      settings: {
-                        ...prev.settings,
-                        wine: {
-                          ...prev.settings?.wine,
-                          version: versionId === 'default' ? undefined : versionId,
-                          umuGameId: umuGameId || undefined,
-                        },
-                      },
-                    }));
-                  }}
-                />
-              )}
-
-              {/* Wine Installation Helper */}
-              {formData.platformId === 'windows-wine' && mode === 'edit' && gameId && (
-                <div className="space-y-3 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-text">Wine Installation</div>
-                      <div className="text-xs text-gray-500">
-                        Pick an installer, run it in the Wine runner, then select what to launch.
-                      </div>
-                    </div>
-
-                    {activeInstallation?.status !== 'installed' && (
-                      <button
-                        type="button"
-                        onClick={() => setShowInstallDialog(true)}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                      >
-                        {activeInstallation?.status === 'installing' ? 'Installing…' : 'Install / Reinstall'}
-                      </button>
-                    )}
-                  </div>
-
-                  {activeInstallation?.status === 'installing' && (
-                    <div className="space-y-3">
-                      <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl animate-pulse">🍷</span>
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-purple-900 dark:text-purple-100">
-                              Wine Installation Running
-                            </div>
-                            <div className="text-xs text-purple-700 dark:text-purple-300 mt-0.5">
-                              Complete the installer in the Wine desktop, then come back here.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowWineMonitorModal(true)}
-                          className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors flex items-center gap-2"
-                          title="Open installation monitor with live logs"
-                        >
-                          <span>🧘</span>
-                          Open Monitor
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowLogsDialog(true)}
-                          className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 text-text rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                          title="View raw container logs"
-                        >
-                          View Logs
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCancelInstallation}
-                          className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                          title="Stop the installation container and reset to not installed"
-                        >
-                          Cancel Installation
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {activeInstallation?.status === 'failed' && (
-                    <div className="text-sm text-red-700 dark:text-red-300">
-                      Installation failed{activeInstallation?.error ? `: ${activeInstallation.error}` : '.'}
-                    </div>
-                  )}
-
-                  {activeInstallation?.status === 'installed' && activeInstallation?.installPath && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm text-green-700 dark:text-green-300">✓ Installed</div>
-                        <button
-                          type="button"
-                          onClick={handleReinstall}
-                          className="px-3 py-1.5 text-sm border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300 rounded-md hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors"
-                          title="Reset installation status and run installer again"
-                        >
-                          Reinstall
-                        </button>
-                      </div>
-                      {typeof (activeInstallation as any)?.installerArgs === 'string' && (activeInstallation as any).installerArgs.trim() !== '' && (
-                        <div className="text-xs text-gray-500">
-                          Installer args: <span className="font-mono break-all">{(activeInstallation as any).installerArgs}</span>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowShortcutDialog(true)}
-                          className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
-                          title="Search for Windows shortcuts (.lnk)"
-                        >
-                          <MagnifyingGlassIcon className="w-4 h-4" />
-                          Find Shortcuts
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowFileExplorer(true)}
-                          className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                          title="Browse installation directory to pick an executable"
-                        >
-                          <FolderIcon className="w-4 h-4" />
-                          Browse Install Folder
-                        </button>
-                      </div>
-                      <div className="text-xs text-gray-500 font-mono break-all">
-                        <div>{formatInstalledPathForDisplay(activeInstallation.installPath)}</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {formData.platformId === 'windows-wine' && (
-                <div>
-                  <label htmlFor="settings.launch.command" className="block text-sm font-medium text-muted mb-2">
-                    Launch Command
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      id="settings.launch.command"
-                      name="settings.launch.command"
-                      value={formData.settings?.launch?.command || ''}
-                      onChange={handleChange}
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                      placeholder="./start.sh or game.exe"
-                    />
-                    {activeInstallation?.status === 'installed' && activeInstallation?.installPath && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setShowShortcutDialog(true)}
-                          className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-1"
-                          title="Search for shortcut files"
-                        >
-                          <MagnifyingGlassIcon className="w-4 h-4" />
-                          Shortcuts
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowFileExplorer(true)}
-                          className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
-                          title="Browse installation directory"
-                        >
-                          <FolderIcon className="w-4 h-4" />
-                          Browse
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-              </div>
-            </div>
-          )}
-          {/* End Install Configuration section */}
-
-          {/* Rendering Section - Only show for Wine games when installed */}
-          {formData.platformId === 'windows-wine' && activeInstallation?.status === 'installed' && (
-            <div 
-              id="rendering"
-              ref={(el) => { sectionRefs.current['rendering'] = el; }}
-              className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
-            >
-              <h3 className="text-lg font-semibold text-text border-b pb-2">Rendering</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                Configure graphics rendering for DirectX translation and display options.
-              </p>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="settings.wine.renderer" className="block text-sm font-medium text-muted mb-2">
-                      WineD3D Renderer
-                    </label>
-                    <select
-                      id="settings.wine.renderer"
-                      name="settings.wine.renderer"
-                      value={formData.settings?.wine?.renderer || 'opengl'}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                    >
-                      <option value="opengl">OpenGL — Most Compatible</option>
-                      <option value="vulkan">Vulkan — Experimental (WineD3D)</option>
-                      <option value="gdi">GDI — Software/2D Games Only</option>
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      This sets how WineD3D translates DirectDraw/D3D calls. OpenGL is recommended for most games.
-                      For DX9-11 games with DXVK enabled, this setting is bypassed.
-                    </p>
-                  </div>
-
-                  {/* DXVK / VKD3D-Proton Settings */}
-                  <div className="col-span-2">
-                    <DxvkVersionSelector
-                      enabled={formData.settings?.wine?.useDxvk || false}
-                      versionId={formData.settings?.wine?.dxvkVersion}
-                      onEnabledChange={(enabled) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          settings: {
-                            ...prev.settings,
-                            wine: {
-                              ...prev.settings?.wine,
-                              useDxvk: enabled,
-                            },
-                          },
-                        }));
-                      }}
-                      onVersionChange={(versionId) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          settings: {
-                            ...prev.settings,
-                            wine: {
-                              ...prev.settings?.wine,
-                              dxvkVersion: versionId,
-                            },
-                          },
-                        }));
-                      }}
-                      showVkd3d={true}
-                      vkd3dEnabled={formData.settings?.wine?.useVkd3dProton || false}
-                      vkd3dVersionId={formData.settings?.wine?.vkd3dVersion}
-                      onVkd3dEnabledChange={(enabled) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          settings: {
-                            ...prev.settings,
-                            wine: {
-                              ...prev.settings?.wine,
-                              useVkd3dProton: enabled,
-                            },
-                          },
-                        }));
-                      }}
-                      onVkd3dVersionChange={(versionId) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          settings: {
-                            ...prev.settings,
-                            wine: {
-                              ...prev.settings?.wine,
-                              vkd3dVersion: versionId,
-                            },
-                          },
-                        }));
-                      }}
-                    />
-                  </div>
-
-                  <div className="col-span-2">
-                    {(() => {
-                      const wineVersion = formData.settings?.wine?.version || '';
-                      const isProton = /^ge-|proton|umu/i.test(wineVersion);
-                      return (
-                        <>
-                          <label className={`flex items-center space-x-2 ${isProton ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                            <input
-                              type="checkbox"
-                              checked={formData.settings?.launch?.fullscreen || false}
-                              disabled={isProton}
-                              onChange={(e) => {
-                                setFormData((prev) => ({
-                                  ...prev,
-                                  settings: {
-                                    ...prev.settings,
-                                    launch: {
-                                      ...prev.settings?.launch,
-                                      fullscreen: e.target.checked,
-                                    },
-                                  },
-                                }));
-                              }}
-                              className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-                            />
-                            <span className="text-sm font-medium text-muted">
-                              Wine virtual desktop
-                            </span>
-                          </label>
-                          {isProton ? (
-                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 ml-6">
-                              ⚠️ Not compatible with GE-Proton — use Gamescope for fullscreen instead
-                            </p>
-                          ) : (
-                            <p className="text-xs text-gray-500 mt-1 ml-6">
-                              Creates a desktop window containing the game. Note: Old games run at their native resolution
-                              inside this window. For true fullscreen with upscaling, use <strong>Gamescope</strong> below.
-                            </p>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
-
-                  {formData.settings?.launch?.fullscreen && (
-                    <div>
-                      <label htmlFor="settings.launch.resolution" className="block text-sm font-medium text-muted mb-2">
-                        Resolution
-                      </label>
-                      <select
-                        id="settings.launch.resolution"
-                        name="settings.launch.resolution"
-                        value={formData.settings?.launch?.resolution || '1920x1080'}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                      >
-                        <option value="1920x1080">1920x1080 (Full HD)</option>
-                        <option value="2560x1440">2560x1440 (QHD)</option>
-                        <option value="3840x2160">3840x2160 (4K)</option>
-                        <option value="1600x900">1600x900</option>
-                        <option value="1440x900">1440x900</option>
-                        <option value="1366x768">1366x768</option>
-                        <option value="1280x1024">1280x1024</option>
-                        <option value="1280x720">1280x720 (HD)</option>
-                        <option value="1024x768">1024x768</option>
-                        <option value="800x600">800x600</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {formData.settings?.launch?.fullscreen && (
-                    <div className="col-span-2">
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={formData.settings?.launch?.useXrandr || false}
-                          onChange={(e) => {
-                            setFormData((prev) => ({
-                              ...prev,
-                              settings: {
-                                ...prev.settings,
-                                launch: {
-                                  ...prev.settings?.launch,
-                                  useXrandr: e.target.checked,
-                                },
-                              },
-                            }));
-                          }}
-                          className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-sm font-medium text-muted">
-                          Set display resolution before launch (xrandr)
-                        </span>
-                      </label>
-                      <p className="text-xs text-gray-500 mt-1 ml-6">
-                        Automatically changes your display resolution to match the game. Useful for older games that don't handle resolution scaling well.
-                      </p>
-                    </div>
-                  )}
-
-                  {formData.settings?.launch?.fullscreen && formData.settings?.launch?.useXrandr && (
-                    <div>
-                      <label htmlFor="settings.launch.xrandrMode" className="block text-sm font-medium text-muted mb-2">
-                        xrandr Resolution
-                      </label>
-                      <input
-                        type="text"
-                        id="settings.launch.xrandrMode"
-                        name="settings.launch.xrandrMode"
-                        value={formData.settings?.launch?.xrandrMode || formData.settings?.launch?.resolution || '1920x1080'}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        placeholder="e.g., 1920x1080"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Display resolution to set via xrandr (defaults to game resolution above)
-                      </p>
-                    </div>
-                  )}
-              </div>{/* End grid */}
-            </div>
-          )}{/* End Rendering section */}
-
-          {/* Wine Advanced Settings - DLL Overrides, Winetricks, Registry */}
           {formData.platformId === 'windows-wine' && (
-            <div 
-              id="wine-advanced"
-              ref={(el) => { sectionRefs.current['wine-advanced'] = el; }}
-              className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
-            >
-              <h3 className="text-lg font-semibold text-text border-b pb-2">Wine Advanced Configuration</h3>
-                  
-                  {/* DLL Overrides */}
-                  <div className="mb-4">
-                    <label htmlFor="settings.wine.dllOverrides" className="block text-sm font-medium text-muted mb-2">
-                      DLL Overrides (WINEDLLOVERRIDES)
-                    </label>
-                    <input
-                      type="text"
-                      id="settings.wine.dllOverrides"
-                      name="settings.wine.dllOverrides"
-                      value={formData.settings?.wine?.dllOverrides || ''}
-                      onChange={(e) => {
-                        setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            wine: {
-                              ...formData.settings?.wine,
-                              dllOverrides: e.target.value,
-                            },
-                          },
-                        });
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                      placeholder="e.g., quartz=disabled;wmvcore=disabled"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Semicolon-separated DLL overrides. Common modes: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">disabled</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">native</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">builtin</code>, <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">native,builtin</code>
-                    </p>
-                  </div>
-
-                  {/* Winetricks */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-muted mb-2">
-                      Winetricks Components
-                    </label>
-                    <div className="space-y-2">
-                      {(formData.settings?.wine?.winetricks || []).map((verb, index) => (
-                        <div key={index} className="flex gap-2">
-                          <input
-                            type="text"
-                            value={verb}
-                            onChange={(e) => {
-                              const newWinetricks = [...(formData.settings?.wine?.winetricks || [])];
-                              newWinetricks[index] = e.target.value;
-                              setFormData({
-                                ...formData,
-                                settings: {
-                                  ...formData.settings,
-                                  wine: {
-                                    ...formData.settings?.wine,
-                                    winetricks: newWinetricks,
-                                  },
-                                },
-                              });
-                            }}
-                            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                            placeholder="e.g., vcrun2019, dxvk, d3dx9"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newWinetricks = (formData.settings?.wine?.winetricks || []).filter((_, i) => i !== index);
-                              setFormData({
-                                ...formData,
-                                settings: {
-                                  ...formData.settings,
-                                  wine: {
-                                    ...formData.settings?.wine,
-                                    winetricks: newWinetricks,
-                                  },
-                                },
-                              });
-                            }}
-                            className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData({
-                            ...formData,
-                            settings: {
-                              ...formData.settings,
-                              wine: {
-                                ...formData.settings?.wine,
-                                winetricks: [...(formData.settings?.wine?.winetricks || []), ''],
-                              },
-                            },
-                          });
-                        }}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-                      >
-                        + Add Winetricks Verb
-                      </button>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Install Windows components before launching. Common: vcrun2019, dxvk, d3dx9, physx, dotnet48
-                    </p>
-                  </div>
-
-                  {/* Registry Settings */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-muted mb-2">
-                      Windows Registry Settings
-                    </label>
-                    <div className="space-y-2">
-                      {(formData.settings?.wine?.registrySettings || []).map((reg, index) => (
-                        <div key={index} className="p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-800">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
-                            <input
-                              type="text"
-                              value={reg.path}
-                              onChange={(e) => {
-                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
-                                newSettings[index] = { ...newSettings[index], path: e.target.value };
-                                setFormData({
-                                  ...formData,
-                                  settings: {
-                                    ...formData.settings,
-                                    wine: {
-                                      ...formData.settings?.wine,
-                                      registrySettings: newSettings,
-                                    },
-                                  },
-                                });
-                              }}
-                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
-                              placeholder="HKCU\Software\MyGame"
-                            />
-                            <input
-                              type="text"
-                              value={reg.name}
-                              onChange={(e) => {
-                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
-                                newSettings[index] = { ...newSettings[index], name: e.target.value };
-                                setFormData({
-                                  ...formData,
-                                  settings: {
-                                    ...formData.settings,
-                                    wine: {
-                                      ...formData.settings?.wine,
-                                      registrySettings: newSettings,
-                                    },
-                                  },
-                                });
-                              }}
-                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
-                              placeholder="ValueName"
-                            />
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <select
-                              value={reg.type}
-                              onChange={(e) => {
-                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
-                                newSettings[index] = { ...newSettings[index], type: e.target.value as 'REG_SZ' | 'REG_DWORD' | 'REG_BINARY' | 'REG_MULTI_SZ' | 'REG_EXPAND_SZ' };
-                                setFormData({
-                                  ...formData,
-                                  settings: {
-                                    ...formData.settings,
-                                    wine: {
-                                      ...formData.settings?.wine,
-                                      registrySettings: newSettings,
-                                    },
-                                  },
-                                });
-                              }}
-                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
-                            >
-                              <option value="REG_SZ">REG_SZ (String)</option>
-                              <option value="REG_DWORD">REG_DWORD (Integer)</option>
-                              <option value="REG_BINARY">REG_BINARY</option>
-                              <option value="REG_MULTI_SZ">REG_MULTI_SZ</option>
-                              <option value="REG_EXPAND_SZ">REG_EXPAND_SZ</option>
-                            </select>
-                            <input
-                              type="text"
-                              value={reg.value}
-                              onChange={(e) => {
-                                const newSettings = [...(formData.settings?.wine?.registrySettings || [])];
-                                newSettings[index] = { ...newSettings[index], value: e.target.value };
-                                setFormData({
-                                  ...formData,
-                                  settings: {
-                                    ...formData.settings,
-                                    wine: {
-                                      ...formData.settings?.wine,
-                                      registrySettings: newSettings,
-                                    },
-                                  },
-                                });
-                              }}
-                              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text text-sm"
-                              placeholder="Value (e.g., 0x1 for DWORD)"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const newSettings = (formData.settings?.wine?.registrySettings || []).filter((_, i) => i !== index);
-                                setFormData({
-                                  ...formData,
-                                  settings: {
-                                    ...formData.settings,
-                                    wine: {
-                                      ...formData.settings?.wine,
-                                      registrySettings: newSettings,
-                                    },
-                                  },
-                                });
-                              }}
-                              className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData({
-                            ...formData,
-                            settings: {
-                              ...formData.settings,
-                              wine: {
-                                ...formData.settings?.wine,
-                                registrySettings: [
-                                  ...(formData.settings?.wine?.registrySettings || []),
-                                  { path: '', name: '', type: 'REG_DWORD' as const, value: '' },
-                                ],
-                              },
-                            },
-                          });
-                        }}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-                      >
-                        + Add Registry Setting
-                      </button>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Set Windows registry values before launching. Useful for game-specific settings like disabling intro videos.
-                    </p>
-                  </div>
-            </div>
-          )}{/* End Wine Advanced section */}
-
-          {/* Gamescope Compositor - Part of Rendering but always visible */}
-          {formData.platformId === 'windows-wine' && (
-            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">Display Compositor</h3>
-              
-              {/* Gamescope toggle */}
-              <div className="flex items-center gap-2 mb-4">
-                <input
-                  type="checkbox"
-                  id="settings.gamescope.enabled"
-                  checked={formData.settings?.gamescope?.enabled || false}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...formData.settings,
-                        gamescope: {
-                          ...formData.settings?.gamescope,
-                          enabled: e.target.checked,
-                        },
-                      },
-                    });
-                  }}
-                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                />
-                  <label htmlFor="settings.gamescope.enabled" className="text-sm font-medium text-text">
-                    Use Gamescope compositor
-                  </label>
-                  <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded">
-                    Recommended for old games
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 mb-3">
-                  Gamescope provides true fullscreen, upscaling (FSR/NIS), and proper resolution handling for old games.
-                  Set the game&apos;s native resolution below and Gamescope will upscale it to fill your display.
-                </p>
-
-                {formData.settings?.gamescope?.enabled && (
-                  <div className="space-y-4 pl-6 border-l-2 border-blue-500">
-                    {/* Output Resolution (Display) */}
-                    <div>
-                      <label htmlFor="settings.gamescope.width" className="block text-sm font-medium text-muted mb-2">
-                        Output Resolution
-                      </label>
-                      <div className="grid grid-cols-2 gap-4">
-                        <select
-                          id="settings.gamescope.width"
-                          name="settings.gamescope.width"
-                          value={formData.settings?.gamescope?.width || 1920}
-                          onChange={(e) => {
-                            const value = parseInt(e.target.value);
-                            const heightMap: Record<number, number> = {
-                              640: 480,
-                              800: 600,
-                              1024: 768,
-                              1280: 720,
-                              1366: 768,
-                              1600: 900,
-                              1920: 1080,
-                              2560: 1440,
-                              3840: 2160,
-                            };
-                            setFormData({
-                              ...formData,
-                              settings: {
-                                ...formData.settings,
-                                gamescope: {
-                                  ...formData.settings?.gamescope,
-                                  width: value,
-                                  height: heightMap[value] || formData.settings?.gamescope?.height || 1080,
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        >
-                          <option value="640">640x480 (VGA)</option>
-                          <option value="800">800x600 (SVGA)</option>
-                          <option value="1024">1024x768 (XGA)</option>
-                          <option value="1280">1280x720 (HD)</option>
-                          <option value="1366">1366x768 (WXGA)</option>
-                          <option value="1600">1600x900 (HD+)</option>
-                          <option value="1920">1920x1080 (Full HD)</option>
-                          <option value="2560">2560x1440 (QHD)</option>
-                          <option value="3840">3840x2160 (4K UHD)</option>
-                        </select>
-                        <input
-                          type="number"
-                          id="settings.gamescope.height"
-                          name="settings.gamescope.height"
-                          value={formData.settings?.gamescope?.height || 1080}
-                          onChange={handleChange}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                          placeholder="Height"
-                        />
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Display resolution (what you see on screen)
-                      </p>
-                    </div>
-
-                    {/* Game Resolution (Internal) */}
-                    <div>
-                      <label htmlFor="settings.gamescope.inputWidth" className="block text-sm font-medium text-muted mb-2">
-                        Game Internal Resolution (optional)
-                      </label>
-                      <div className="grid grid-cols-2 gap-4">
-                        <select
-                          id="settings.gamescope.inputWidth"
-                          name="settings.gamescope.inputWidth"
-                          value={formData.settings?.gamescope?.inputWidth || ''}
-                          onChange={(e) => {
-                            const value = e.target.value ? parseInt(e.target.value) : undefined;
-                            const heightMap: Record<number, number> = {
-                              640: 480,
-                              800: 600,
-                              1024: 768,
-                              1280: 720,
-                              1366: 768,
-                              1600: 900,
-                              1920: 1080,
-                              2560: 1440,
-                              3840: 2160,
-                            };
-                            setFormData({
-                              ...formData,
-                              settings: {
-                                ...formData.settings,
-                                gamescope: {
-                                  ...formData.settings?.gamescope,
-                                  inputWidth: value,
-                                  inputHeight: value ? heightMap[value] : undefined,
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        >
-                          <option value="">Same as output</option>
-                          <option value="640">640x480 (VGA)</option>
-                          <option value="800">800x600 (SVGA)</option>
-                          <option value="1024">1024x768 (XGA)</option>
-                          <option value="1280">1280x720 (HD)</option>
-                          <option value="1366">1366x768 (WXGA)</option>
-                          <option value="1600">1600x900 (HD+)</option>
-                          <option value="1920">1920x1080 (Full HD)</option>
-                          <option value="2560">2560x1440 (QHD)</option>
-                          <option value="3840">3840x2160 (4K UHD)</option>
-                        </select>
-                        <input
-                          type="number"
-                          id="settings.gamescope.inputHeight"
-                          name="settings.gamescope.inputHeight"
-                          value={formData.settings?.gamescope?.inputHeight || ''}
-                          onChange={handleChange}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                          placeholder="Height (auto)"
-                        />
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Internal resolution the game renders at (for upscaling). Leave empty to match output resolution.
-                      </p>
-                    </div>
-
-                    {/* Refresh Rate */}
-                    <div>
-                      <label htmlFor="settings.gamescope.refreshRate" className="block text-sm font-medium text-muted mb-2">
-                        Refresh Rate
-                      </label>
-                      <select
-                        id="settings.gamescope.refreshRate"
-                        name="settings.gamescope.refreshRate"
-                        value={formData.settings?.gamescope?.refreshRate || 60}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                      >
-                        <option value="30">30 Hz</option>
-                        <option value="60">60 Hz</option>
-                        <option value="75">75 Hz</option>
-                        <option value="90">90 Hz</option>
-                        <option value="120">120 Hz</option>
-                        <option value="144">144 Hz</option>
-                        <option value="165">165 Hz</option>
-                        <option value="240">240 Hz</option>
-                      </select>
-                    </div>
-
-                    {/* Upscaler */}
-                    <div>
-                      <label htmlFor="settings.gamescope.upscaler" className="block text-sm font-medium text-muted mb-2">
-                        Upscaler
-                      </label>
-                      <select
-                        id="settings.gamescope.upscaler"
-                        name="settings.gamescope.upscaler"
-                        value={formData.settings?.gamescope?.upscaler || 'auto'}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                      >
-                        <option value="auto">Auto</option>
-                        <option value="fsr">FSR (AMD FidelityFX)</option>
-                        <option value="nis">NIS (NVIDIA Image Scaling)</option>
-                        <option value="linear">Linear</option>
-                        <option value="nearest">Nearest</option>
-                      </select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Upscaling filter for better image quality when game resolution differs from output
-                      </p>
-                    </div>
-
-                    {/* Fullscreen */}
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="settings.gamescope.fullscreen"
-                        checked={formData.settings?.gamescope?.fullscreen || false}
-                        onChange={(e) => {
-                          setFormData({
-                            ...formData,
-                            settings: {
-                              ...formData.settings,
-                              gamescope: {
-                                ...formData.settings?.gamescope,
-                                fullscreen: e.target.checked,
-                              },
-                            },
-                          });
-                        }}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                      />
-                      <label htmlFor="settings.gamescope.fullscreen" className="text-sm text-text">
-                        Fullscreen
-                      </label>
-                    </div>
-
-                    {/* Frame Rate Limit */}
-                    <div>
-                      <label htmlFor="settings.gamescope.limitFps" className="block text-sm font-medium text-muted mb-2">
-                        FPS Limit (optional)
-                      </label>
-                      <input
-                        type="number"
-                        id="settings.gamescope.limitFps"
-                        name="settings.gamescope.limitFps"
-                        value={formData.settings?.gamescope?.limitFps || ''}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                        placeholder="e.g., 60"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Leave empty for no limit
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-              {/* MangoHUD Performance Overlay */}
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="settings.mangohud.enabled"
-                    checked={formData.settings?.mangohud?.enabled || false}
-                    onChange={(e) => {
-                      setFormData({
-                        ...formData,
-                        settings: {
-                          ...formData.settings,
-                          mangohud: {
-                            ...formData.settings?.mangohud,
-                            enabled: e.target.checked,
-                          },
-                        },
-                      });
-                    }}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                  />
-                  <label htmlFor="settings.mangohud.enabled" className="text-sm font-medium text-text">
-                    Enable MangoHUD performance overlay
-                  </label>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Display FPS, frame time, CPU/GPU usage, and other performance metrics in-game
-                </p>
-              </div>
-            </div>
-          )}{/* End Display Compositor section */}
-
-          {/* Game Information Section */}
-          <div 
-            id="game-info"
-            ref={(el) => { sectionRefs.current['game-info'] = el; }}
-            className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6"
-          >
-            <h3 className="text-lg font-semibold text-text border-b pb-2">Game Information</h3>
-
-            {/* Description */}
-            <div>
-              <label htmlFor="metadata.description" className="block text-sm font-medium text-muted mb-2">
-                Description
-              </label>
-              <textarea
-                id="metadata.description"
-                name="metadata.description"
-                value={formData.metadata.description}
-                onChange={handleChange}
-                rows={4}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                placeholder="Brief description of the game"
-              />
-            </div>
-
-            {/* Genre */}
-            <div>
-              <label htmlFor="metadata.genre" className="block text-sm font-medium text-muted mb-2">
-                Genre
-              </label>
-              <input
-                type="text"
-                id="metadata.genre"
-                name="metadata.genre"
-                value={formData.metadata.genre}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                placeholder="Action, RPG, Strategy (comma-separated)"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Developer */}
-              <div>
-                <label htmlFor="metadata.developer" className="block text-sm font-medium text-muted mb-2">
-                  Developer
-                </label>
-                <input
-                  type="text"
-                  id="metadata.developer"
-                  name="metadata.developer"
-                  value={formData.metadata.developer}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                  placeholder="Game developer"
-                />
-              </div>
-
-              {/* Publisher */}
-              <div>
-                <label htmlFor="metadata.publisher" className="block text-sm font-medium text-muted mb-2">
-                  Publisher
-                </label>
-                <input
-                  type="text"
-                  id="metadata.publisher"
-                  name="metadata.publisher"
-                  value={formData.metadata.publisher}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                  placeholder="Game publisher"
-                />
-              </div>
-
-              {/* Release Date */}
-              <div>
-                <label htmlFor="metadata.releaseDate" className="block text-sm font-medium text-muted mb-2">
-                  Release Date
-                </label>
-                <input
-                  type="date"
-                  id="metadata.releaseDate"
-                  name="metadata.releaseDate"
-                  value={formData.metadata.releaseDate}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                />
-              </div>
-
-              {/* Rating */}
-              <div>
-                <label htmlFor="metadata.rating" className="block text-sm font-medium text-muted mb-2">
-                  Rating (1-10)
-                </label>
-                <input
-                  type="number"
-                  id="metadata.rating"
-                  name="metadata.rating"
-                  min="1"
-                  max="10"
-                  value={formData.metadata.rating || ''}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-text"
-                  placeholder="1-10"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Image Selection */}
-          {availableImages.length > 0 && (
-            <div className="space-y-4 mb-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">Display Images</h3>
-              
-              {/* Primary Image */}
-              <div>
-                <label className="block text-sm font-medium text-muted mb-2">
-                  Primary Image (Tile Display)
-                </label>
-                <div className="flex items-center gap-4">
-                  {formData.metadata.primaryImage && (
-                    <img
-                      src={formData.metadata.primaryImage}
-                      alt="Primary"
-                      className="w-24 h-24 object-cover rounded border-2 border-blue-500"
-                    />
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowImageSelector('primary')}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                  >
-                    {formData.metadata.primaryImage ? 'Change' : 'Select'} Primary Image
-                  </button>
-                  {formData.metadata.primaryImage && (
-                    <button
-                      type="button"
-                      onClick={() => setFormData(prev => ({
-                        ...prev,
-                        metadata: { ...prev.metadata, primaryImage: '' }
-                      }))}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Backdrop Image */}
-              <div>
-                <label className="block text-sm font-medium text-muted mb-2">
-                  Backdrop Image (Hover Effect)
-                </label>
-                <div className="flex items-center gap-4">
-                  {formData.metadata.backdropImage && (
-                    <img
-                      src={formData.metadata.backdropImage}
-                      alt="Backdrop"
-                      className="w-32 h-18 object-cover rounded border-2 border-purple-500"
-                    />
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowImageSelector('backdrop')}
-                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
-                  >
-                    {formData.metadata.backdropImage ? 'Change' : 'Select'} Backdrop Image
-                  </button>
-                  {formData.metadata.backdropImage && (
-                    <button
-                      type="button"
-                      onClick={() => setFormData(prev => ({
-                        ...prev,
-                        metadata: { ...prev.metadata, backdropImage: '' }
-                      }))}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Image Selector Modal */}
-              {showImageSelector && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                  <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
-                    <h3 className="text-xl font-semibold mb-4 text-text">
-                      Select {showImageSelector === 'primary' ? 'Primary' : 'Backdrop'} Image
-                    </h3>
-                    
-                    {/* Game Screenshots Section */}
-                    {screenshots.length > 0 && (
-                      <div className="mb-6">
-                        <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
-                          Your Screenshots
-                        </h4>
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                          {screenshots.map((screenshot) => (
-                            <div
-                              key={screenshot.filename}
-                              onClick={() => selectImage(screenshot.path)}
-                              className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all group relative"
-                            >
-                              <img
-                                src={screenshot.path}
-                                alt={screenshot.filename}
-                                className="w-full h-32 object-cover"
-                              />
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center">
-                                <span className="text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity px-2 text-center">
-                                  {formatRelativeTime(screenshot.modified)}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* IGDB Images Section */}
-                    {availableImages.length > 0 && (
-                      <div>
-                        <h4 className="text-sm font-semibold text-text mb-2 flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 bg-purple-500 rounded-full"></span>
-                          IGDB Images
-                        </h4>
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                          {availableImages.map((img, index) => (
-                            <div
-                              key={index}
-                              onClick={() => selectImage(img)}
-                              className="cursor-pointer border-2 border-transparent hover:border-blue-500 rounded overflow-hidden transition-all"
-                            >
-                              <img
-                                src={img}
-                                alt={`Option ${index + 1}`}
-                                className="w-full h-32 object-cover"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {availableImages.length === 0 && screenshots.length === 0 && (
-                      <p className="text-center text-muted py-8">No images available</p>
-                    )}
-                    
-                    <button
-                      type="button"
-                      onClick={() => setShowImageSelector(null)}
-                      className="w-full px-4 py-2 mt-6 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Scrape Data */}
-          {scrapeHref && (
-            <div className="space-y-3 mb-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">Scrape Data</h3>
-              <p className="text-sm text-muted">
-                Fetch metadata and images from external sources, then pick tile/backdrop images.
-              </p>
-              <div>
-                <Link
-                  href={scrapeHref}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
-                  title="Scrape metadata and images"
-                >
-                  Scrape Data
-                  <span aria-hidden>
-                    →
-                  </span>
-                </Link>
-              </div>
-            </div>
-          )}
-
-          {/* Game Screenshots - Show for emulator games (VICE) */}
-          {mode === 'edit' && 
-           ['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(formData.platformId) && 
-           screenshots.length > 0 && (
-            <div className="space-y-4 mb-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">Game Screenshots</h3>
-              <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <p className="text-sm text-muted mb-3">
-                  Screenshots captured from VICE emulator (saved in emulator home directory)
-                </p>
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {screenshots.map((screenshot, index) => (
-                    <div 
-                      key={screenshot.filename}
-                      className="flex items-center gap-3 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
-                    >
-                      {/* Thumbnail */}
-                      <div className="flex-shrink-0">
-                        <img
-                          src={screenshot.path}
-                          alt={`Screenshot ${index + 1}`}
-                          className="w-32 h-24 object-cover rounded border border-gray-300 dark:border-gray-600"
-                        />
-                      </div>
-                      
-                      {/* Info */}
-                      <div className="flex-1 min-w0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-text truncate">
-                            {screenshot.filename}
-                          </p>
-                          <div className="relative group">
-                            <InformationCircleIcon className="w-4 h-4 text-gray-400 hover:text-blue-500 cursor-help" />
-                            <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block z-10 w-64 p-3 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg shadow-lg">
-                              <p className="font-medium mb-1">
-                                {new Date(screenshot.modified).toLocaleString()}
-                              </p>
-                              <p className="text-gray-300 dark:text-gray-400">
-                                Captured {formatRelativeTime(screenshot.modified)}
-                              </p>
-                              <div className="absolute left-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
-                            </div>
-                          </div>
-                        </div>
-                        <p className="text-xs text-muted mt-1">
-                          {(screenshot.size / 1024).toFixed(1)} KB
-                        </p>
-                      </div>
-                      
-                      {/* Actions */}
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormData(prev => ({
-                              ...prev,
-                              metadata: { ...prev.metadata, primaryImage: screenshot.path }
-                            }));
-                          }}
-                          className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                        >
-                          Set as Primary
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormData(prev => ({
-                              ...prev,
-                              metadata: { ...prev.metadata, backdropImage: screenshot.path }
-                            }));
-                          }}
-                          className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
-                        >
-                          Set as Backdrop
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Saves & States - Show for RetroArch platforms */}
-          {mode === 'edit' && 
-           RETROARCH_PLATFORMS.includes(formData.platformId) && (
-            <div className="space-y-4 mb-6 border-t border-gray-200 dark:border-gray-700 pt-6">
-              <h3 className="text-lg font-semibold text-text border-b pb-2">💾 Saves & States</h3>
-              
-              {saveFiles.sram.length === 0 && saveFiles.states.length === 0 ? (
-                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-6 text-center">
-                  <p className="text-muted">No save files found for this game.</p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Save files and save states will appear here after you play the game.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Save States */}
-                  {saveFiles.states.length > 0 && (
-                    <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                      <h4 className="font-medium text-text mb-3 flex items-center gap-2">
-                        <span>📸</span> Save States ({saveFiles.states.length})
-                      </h4>
-                      <div className="space-y-2">
-                        {saveFiles.states.map((save) => (
-                          <div 
-                            key={save.filename}
-                            className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-text truncate">
-                                  {save.slot !== undefined ? `Slot ${save.slot}` : save.filename}
-                                </span>
-                                <span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
-                                  {(save.size / 1024).toFixed(1)} KB
-                                </span>
-                              </div>
-                              <p className="text-xs text-muted mt-1">
-                                {formatRelativeTime(save.modified)} • {new Date(save.modified).toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="flex gap-2 ml-4">
-                              <button
-                                type="button"
-                                onClick={() => downloadSave(save.filename, 'state')}
-                                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                              >
-                                Download
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteSave(save.filename, 'state')}
-                                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* SRAM Saves */}
-                  {saveFiles.sram.length > 0 && (
-                    <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                      <h4 className="font-medium text-text mb-3 flex items-center gap-2">
-                        <span>🎮</span> In-Game Saves ({saveFiles.sram.length})
-                      </h4>
-                      <p className="text-xs text-gray-500 mb-3">
-                        Battery/SRAM saves created by the game itself (memory card saves, etc.)
-                      </p>
-                      <div className="space-y-2">
-                        {saveFiles.sram.map((save) => (
-                          <div 
-                            key={save.filename}
-                            className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-text truncate">
-                                  {save.filename}
-                                </span>
-                                <span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
-                                  {(save.size / 1024).toFixed(1)} KB
-                                </span>
-                              </div>
-                              <p className="text-xs text-muted mt-1">
-                                {formatRelativeTime(save.modified)} • {new Date(save.modified).toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="flex gap-2 ml-4">
-                              <button
-                                type="button"
-                                onClick={() => downloadSave(save.filename, 'sram')}
-                                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                              >
-                                Download
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteSave(save.filename, 'sram')}
-                                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Buttons */}
-          <div className="flex gap-4 mt-6">
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              {isSubmitting ? (mode === 'edit' ? 'Saving...' : 'Adding...') : (mode === 'edit' ? 'Save Changes' : 'Add Game')}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (onCancel) {
-                  onCancel();
-                } else {
-                  router.push('/');
-                }
+            <WineRenderingSection
+              formData={formData}
+              setFormData={setFormData}
+              handleChange={handleChange}
+              phase={winePhase}
+              sectionRef={(el) => {
+                sectionRefs.current['rendering'] = el;
               }}
-              className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+            />
+          )}
+
+          {formData.platformId === 'windows-wine' && (
+            <WineMakeItRunSection
+              gameId={gameId}
+              formData={formData}
+              setFormData={setFormData}
+              handleChange={handleChange}
+              selectedLutrisInstallerId={activePlatformConfig?.selectedLutrisInstallerId}
+              makeItRunCompatLoading={makeItRunCompatLoading}
+              makeItRunCompatSummary={makeItRunCompatSummary}
+              makeItRunIoLoading={makeItRunIoLoading}
+              winetricksVerbQuery={winetricksVerbQuery}
+              setWinetricksVerbQuery={setWinetricksVerbQuery}
+              filteredWinetricksVerbs={filteredWinetricksVerbs}
+              commonWinetricksVerbs={COMMON_WINETRICKS_VERBS}
+              applyDllQuickAdd={applyDllQuickAdd}
+              onAutoDetect={handleMakeItRunAutoDetect}
+              onExportToml={handleExportMakeItRunToml}
+              onImportFileSelected={(file) => {
+                void handleImportMakeItRunToml(file);
+              }}
+              onRunRegistrySetup={() => handleRunWineRegistrySetup()}
+              onApplyRegistrySettings={() => handleApplyConfiguredRegistrySettings()}
+              phase={winePhase}
+              sectionRef={(el) => {
+                sectionRefs.current['makeitrun-config'] = el;
+              }}
+            />
+          )}
+
+          {formData.platformId === 'windows-wine' && (
+            <WinePerformanceSection
+              formData={formData}
+              setFormData={setFormData}
+              handleChange={handleChange}
+              isLocked={!canAccessWineAdvanced}
+              phase={winePhase}
+              sectionRef={(el) => {
+                sectionRefs.current['performance'] = el;
+              }}
+            />
+          )}
+
+          <GameInfoSection
+            mode={mode}
+            formData={formData}
+            screenshots={screenshots}
+            currentScreenshotIndex={currentScreenshotIndex}
+            setCurrentScreenshotIndex={setCurrentScreenshotIndex}
+            handleChange={handleChange}
+            setFormData={setFormData}
+            sectionRef={(el) => {
+              sectionRefs.current['game-info'] = el;
+            }}
+          />
+
+          <DisplayImagesSection
+            availableImages={availableImages}
+            screenshots={screenshots}
+            formData={formData}
+            setFormData={setFormData}
+            showImageSelector={showImageSelector}
+            setShowImageSelector={setShowImageSelector}
+            selectImage={selectImage}
+            formatRelativeTime={formatRelativeTime}
+          />
+
+          <ScrapeDataSection scrapeHref={scrapeHref} />
+
+          <RetroMediaSection
+            mode={mode}
+            platformId={formData.platformId}
+            screenshots={screenshots}
+            saveFiles={saveFiles}
+            retroarchPlatforms={RETROARCH_PLATFORMS}
+            setFormData={setFormData}
+            formatRelativeTime={formatRelativeTime}
+            downloadSave={downloadSave}
+            deleteSave={deleteSave}
+          />
+
+          <GameFormActionButtons
+            isSubmitting={isSubmitting}
+            mode={mode}
+            onCancel={onCancel}
+            onCancelFallback={() => router.push('/')}
+          />
           </div>{/* End Main Content Area */}
         </div>{/* End flex container */}
 
-        {/* Installation Dialog */}
-        {showInstallDialog && gameId && formData.platformId && (
-          <InstallGameDialog
-            gameId={gameId}
-            platformId={formData.platformId}
-            onClose={() => setShowInstallDialog(false)}
-            onSuccess={() => {
-              setSuccessMessage('Installation started! Follow the wizard on your display.');
-              // Reload the game data to show installation status
-              window.location.reload();
-            }}
-          />
-        )}
-
-        {/* Shortcut Selector Dialog */}
-        {showShortcutDialog && gameId && activeInstallation?.installPath && (
-          <ShortcutSelectorDialog
-            gameId={gameId}
-            installPath={activeInstallation.installPath}
-            isOpen={showShortcutDialog}
-            onClose={() => setShowShortcutDialog(false)}
-            onSelectShortcut={handleSelectShortcut}
-            onBrowseManually={handleBrowseInstallDirectory}
-          />
-        )}
-
-        {/* File Explorer for browsing installation directory */}
-        {showFileExplorer && activeInstallation?.installPath && (
-          <FileExplorer
-            isOpen={showFileExplorer}
-            onClose={() => setShowFileExplorer(false)}
-            onSelect={handleFileExplorerSelect}
-            selectMode="file"
-            title="Select Game Executable"
-            initialPath={formData.settings?.launch?.workingDirectory || activeInstallation.installPath}
-          />
-        )}
-
-        {/* File Explorer for selecting ROM files */}
-        {showRomFileExplorer && (
-          <FileExplorer
-            isOpen={showRomFileExplorer}
-            onClose={() => setShowRomFileExplorer(false)}
-            onSelect={handleRomFileSelect}
-            selectMode="file"
-            title="Select ROM File (.d64, .d81, .t64, .prg, .crt, .tap, .g64, .zip)"
-            initialPath={getRomsBrowsePath()}
-          />
-        )}
-
-        {/* Container Logs Dialog */}
-        {showLogsDialog && gameId && (
-          <ContainerLogsDialog
-            gameId={gameId}
-            onClose={() => setShowLogsDialog(false)}
-          />
-        )}
-
-        {/* Wine Installation Monitor Modal */}
-        {showWineMonitorModal && gameId && formData.platformId === 'windows-wine' && (
-          <WineInstallationMonitorModal
-            gameId={gameId}
-            gameTitle={formData.title || 'Unknown Game'}
-            onClose={() => setShowWineMonitorModal(false)}
-            onCancel={() => {
-              handleCancelInstallation();
-              setShowWineMonitorModal(false);
-            }}
-          />
-        )}
+        <GameFormDialogs
+          gameId={gameId}
+          platformId={formData.platformId}
+          gameTitle={formData.title}
+          launchWorkingDirectory={formData.settings?.launch?.workingDirectory}
+          showInstallDialog={showInstallDialog}
+          showShortcutDialog={showShortcutDialog}
+          showFileExplorer={showFileExplorer}
+          showRomFileExplorer={showRomFileExplorer}
+          showLogsDialog={showLogsDialog}
+          showWineMonitorModal={showWineMonitorModal}
+          activeInstallPath={activeInstallation?.installPath}
+          onInstallDialogClose={() => setShowInstallDialog(false)}
+          onInstallSuccess={() => {
+            setSuccessMessage('Installation started! Follow the wizard on your display.');
+            window.location.reload();
+          }}
+          onShortcutDialogClose={() => setShowShortcutDialog(false)}
+          onSelectShortcut={handleSelectShortcut}
+          onBrowseManually={handleBrowseInstallDirectory}
+          onFileExplorerClose={() => setShowFileExplorer(false)}
+          onFileExplorerSelect={handleFileExplorerSelect}
+          onRomExplorerClose={() => setShowRomFileExplorer(false)}
+          onRomFileSelect={handleRomFileSelect}
+          onLogsClose={() => setShowLogsDialog(false)}
+          onWineMonitorClose={() => setShowWineMonitorModal(false)}
+          onWineMonitorCancel={() => {
+            handleCancelInstallation();
+            setShowWineMonitorModal(false);
+          }}
+          getRomsBrowsePath={getRomsBrowsePath}
+        />
       </div>
     </form>
   );

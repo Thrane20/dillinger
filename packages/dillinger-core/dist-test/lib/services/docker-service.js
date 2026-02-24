@@ -1,0 +1,4305 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DockerService = void 0;
+exports.buildLaunchEnvironmentVariables = buildLaunchEnvironmentVariables;
+const dockerode_1 = __importDefault(require("dockerode"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = require("fs");
+const storage_1 = require("./storage");
+const settings_1 = require("./settings");
+const logger_1 = require("./logger");
+const docker = new dockerode_1.default({ socketPath: '/var/run/docker.sock' });
+function buildLaunchEnvironmentVariables(gameId, sessionId, environment) {
+    return [
+        `GAME_ID=${gameId}`,
+        `SESSION_ID=${sessionId}`,
+        `SAVES_PATH=/data/saves/${gameId}`,
+        ...Object.entries(environment).map(([key, value]) => `${key}=${value}`),
+    ];
+}
+class DockerService {
+    static instance;
+    storage;
+    // Volume name for the current game session
+    SESSION_VOLUME = 'dillinger_current_session';
+    STREAMING_RUNTIME_VOLUME = 'dillinger_streaming_runtime';
+    async detectActiveStreamingWaylandDisplay() {
+        // Wolf may rotate Wayland socket names across sessions (wayland-1, wayland-2, ...).
+        // Runner containers must connect to the currently active socket, which lives in the
+        // shared streaming runtime volume.
+        try {
+            const { exitCode, output } = await this.runInVolume(this.STREAMING_RUNTIME_VOLUME, '/mnt', 
+            // Pick the newest wayland-* that is a Unix socket.
+            'for f in $(ls -1t /mnt/wayland-* 2>/dev/null); do [ -S "$f" ] && basename "$f" && exit 0; done; exit 1');
+            if (exitCode === 0) {
+                const name = output.trim().split('\n')[0]?.trim();
+                if (name)
+                    return name;
+            }
+        }
+        catch {
+            // ignore
+        }
+        return null;
+    }
+    // Host path mapping for devcontainer
+    // When running in a devcontainer, /workspaces/dillinger maps to a host path
+    // We need to detect this and use the host path for Docker volumes
+    workspaceHostPath = null;
+    mounts = []; // Store all mounts for path translation
+    // Cache for configured volumes
+    volumeCache = null;
+    volumeCacheTime = 0;
+    VOLUME_CACHE_TTL = 30000; // 30 seconds
+    constructor() {
+        this.storage = storage_1.JSONStorageService.getInstance();
+        // detectHostPath will be called lazily on first use
+    }
+    static getInstance() {
+        if (!DockerService.instance) {
+            DockerService.instance = new DockerService();
+        }
+        return DockerService.instance;
+    }
+    /**
+     * Get all configured volumes from storage with caching
+     */
+    async getConfiguredVolumes() {
+        const now = Date.now();
+        if (this.volumeCache && (now - this.volumeCacheTime) < this.VOLUME_CACHE_TTL) {
+            return this.volumeCache;
+        }
+        try {
+            const volumes = await this.storage.listEntities('volumes');
+            this.volumeCache = volumes.map((v) => ({
+                id: v.id,
+                name: v.name,
+                dockerVolumeName: v.dockerVolumeName,
+                hostPath: v.hostPath,
+            }));
+            this.volumeCacheTime = now;
+            return this.volumeCache;
+        }
+        catch (error) {
+            logger_1.logger.warn('Failed to load configured volumes:', error);
+            return [];
+        }
+    }
+    /**
+     * Find a configured volume that contains the given host path.
+     * Returns the volume info and the relative path within the volume.
+     */
+    async findVolumeForPath(hostPath) {
+        const volumes = await this.getConfiguredVolumes();
+        // Sort by hostPath length descending to match the most specific volume first
+        const sortedVolumes = [...volumes].sort((a, b) => b.hostPath.length - a.hostPath.length);
+        for (const volume of sortedVolumes) {
+            // Check if the path is under this volume's host path
+            if (hostPath === volume.hostPath || hostPath.startsWith(volume.hostPath + '/')) {
+                const relativePath = hostPath === volume.hostPath ? '' : hostPath.substring(volume.hostPath.length);
+                return { volume, relativePath };
+            }
+        }
+        return null;
+    }
+    /**
+     * If a container path lives inside a Docker volume mount, return the volume name
+     * and relative path within that volume.
+     */
+    getVolumeMountForPath(containerPath) {
+        if (!this.mounts || this.mounts.length === 0) {
+            return null;
+        }
+        const sortedMounts = [...this.mounts].sort((a, b) => b.Destination.length - a.Destination.length);
+        for (const mount of sortedMounts) {
+            if (mount.Type !== 'volume')
+                continue;
+            const isExact = containerPath === mount.Destination;
+            const isPrefix = containerPath.startsWith(mount.Destination + '/');
+            if (!isExact && !isPrefix)
+                continue;
+            const relativePath = isExact ? '' : containerPath.substring(mount.Destination.length);
+            const volumeName = mount.Name || mount.Source;
+            if (!volumeName)
+                continue;
+            return { volumeName, relativePath };
+        }
+        return null;
+    }
+    getInstalledVolumeBinds() {
+        if (!this.mounts || this.mounts.length === 0) {
+            return [];
+        }
+        const binds = [];
+        for (const mount of this.mounts) {
+            if (mount.Type !== 'volume')
+                continue;
+            const volumeName = mount.Name || mount.Source;
+            if (!volumeName || !volumeName.startsWith('dillinger_installed_'))
+                continue;
+            const suffix = volumeName.substring('dillinger_installed_'.length);
+            if (!suffix)
+                continue;
+            binds.push(`${volumeName}:/installed/${suffix}:rw`);
+        }
+        return binds;
+    }
+    /**
+     * Build the ROM bind mount and container path, handling devcontainer volume mounts.
+     */
+    async resolveRomMount(romPath) {
+        if (romPath === '/roms' || romPath.startsWith('/roms/')) {
+            return {
+                bind: 'dillinger_roms:/roms:ro',
+                containerPath: romPath,
+            };
+        }
+        const romDir = path_1.default.posix.dirname(romPath);
+        const romFilename = path_1.default.posix.basename(romPath);
+        const stripLeadingSlash = (value) => value.replace(/^\/+/, '');
+        const volumeMount = this.getVolumeMountForPath(romDir);
+        if (volumeMount) {
+            const relative = stripLeadingSlash(volumeMount.relativePath);
+            const containerPath = relative
+                ? path_1.default.posix.join('/roms', relative, romFilename)
+                : path_1.default.posix.join('/roms', romFilename);
+            return { bind: `${volumeMount.volumeName}:/roms:ro`, containerPath };
+        }
+        const hostRomDir = this.resolveHostPath(romDir);
+        const volumeMatch = await this.findVolumeForPath(hostRomDir);
+        if (volumeMatch) {
+            const relative = stripLeadingSlash(volumeMatch.relativePath);
+            const containerPath = relative
+                ? path_1.default.posix.join('/roms', relative, romFilename)
+                : path_1.default.posix.join('/roms', romFilename);
+            return { bind: `${volumeMatch.volume.dockerVolumeName}:/roms:ro`, containerPath };
+        }
+        // Fallback: try to preserve subdirectory structure when the ROM path
+        // lives under a well-known mount (e.g. /roms/c64/GAME.D64).  Instead of
+        // mounting the immediate parent dir, find the top-level mount and keep
+        // the relative path within the container.
+        return { bind: `${hostRomDir}:/roms:ro`, containerPath: path_1.default.posix.join('/roms', romFilename) };
+    }
+    async callSidecarAPI(endpoint, method, body) {
+        const baseUrl = process.env.DILLINGER_SIDECAR_API_BASE || 'http://localhost:9999';
+        const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+        const response = await fetch(url, {
+            method,
+            headers: body ? { 'Content-Type': 'application/json' } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+            signal: AbortSignal.timeout(5000),
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            const detail = text ? ` ${text.slice(0, 200)}` : '';
+            throw new Error(`Sidecar API ${method} ${endpoint} failed: ${response.status}${detail}`);
+        }
+        if (response.status === 204) {
+            return undefined;
+        }
+        return await response.json();
+    }
+    async safeSidecarGet(endpoint) {
+        try {
+            return await this.callSidecarAPI(endpoint, 'GET');
+        }
+        catch (error) {
+            logger_1.logger.debug(`Sidecar GET ${endpoint} failed:`, error);
+            return null;
+        }
+    }
+    async getSidecarHealth() {
+        return await this.safeSidecarGet('/health');
+    }
+    async getSidecarStatus() {
+        return await this.safeSidecarGet('/status');
+    }
+    async getPairStatus() {
+        return await this.safeSidecarGet('/pair/status');
+    }
+    async acceptPairing(pairSecret, pin) {
+        return await this.callSidecarAPI('/pair/accept', 'POST', {
+            pair_secret: pairSecret,
+            pin,
+        });
+    }
+    async launchSidecarCommand(cmd, env) {
+        return await this.callSidecarAPI('/launch', 'POST', {
+            cmd,
+            env: env || {},
+        });
+    }
+    async stopSidecarCommand() {
+        try {
+            await this.callSidecarAPI('/stop', 'POST', {});
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : '';
+            if (message.includes('ECONNREFUSED')) {
+                logger_1.logger.warn('Sidecar API not reachable while stopping test stream; assuming stopped.');
+                return;
+            }
+            throw error;
+        }
+    }
+    /**
+     * Check if a path exists on the host using a Docker container.
+     * This is needed when the Dillinger container doesn't have direct access to host paths.
+     *
+     * @param hostPath The absolute path on the host to check
+     * @param dockerVolumeName Optional Docker volume name to use for mounting (if path is in a volume)
+     */
+    async hostPathExists(hostPath, dockerVolumeName) {
+        try {
+            // If we have a Docker volume, mount it and check inside
+            if (dockerVolumeName) {
+                const volumeInfo = await this.findVolumeForPath(hostPath);
+                if (volumeInfo) {
+                    const containerPath = `/mnt/vol${volumeInfo.relativePath}`;
+                    const container = await docker.createContainer({
+                        Image: 'alpine:3.20',
+                        Cmd: ['sh', '-lc', `[ -e "${containerPath}" ]`],
+                        HostConfig: {
+                            AutoRemove: true,
+                            Binds: [`${volumeInfo.volume.dockerVolumeName}:/mnt/vol:ro`],
+                        },
+                    });
+                    await container.start();
+                    const wait = await container.wait();
+                    return wait.StatusCode === 0;
+                }
+            }
+            // Try direct bind mount
+            const container = await docker.createContainer({
+                Image: 'alpine:3.20',
+                Cmd: ['sh', '-lc', `[ -e "/check" ]`],
+                HostConfig: {
+                    AutoRemove: true,
+                    Binds: [`${hostPath}:/check:ro`],
+                },
+            });
+            await container.start();
+            const wait = await container.wait();
+            return wait.StatusCode === 0;
+        }
+        catch (error) {
+            logger_1.logger.debug(`hostPathExists check failed for ${hostPath}:`, error);
+            return false;
+        }
+    }
+    /**
+     * Run a command inside a container with a volume mounted.
+     * Returns combined stdout/stderr output.
+     */
+    async runInVolume(dockerVolumeName, mountPoint, command) {
+        const container = await docker.createContainer({
+            Image: 'alpine:3.20',
+            Cmd: ['sh', '-lc', command],
+            Tty: true,
+            HostConfig: {
+                AutoRemove: false,
+                Binds: [`${dockerVolumeName}:${mountPoint}:ro`],
+            },
+        });
+        await container.start();
+        const wait = await container.wait();
+        let output = '';
+        try {
+            const logsBuffer = await container.logs({
+                stdout: true,
+                stderr: true,
+                follow: false,
+            });
+            output = logsBuffer.toString('utf8');
+        }
+        finally {
+            try {
+                await container.remove({ force: true });
+            }
+            catch {
+                // ignore
+            }
+        }
+        return { exitCode: wait.StatusCode ?? 1, output };
+    }
+    /**
+     * Run a command inside a temporary container with a host bind mounted.
+     */
+    async runInBindPath(hostPath, mountPoint, command) {
+        const container = await docker.createContainer({
+            Image: 'alpine:3.20',
+            Cmd: ['sh', '-lc', command],
+            Tty: true,
+            HostConfig: {
+                AutoRemove: false,
+                Binds: [`${hostPath}:${mountPoint}:ro`],
+            },
+        });
+        await container.start();
+        const wait = await container.wait();
+        let output = '';
+        try {
+            const logsBuffer = await container.logs({
+                stdout: true,
+                stderr: true,
+                follow: false,
+            });
+            output = logsBuffer.toString('utf8');
+        }
+        finally {
+            try {
+                await container.remove({ force: true });
+            }
+            catch {
+                // ignore
+            }
+        }
+        return { exitCode: wait.StatusCode ?? 1, output };
+    }
+    /**
+     * Find a file path with case-insensitive matching within a volume.
+     * Returns the actual path if found (with correct case), or null if not found.
+     *
+     * This is needed because Windows game executables often have mixed case in their
+     * paths (e.g., "CC3.exe"), but configs might reference them with different case
+     * (e.g., "cc3.exe"). Linux file systems are case-sensitive, so we need to find
+     * the actual file regardless of case.
+     *
+     * @param dockerVolumeName Docker volume name to search in
+     * @param relativePath Path relative to the volume root (e.g., "game-id/drive_c/Game/game.exe")
+     * @returns Actual path with correct case (relative to volume), or null if not found
+     */
+    async findPathCaseInsensitiveInVolume(dockerVolumeName, relativePath) {
+        const clean = relativePath.replace(/^\/+/, '');
+        const parts = clean.split('/');
+        // We'll build up the path piece by piece, doing case-insensitive lookup at each level
+        let currentPath = '/mnt/vol';
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            if (!part)
+                continue;
+            // Use find with -maxdepth 1 to do case-insensitive match at this level
+            const { exitCode, output } = await this.runInVolume(dockerVolumeName, '/mnt/vol', `find "${currentPath}" -maxdepth 1 -iname "${part}" -print -quit 2>/dev/null | head -1`);
+            const foundPath = output.trim().split('\n')[0]?.trim();
+            if (exitCode !== 0 || !foundPath) {
+                logger_1.logger.debug(`Case-insensitive search: No match for "${part}" in "${currentPath}"`);
+                return null;
+            }
+            currentPath = foundPath;
+        }
+        // Return the path relative to /mnt/vol
+        return currentPath.startsWith('/mnt/vol/')
+            ? currentPath.substring('/mnt/vol/'.length)
+            : currentPath.startsWith('/mnt/vol')
+                ? currentPath.substring('/mnt/vol'.length)
+                : currentPath;
+    }
+    /**
+     * Check if a path exists (case-insensitively) in a volume and return the actual path if found.
+     */
+    async checkPathCaseInsensitiveInVolume(dockerVolumeName, relativePath) {
+        try {
+            // First try exact match (faster)
+            const { exitCode } = await this.runInVolume(dockerVolumeName, '/mnt/vol', `[ -e "/mnt/vol/${relativePath.replace(/^\/+/, '')}" ]`);
+            if (exitCode === 0) {
+                return { exists: true, actualPath: relativePath };
+            }
+            // Try case-insensitive match
+            logger_1.logger.debug(`Exact path not found, trying case-insensitive match for: ${relativePath}`);
+            const actualPath = await this.findPathCaseInsensitiveInVolume(dockerVolumeName, relativePath);
+            if (actualPath) {
+                logger_1.logger.info(`Found case-insensitive match: "${relativePath}" -> "${actualPath}"`);
+                return { exists: true, actualPath };
+            }
+            return { exists: false, actualPath: null };
+        }
+        catch (error) {
+            logger_1.logger.warn(`Case-insensitive path check failed for ${relativePath}:`, error);
+            return { exists: false, actualPath: null };
+        }
+    }
+    /**
+     * Find the first executable candidate by basename within a mounted Wine prefix volume.
+     * Returns a path relative to the volume root when found.
+     */
+    async findExecutableByBasenameInVolume(dockerVolumeName, executableBasename) {
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const command = `find /mnt/vol/drive_c -type f -iname ${shQuote(executableBasename)} -print -quit 2>/dev/null`;
+        const { exitCode, output } = await this.runInVolume(dockerVolumeName, '/mnt/vol', command);
+        if (exitCode !== 0) {
+            return null;
+        }
+        const foundPath = output.trim().split('\n')[0]?.trim();
+        if (!foundPath) {
+            return null;
+        }
+        if (foundPath.startsWith('/mnt/vol/')) {
+            return foundPath.substring('/mnt/vol/'.length);
+        }
+        if (foundPath.startsWith('/mnt/vol')) {
+            return foundPath.substring('/mnt/vol'.length).replace(/^\/+/, '');
+        }
+        return foundPath.replace(/^\/+/, '');
+    }
+    /**
+     * List a few .exe files near the requested directory to improve error messages.
+     */
+    async listNearbyExecutablesInVolume(dockerVolumeName, expectedRelativeExecutablePath) {
+        const expectedDir = path_1.default.posix.dirname(expectedRelativeExecutablePath);
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const command = [
+            `if [ -d /mnt/vol/${shQuote(expectedDir)} ]; then`,
+            `  find /mnt/vol/${shQuote(expectedDir)} -maxdepth 2 -type f \\(`,
+            `    -iname '*.exe' -o -iname '*.bat' -o -iname '*.com' \\) -print | head -10;`,
+            `else`,
+            `  find /mnt/vol/drive_c -maxdepth 5 -type f -iname '*.exe' -print | head -10;`,
+            `fi`,
+        ].join(' ');
+        const { output } = await this.runInVolume(dockerVolumeName, '/mnt/vol', command);
+        return output
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => (line.startsWith('/mnt/vol/') ? line.substring('/mnt/vol/'.length) : line));
+    }
+    async isRegularFileInVolume(dockerVolumeName, relativePath) {
+        const clean = relativePath.replace(/^\/+/, '');
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const { exitCode } = await this.runInVolume(dockerVolumeName, '/mnt/vol', `[ -f /mnt/vol/${shQuote(clean)} ]`);
+        return exitCode === 0;
+    }
+    async findExecutableInsideDirectoryInVolume(dockerVolumeName, directoryRelativePath) {
+        const clean = directoryRelativePath.replace(/^\/+/, '');
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const command = `if [ -d /mnt/vol/${shQuote(clean)} ]; then find /mnt/vol/${shQuote(clean)} -maxdepth 2 -type f -iname '*.exe' -print -quit 2>/dev/null; fi`;
+        const { exitCode, output } = await this.runInVolume(dockerVolumeName, '/mnt/vol', command);
+        if (exitCode !== 0) {
+            return null;
+        }
+        const found = output.trim().split('\n')[0]?.trim();
+        if (!found) {
+            return null;
+        }
+        return found.startsWith('/mnt/vol/') ? found.substring('/mnt/vol/'.length) : found.replace(/^\/+/, '');
+    }
+    /**
+     * Find executable by basename in a directly bind-mounted Wine prefix.
+     */
+    async findExecutableByBasenameInBindPath(hostPrefixPath, executableBasename) {
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const command = `find /mnt/vol/drive_c -type f -iname ${shQuote(executableBasename)} -print -quit 2>/dev/null`;
+        const { exitCode, output } = await this.runInBindPath(hostPrefixPath, '/mnt/vol', command);
+        if (exitCode !== 0) {
+            return null;
+        }
+        const foundPath = output.trim().split('\n')[0]?.trim();
+        if (!foundPath) {
+            return null;
+        }
+        if (foundPath.startsWith('/mnt/vol/')) {
+            return foundPath.substring('/mnt/vol/'.length);
+        }
+        if (foundPath.startsWith('/mnt/vol')) {
+            return foundPath.substring('/mnt/vol'.length).replace(/^\/+/, '');
+        }
+        return foundPath.replace(/^\/+/, '');
+    }
+    /**
+     * List nearby executable candidates in a directly bind-mounted Wine prefix.
+     */
+    async listNearbyExecutablesInBindPath(hostPrefixPath, expectedRelativeExecutablePath) {
+        const expectedDir = path_1.default.posix.dirname(expectedRelativeExecutablePath);
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const command = [
+            `if [ -d /mnt/vol/${shQuote(expectedDir)} ]; then`,
+            `  find /mnt/vol/${shQuote(expectedDir)} -maxdepth 2 -type f \\(`,
+            `    -iname '*.exe' -o -iname '*.bat' -o -iname '*.com' \\) -print | head -10;`,
+            `else`,
+            `  find /mnt/vol/drive_c -maxdepth 5 -type f -iname '*.exe' -print | head -10;`,
+            `fi`,
+        ].join(' ');
+        const { output } = await this.runInBindPath(hostPrefixPath, '/mnt/vol', command);
+        return output
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => (line.startsWith('/mnt/vol/') ? line.substring('/mnt/vol/'.length) : line));
+    }
+    async isRegularFileInBindPath(hostPrefixPath, relativePath) {
+        const clean = relativePath.replace(/^\/+/, '');
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const { exitCode } = await this.runInBindPath(hostPrefixPath, '/mnt/vol', `[ -f /mnt/vol/${shQuote(clean)} ]`);
+        return exitCode === 0;
+    }
+    async findExecutableInsideDirectoryInBindPath(hostPrefixPath, directoryRelativePath) {
+        const clean = directoryRelativePath.replace(/^\/+/, '');
+        const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+        const command = `if [ -d /mnt/vol/${shQuote(clean)} ]; then find /mnt/vol/${shQuote(clean)} -maxdepth 2 -type f -iname '*.exe' -print -quit 2>/dev/null; fi`;
+        const { exitCode, output } = await this.runInBindPath(hostPrefixPath, '/mnt/vol', command);
+        if (exitCode !== 0) {
+            return null;
+        }
+        const found = output.trim().split('\n')[0]?.trim();
+        if (!found) {
+            return null;
+        }
+        return found.startsWith('/mnt/vol/') ? found.substring('/mnt/vol/'.length) : found.replace(/^\/+/, '');
+    }
+    /**
+     * Resolve the actual image reference to use for a runner.
+     * This looks up what version is actually installed locally and returns the full image:tag.
+     *
+     * @param baseRepository Base repository without tag (e.g., "ghcr.io/thrane20/dillinger/runner-wine")
+     * @returns Full image reference with installed version tag
+     * @throws Error if no matching image is installed
+     */
+    async resolveInstalledRunnerImage(baseRepository) {
+        // Strip any existing tag from the repository
+        const repoWithoutTag = baseRepository.replace(/:.*$/, '');
+        // Extract runner name for user-friendly messages
+        const runnerName = repoWithoutTag.split('/').pop() || repoWithoutTag;
+        try {
+            const images = await docker.listImages({ all: true });
+            // Find installed image by matching repository prefix
+            const matchingImage = images.find(img => img.RepoTags?.some(tag => tag.startsWith(repoWithoutTag + ':')));
+            if (!matchingImage || !matchingImage.RepoTags) {
+                const error = new Error(`Runner not installed: ${runnerName}. ` +
+                    `Please go to Settings → Platforms and download the ${runnerName} runner first.`);
+                logger_1.logger.error(error.message);
+                throw error;
+            }
+            // Find the best tag - prefer semver over 'latest'
+            const matchingTags = matchingImage.RepoTags.filter(tag => tag.startsWith(repoWithoutTag + ':'));
+            // Look for versioned tags first (semver format)
+            const versionedTag = matchingTags.find(tag => {
+                const tagPart = tag.split(':')[1];
+                return tagPart && /^\d+\.\d+\.\d+$/.test(tagPart);
+            });
+            if (versionedTag) {
+                logger_1.logger.info(`Resolved runner image: ${versionedTag}`);
+                return versionedTag;
+            }
+            // Fallback to any available tag
+            const anyTag = matchingTags[0];
+            if (anyTag) {
+                logger_1.logger.info(`Resolved runner image (non-versioned): ${anyTag}`);
+                return anyTag;
+            }
+            throw new Error(`No valid tag found for runner: ${runnerName}`);
+        }
+        catch (error) {
+            if (error instanceof Error && error.message.includes('Runner not installed')) {
+                throw error; // Re-throw with user-friendly message
+            }
+            logger_1.logger.error(`Failed to resolve runner image ${repoWithoutTag}:`, error);
+            throw new Error(`Failed to find installed runner: ${runnerName}`);
+        }
+    }
+    /**
+     * Build WINEDEBUG environment variable from game settings
+     * @param game Game object with optional wine debug configuration
+     * @param debugMode If true (keepAlive/debug launch), enable useful debug channels
+     * @returns WINEDEBUG string (e.g., "-all", "+relay,+seh", "+all")
+     */
+    buildWineDebug(game, debugMode = false) {
+        const debug = game.settings?.wine?.debug;
+        // If debug mode (keepAlive) is enabled, use a useful set of debug channels
+        // unless the user has explicitly configured their own debug settings
+        if (debugMode && (!debug || Object.keys(debug).length === 0)) {
+            // Enable useful channels for debugging game launch issues:
+            // - warn: Wine warnings (important)
+            // - err: Wine errors (critical)
+            // - fixme: Unimplemented features (helpful for compatibility issues)
+            // - loaddll: DLL loading (helps identify missing DLLs)
+            // - module: Module loading issues
+            // - seh: Structured exception handling (crashes)
+            return '+warn,+err,+fixme,+loaddll,+module,+seh,-other';
+        }
+        // If no debug settings or all false, disable all debug output
+        if (!debug || Object.keys(debug).length === 0) {
+            return '-all';
+        }
+        // If "all" is enabled, enable all debug output
+        if (debug.all) {
+            return '+all';
+        }
+        // Build comma-separated list of enabled channels
+        const enabledChannels = [];
+        if (debug.relay)
+            enabledChannels.push('+relay');
+        if (debug.seh)
+            enabledChannels.push('+seh');
+        if (debug.tid)
+            enabledChannels.push('+tid');
+        if (debug.timestamp)
+            enabledChannels.push('+timestamp');
+        if (debug.heap)
+            enabledChannels.push('+heap');
+        if (debug.file)
+            enabledChannels.push('+file');
+        if (debug.module)
+            enabledChannels.push('+module');
+        if (debug.win)
+            enabledChannels.push('+win');
+        if (debug.d3d)
+            enabledChannels.push('+d3d');
+        if (debug.opengl)
+            enabledChannels.push('+opengl');
+        // If no channels enabled, disable all
+        if (enabledChannels.length === 0) {
+            return '-all';
+        }
+        // Return comma-separated list
+        return enabledChannels.join(',');
+    }
+    /**
+     * Detect the host path for the workspace by inspecting the current container
+     * This is called lazily on first volume operation
+     */
+    async detectHostPath() {
+        if (this.workspaceHostPath !== null) {
+            return; // Already detected
+        }
+        // First, try environment variable override
+        if (process.env.HOST_WORKSPACE_PATH) {
+            this.workspaceHostPath = process.env.HOST_WORKSPACE_PATH;
+            logger_1.logger.info(`✓ Using HOST_WORKSPACE_PATH from env: ${this.workspaceHostPath}`);
+            return;
+        }
+        try {
+            // Detect our container ID.  os.hostname() returns the *hostname* which
+            // may differ from the Docker container ID (e.g. when the devcontainer
+            // sets a custom hostname).  We first try to extract the real container
+            // ID from /proc/self/mountinfo (Docker writes paths containing the
+            // full 64-hex-char container ID).  Fall back to os.hostname().
+            let containerId = null;
+            try {
+                const mountinfo = (0, fs_1.readFileSync)('/proc/self/mountinfo', 'utf8');
+                const cidMatch = mountinfo.match(/\/var\/lib\/docker\/containers\/([0-9a-f]{64})\//);
+                if (cidMatch) {
+                    containerId = cidMatch[1];
+                    logger_1.logger.info(`Detected container ID from mountinfo: ${containerId.substring(0, 12)}...`);
+                }
+            }
+            catch { /* ignore */ }
+            if (!containerId) {
+                const os = await import('os');
+                containerId = os.hostname();
+                logger_1.logger.info(`Using hostname as container ID: ${containerId}`);
+            }
+            logger_1.logger.info(`Detecting host path for container: ${containerId.substring(0, 12)}`);
+            // Inspect the current container to find the workspace mount
+            const container = docker.getContainer(containerId);
+            const info = await container.inspect();
+            this.mounts = info.Mounts || []; // Store mounts for general translation
+            logger_1.logger.info(`Found ${info.Mounts?.length || 0} mounts in container`);
+            // Find the mount for /workspaces/dillinger
+            const workspaceMount = info.Mounts?.find((mount) => mount.Destination === '/workspaces/dillinger');
+            if (workspaceMount) {
+                this.workspaceHostPath = workspaceMount.Source;
+                logger_1.logger.info(`✓ Detected host workspace path: ${this.workspaceHostPath}`);
+            }
+            else {
+                this.workspaceHostPath = ''; // Mark as checked but not found
+                logger_1.logger.warn('⚠ Not running in devcontainer, using container paths directly');
+                logger_1.logger.info('Available mounts: ' + info.Mounts?.map((m) => m.Destination).join(', '));
+            }
+        }
+        catch (error) {
+            // Not running in a container or can't detect - use paths as-is
+            this.workspaceHostPath = ''; // Mark as checked but not found
+            logger_1.logger.warn('⚠ Could not detect host path, using container paths');
+            logger_1.logger.error('Error details: ' + error.message);
+            logger_1.logger.info('💡 Tip: Set HOST_WORKSPACE_PATH environment variable to override');
+        }
+    }
+    /**
+     * Convert container path to host path for Docker volume binding
+     */
+    getHostPath(containerPath) {
+        if (this.workspaceHostPath && this.workspaceHostPath !== '' && containerPath.startsWith('/workspaces/dillinger')) {
+            // Replace the container workspace path with the host workspace path
+            const relativePath = containerPath.substring('/workspaces/dillinger'.length);
+            const hostPath = this.workspaceHostPath + relativePath;
+            logger_1.logger.debug(`  Path translation: ${containerPath} -> ${hostPath}`);
+            return hostPath;
+        }
+        // General path translation based on detected mounts
+        if (this.mounts && this.mounts.length > 0) {
+            // Sort mounts by destination length (descending) to match longest prefix first
+            const sortedMounts = [...this.mounts].sort((a, b) => b.Destination.length - a.Destination.length);
+            for (const mount of sortedMounts) {
+                // Check if container path starts with mount destination
+                // Ensure we match directory boundaries (e.g. /data matches /data/foo but not /database)
+                if (containerPath === mount.Destination || containerPath.startsWith(mount.Destination + '/')) {
+                    const relativePath = containerPath.substring(mount.Destination.length);
+                    // If it's a named volume, we can't easily map it to a host path unless we know where volumes are stored
+                    // But if Source is a path (bind mount), we can use it
+                    if (mount.Type === 'bind' || mount.Source.startsWith('/')) {
+                        const hostPath = mount.Source + relativePath;
+                        logger_1.logger.debug(`  Path translation (mount): ${containerPath} -> ${hostPath}`);
+                        return hostPath;
+                    }
+                }
+            }
+        }
+        return containerPath;
+    }
+    /**
+     * Create or update the dillinger_current_session volume to point to a specific game directory
+     */
+    async setCurrentSessionVolume(gamePath) {
+        // Ensure host path is detected first
+        await this.detectHostPath();
+        const dillingerRoot = this.storage.getDillingerRoot();
+        const absoluteGamePath = path_1.default.join(dillingerRoot, gamePath);
+        // Convert to host path if running in devcontainer
+        const hostGamePath = this.getHostPath(absoluteGamePath);
+        logger_1.logger.info(`Setting session volume to: ${absoluteGamePath}`);
+        if (hostGamePath !== absoluteGamePath) {
+            logger_1.logger.info(`  Host path: ${hostGamePath}`);
+        }
+        try {
+            // Check if volume exists
+            const volume = docker.getVolume(this.SESSION_VOLUME);
+            try {
+                await volume.inspect();
+                // Volume exists, remove it first
+                logger_1.logger.info(`Removing existing ${this.SESSION_VOLUME} volume`);
+                try {
+                    await volume.remove();
+                }
+                catch (removeErr) {
+                    if (removeErr.statusCode === 409) {
+                        // Volume is in use, find and remove containers using it
+                        logger_1.logger.info(`Volume in use, cleaning up containers...`);
+                        await this.cleanupVolumeContainers();
+                        // Try removing volume again
+                        await volume.remove();
+                    }
+                    else {
+                        throw removeErr;
+                    }
+                }
+            }
+            catch (err) {
+                if (err.statusCode !== 404) {
+                    throw err;
+                }
+                // Volume doesn't exist, which is fine
+            }
+            // Create new volume with bind mount to game directory
+            logger_1.logger.info(`Creating ${this.SESSION_VOLUME} volume bound to ${hostGamePath}`);
+            await docker.createVolume({
+                Name: this.SESSION_VOLUME,
+                Driver: 'local',
+                DriverOpts: {
+                    type: 'none',
+                    device: hostGamePath,
+                    o: 'bind'
+                }
+            });
+            logger_1.logger.info(`✓ Session volume configured for ${gamePath}`);
+        }
+        catch (error) {
+            logger_1.logger.error('Error setting session volume:', error);
+            throw new Error(`Failed to configure session volume: ${error}`);
+        }
+    }
+    /**
+     * Create session volume for an absolute path (e.g., installed games)
+     */
+    async setCurrentSessionVolumeAbsolute(absolutePath) {
+        // Ensure host path is detected first
+        await this.detectHostPath();
+        // Convert to host path if running in devcontainer
+        const hostPath = this.getHostPath(absolutePath);
+        logger_1.logger.info(`Setting session volume to absolute path: ${absolutePath}`);
+        if (hostPath !== absolutePath) {
+            logger_1.logger.info(`  Host path: ${hostPath}`);
+        }
+        try {
+            // Check if volume exists
+            const volume = docker.getVolume(this.SESSION_VOLUME);
+            try {
+                await volume.inspect();
+                // Volume exists, remove it first
+                logger_1.logger.info(`Removing existing ${this.SESSION_VOLUME} volume`);
+                try {
+                    await volume.remove();
+                }
+                catch (removeErr) {
+                    if (removeErr.statusCode === 409) {
+                        // Volume is in use, find and remove containers using it
+                        logger_1.logger.info(`Volume in use, cleaning up containers...`);
+                        await this.cleanupVolumeContainers();
+                        // Try removing volume again
+                        await volume.remove();
+                    }
+                    else {
+                        throw removeErr;
+                    }
+                }
+            }
+            catch (err) {
+                if (err.statusCode !== 404) {
+                    throw err;
+                }
+                // Volume doesn't exist, which is fine
+            }
+            // Create new volume with bind mount to absolute path
+            logger_1.logger.info(`Creating ${this.SESSION_VOLUME} volume bound to ${hostPath}`);
+            await docker.createVolume({
+                Name: this.SESSION_VOLUME,
+                Driver: 'local',
+                DriverOpts: {
+                    type: 'none',
+                    device: hostPath,
+                    o: 'bind'
+                }
+            });
+            logger_1.logger.info(`✓ Session volume configured for ${absolutePath}`);
+        }
+        catch (error) {
+            logger_1.logger.error('Error setting session volume:', error);
+            throw new Error(`Failed to configure session volume: ${error}`);
+        }
+    }
+    /**
+     * Kill any existing streaming containers.
+     * Only one streaming session is allowed at a time to avoid port conflicts.
+     * Called before launching a new streaming session.
+     */
+    async killExistingStreamingContainers() {
+        try {
+            logger_1.logger.info('Checking for existing streaming containers...');
+            const containers = await docker.listContainers({
+                all: true,
+                filters: {
+                    label: ['dillinger.streaming=true']
+                }
+            });
+            if (containers.length === 0) {
+                logger_1.logger.info('No existing streaming containers found');
+                return;
+            }
+            logger_1.logger.info(`Found ${containers.length} existing streaming container(s), stopping...`);
+            for (const containerInfo of containers) {
+                const container = docker.getContainer(containerInfo.Id);
+                const name = containerInfo.Names?.[0]?.replace(/^\//, '') || containerInfo.Id;
+                try {
+                    // Check if container is running
+                    if (containerInfo.State === 'running') {
+                        logger_1.logger.info(`  Stopping streaming container: ${name}`);
+                        await container.stop({ t: 5 }); // 5 second timeout
+                    }
+                    // Remove the container
+                    logger_1.logger.info(`  Removing streaming container: ${name}`);
+                    await container.remove({ force: true });
+                    logger_1.logger.info(`  ✓ Removed: ${name}`);
+                }
+                catch (err) {
+                    // Container may have already been removed
+                    if (err.statusCode !== 404) {
+                        logger_1.logger.warn(`  Failed to remove container ${name}: ${err.message}`);
+                    }
+                }
+            }
+            logger_1.logger.info('✓ Existing streaming containers cleaned up');
+        }
+        catch (error) {
+            logger_1.logger.error('Error killing existing streaming containers:', error);
+            // Don't throw - we still want to try launching the new container
+        }
+    }
+    /**
+     * Get information about the currently active streaming session
+     */
+    async getActiveStreamingSession() {
+        try {
+            const containers = await docker.listContainers({
+                filters: {
+                    label: ['dillinger.streaming=true'],
+                    status: ['running']
+                }
+            });
+            if (containers.length === 0) {
+                return null;
+            }
+            const containerInfo = containers[0];
+            const container = docker.getContainer(containerInfo.Id);
+            const inspect = await container.inspect();
+            return {
+                containerId: containerInfo.Id,
+                gameName: inspect.Config.Labels?.['dillinger.game.title'] || 'Unknown',
+                startedAt: inspect.State.StartedAt
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Error getting active streaming session:', error);
+            return null;
+        }
+    }
+    /**
+     * Launch a game in a Docker container
+     */
+    async launchGame(options) {
+        const { game, platform, sessionId, mode = 'local' } = options;
+        // Ensure host path detection
+        await this.detectHostPath();
+        // Check if streaming is enabled (from game settings or mode override)
+        const moonlightConfig = game.settings?.moonlight;
+        const isStreamingMode = mode === 'streaming' || moonlightConfig?.enabled;
+        // If streaming mode, kill any existing streaming containers first
+        // Only one streaming session allowed at a time to avoid port conflicts
+        if (isStreamingMode) {
+            logger_1.logger.info('Streaming mode enabled - checking for existing streams...');
+            await this.killExistingStreamingContainers();
+        }
+        const gameDirectory = game.installation?.installPath || game.filePath;
+        if (!gameDirectory) {
+            throw new Error('Game has no file path or installation path configured');
+        }
+        // Set up the session volume ONLY for non-Wine games
+        // Wine games use direct Wine prefix bind mounts, no temp volume needed
+        if (platform.type !== 'wine') {
+            const isAbsolutePath = path_1.default.isAbsolute(gameDirectory);
+            if (isAbsolutePath) {
+                await this.setCurrentSessionVolumeAbsolute(gameDirectory);
+            }
+            else {
+                await this.setCurrentSessionVolume(gameDirectory);
+            }
+        }
+        // Get launch configuration
+        const launchCommand = game.settings?.launch?.command || './start.sh';
+        const launchArgs = game.settings?.launch?.arguments || [];
+        const environment = game.settings?.launch?.environment || {};
+        // For Wine games, convert Windows paths to Linux paths within the Wine prefix
+        // Windows path: C:\GOG Games\Close Combat 3\cc3.exe
+        // Becomes: /wineprefix/drive_c/GOG Games/Close Combat 3/cc3.exe
+        let gameExecutable;
+        let cmdArray;
+        let containerWorkingDir;
+        let romBind = null;
+        let romContainerPath = null;
+        // Map platform IDs to VICE emulator commands
+        const viceEmulators = {
+            'c64': 'x64', // Commodore 64 (better host joystick compatibility)
+            'c128': 'x128', // Commodore 128
+            'vic20': 'xvic', // VIC-20
+            'plus4': 'xplus4', // Plus/4
+            'pet': 'xpet' // PET
+        };
+        // Map platform IDs to Amiga emulator commands
+        const amigaEmulators = {
+            'amiga': 'fs-uae', // Amiga (A500 default)
+            'amiga500': 'fs-uae', // Amiga 500
+            'amiga500plus': 'fs-uae', // Amiga 500+
+            'amiga600': 'fs-uae', // Amiga 600
+            'amiga1200': 'fs-uae', // Amiga 1200
+            'amiga3000': 'fs-uae', // Amiga 3000
+            'amiga4000': 'fs-uae', // Amiga 4000
+            'cd32': 'fs-uae' // Amiga CD32
+        };
+        // Map platform IDs to RetroArch cores
+        const retroarchCores = {
+            'nes': 'nestopia', // NES/Famicom
+            'snes': 'snes9x', // SNES/Super Famicom
+            'psx': 'beetle_psx_hw', // PlayStation 1
+            'mame': 'mame', // Arcade (MAME)
+        };
+        // Map platform IDs to MAME emulator commands
+        const mameEmulators = {
+            'mame': 'mame',
+            // 'arcade': 'mame' // Removed arcade from here as it's now handled by RetroArch runner
+        };
+        if (platform.type === 'wine') {
+            // For Wine games, we pass a container path executable via env (GAME_EXECUTABLE)
+            // and let the runner use WINEPREFIX (also set via env). This avoids hardcoding
+            // legacy /wineprefix paths now that prefixes live under /installed.
+            // Prepare clean arguments
+            const cleanArgs = launchArgs
+                .filter(arg => arg && typeof arg === 'string')
+                .map(arg => arg.replace(/\0/g, ''))
+                .filter(arg => arg !== ''); // Remove empty strings
+            // Resolve the launch command into a path under the mounted prefix.
+            // Support multiple formats:
+            // 1. Linux absolute path with drive_c: /mnt/m2fast/game-slug/drive_c/GOG Games/CC3.exe
+            // 2. Relative path with drive_c: drive_c/GOG Games/Commandos/comandos.exe
+            // 3. Windows-style path: C:\GOG Games\...
+            // 4. Relative Windows path without drive letter: GOG Games\Commandos\comandos.exe
+            // Check if this is already a Linux absolute path containing drive_c
+            // (e.g., /mnt/m2fast/game-slug/drive_c/GOG Games/CC3.exe)
+            const driveCIndex = launchCommand.indexOf('/drive_c/');
+            const driveCRelativeIndex = launchCommand.indexOf('drive_c/');
+            if (launchCommand.startsWith('/') && driveCIndex !== -1) {
+                // Linux absolute path - extract the relative path after drive_c
+                const relativeWindowsPath = launchCommand.substring(driveCIndex + '/drive_c'.length);
+                gameExecutable = path_1.default.posix.join('/wineprefix/drive_c', relativeWindowsPath);
+                logger_1.logger.info(`  Detected Linux absolute path with Wine prefix`);
+                logger_1.logger.info(`    Full path: ${launchCommand}`);
+                logger_1.logger.info(`    Relative Windows path: ${relativeWindowsPath}`);
+            }
+            else if (driveCRelativeIndex === 0) {
+                // Path already starts with "drive_c/" - just prepend /wineprefix/
+                let linuxPath = launchCommand.replace(/\\/g, '/');
+                gameExecutable = path_1.default.posix.join('/wineprefix', linuxPath);
+                logger_1.logger.info(`  Detected relative path with drive_c prefix`);
+                logger_1.logger.info(`    Launch command: ${launchCommand}`);
+                logger_1.logger.info(`    Resolved to: ${gameExecutable}`);
+            }
+            else {
+                // Traditional Windows-style path (C:\GOG Games\...) - convert to Linux
+                let linuxPath = launchCommand.replace(/^[A-Za-z]:/, '');
+                linuxPath = linuxPath.replace(/\\/g, '/');
+                gameExecutable = path_1.default.posix.join('/wineprefix/drive_c', linuxPath);
+                logger_1.logger.info(`  Detected Windows-style path`);
+                logger_1.logger.info(`    Launch command: ${launchCommand}`);
+                logger_1.logger.info(`    Resolved to: ${gameExecutable}`);
+            }
+            // Note: Docker's `Cmd` does not perform shell expansion, so passing
+            // `$GAME_EXECUTABLE` would be treated as a literal filename. Use a shell
+            // wrapper so the variable expands at runtime.
+            const escapedArgs = cleanArgs.map((a) => a.replace(/"/g, '\\"'));
+            const argsJoined = escapedArgs.map((a) => `"${a}"`).join(' ');
+            // If keepAlive is enabled, ensure the container stays running after Wine exits
+            // so the user can `docker exec` and inspect files/logs.
+            const keepAliveSuffix = options.keepAlive === true
+                ? ' ; EXIT_CODE=$? ; echo "[dillinger] wine exited with code: ${EXIT_CODE}" ; tail -f /dev/null'
+                : '';
+            cmdArray = ['bash', '-lc', `wine "${'${GAME_EXECUTABLE}'}"${argsJoined ? ` ${argsJoined}` : ''}${keepAliveSuffix}`];
+            // Set working directory to the executable directory.
+            // Some Windows games rely on relative paths to DLLs/data next to the EXE.
+            // Note: GAME_EXECUTABLE will be rewritten from /wineprefix/... to /installed/... later,
+            // so we use the expected rewritten path when computing the working directory.
+            // We will rewrite WINEPREFIX + GAME_EXECUTABLE to the real prefix path under /installed later.
+            // For now set a placeholder; we'll overwrite containerWorkingDir once the prefix is resolved.
+            containerWorkingDir = '/installed';
+            logger_1.logger.info(`Launching game: ${game.title}`);
+            logger_1.logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+            logger_1.logger.info(`  Original Windows path: ${launchCommand}`);
+            logger_1.logger.info(`  Wine command (template): ${cmdArray.join(' ')}`);
+            logger_1.logger.info(`  Working directory: ${containerWorkingDir}`);
+        }
+        else if (platform.configuration.containerImage?.includes('runner-retroarch')) {
+            // For RetroArch games
+            // Priority: game-specific core > platform config core > platform ID default > 'mame' fallback
+            const platformCore = game.platformId ? retroarchCores[game.platformId] || 'mame' : 'mame';
+            const core = game.settings?.emulator?.core || platform.configuration.defaultSettings?.emulator?.core || platformCore;
+            logger_1.logger.info('RetroArch core selection debug:', {
+                gamePlatformId: game.platformId,
+                retroarchCoresLookup: game.platformId ? retroarchCores[game.platformId] : undefined,
+                platformCore,
+                gameSettingsEmulatorCore: game.settings?.emulator?.core,
+                platformConfigCore: platform.configuration.defaultSettings?.emulator?.core,
+                finalCore: core,
+            });
+            const romPath = game.filePath;
+            if (romPath === 'MENU') {
+                // Launch into menu without a ROM
+                // Do NOT set RETROARCH_CORE to avoid pre-loading a core
+                gameExecutable = 'retroarch';
+                cmdArray = [];
+                containerWorkingDir = '/home/gameuser';
+                logger_1.logger.info(`Launching RetroArch Menu (Setup Mode)`);
+            }
+            else {
+                // Set RETROARCH_CORE env var for normal games
+                environment['RETROARCH_CORE'] = core;
+                environment['RETROARCH_LOG_FILE'] = '/home/gameuser/.config/retroarch/retroarch.log';
+                environment['RETROARCH_LOG_LEVEL'] = '1';
+                const isMameCore = ['mame', 'mame2003', 'mame2003_plus'].includes(core);
+                if (isMameCore) {
+                    try {
+                        const settingsService = settings_1.SettingsService.getInstance();
+                        const retroarchSettings = await settingsService.getRetroarchSettings();
+                        const globalMame = retroarchSettings.mame || {};
+                        const gameMame = game.settings?.emulator?.settings?.mame || {};
+                        const aspect = gameMame.aspect ?? globalMame.aspect;
+                        if (aspect) {
+                            environment['RETROARCH_MAME_ASPECT'] = aspect;
+                        }
+                        const integerScale = gameMame.integerScale ?? globalMame.integerScale;
+                        if (typeof integerScale === 'boolean') {
+                            environment['RETROARCH_MAME_INTEGER_SCALE'] = integerScale ? 'true' : 'false';
+                        }
+                        const borderlessFullscreen = gameMame.borderlessFullscreen ?? globalMame.borderlessFullscreen;
+                        if (typeof borderlessFullscreen === 'boolean') {
+                            environment['RETROARCH_MAME_BORDERLESS'] = borderlessFullscreen ? 'true' : 'false';
+                        }
+                        logger_1.logger.info('RetroArch MAME settings resolved:', {
+                            aspect,
+                            integerScale,
+                            borderlessFullscreen,
+                        });
+                    }
+                    catch (err) {
+                        logger_1.logger.warn('Failed to apply RetroArch MAME settings:', err);
+                    }
+                }
+                // Get platform settings for fullscreen preference
+                if (game.platformId === 'psx') {
+                    try {
+                        const settingsService = settings_1.SettingsService.getInstance();
+                        const allSettings = await settingsService.getAllSettings();
+                        const psxSettings = allSettings.platforms?.psx;
+                        if (psxSettings?.fullscreen) {
+                            environment['RETROARCH_FULLSCREEN'] = 'true';
+                            logger_1.logger.info(`  Fullscreen: enabled (from platform settings)`);
+                        }
+                    }
+                    catch (err) {
+                        logger_1.logger.warn(`Could not read PSX platform settings:`, err);
+                    }
+                }
+                if (!romPath) {
+                    throw new Error('No ROM file specified for RetroArch game');
+                }
+                const romMount = await this.resolveRomMount(romPath);
+                romBind = romMount.bind;
+                romContainerPath = romMount.containerPath;
+                // Command is just the ROM path (entrypoint handles the rest)
+                gameExecutable = 'retroarch'; // Just for logging
+                cmdArray = [romContainerPath];
+                containerWorkingDir = '/home/gameuser';
+                logger_1.logger.info(`Launching RetroArch game: ${game.title}`);
+                logger_1.logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+                logger_1.logger.info(`  Core: ${core}`);
+                logger_1.logger.info(`  ROM file: ${romPath}`);
+            }
+        }
+        else if (game.platformId && viceEmulators[game.platformId]) {
+            // For Commodore emulator games (C64, C128, VIC-20, Plus/4, PET)
+            const emulatorCmd = viceEmulators[game.platformId];
+            if (!emulatorCmd) {
+                throw new Error(`Unknown Commodore platform: ${game.platformId}`);
+            }
+            const romPath = game.filePath; // Path to ROM file (.d64, .crt, .t64, etc.)
+            if (!romPath) {
+                throw new Error('No ROM file specified for Commodore game');
+            }
+            // VICE emulator command: x64sc /roms/game.d64
+            // The ROM file is mounted into /roms inside the container
+            const romMount = await this.resolveRomMount(romPath);
+            romBind = romMount.bind;
+            romContainerPath = romMount.containerPath;
+            gameExecutable = emulatorCmd;
+            // Do NOT pass -default: it resets joystick/input settings to disabled.
+            // Fresh containers have no stale config, so -default is unnecessary.
+            // VICE uses its own evdev joystick driver to scan /dev/input.
+            cmdArray = [emulatorCmd, romContainerPath];
+            containerWorkingDir = '/home/gameuser';
+            logger_1.logger.info(`Launching Commodore game: ${game.title}`);
+            logger_1.logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+            logger_1.logger.info(`  Emulator: ${emulatorCmd}`);
+            logger_1.logger.info(`  ROM file: ${romPath}`);
+            logger_1.logger.info(`  Command: ${cmdArray.join(' ')}`);
+        }
+        else if (game.platformId && amigaEmulators[game.platformId]) {
+            // For Amiga emulator games
+            const emulatorCmd = amigaEmulators[game.platformId];
+            if (!emulatorCmd) {
+                throw new Error(`Unknown Amiga platform: ${game.platformId}`);
+            }
+            const romPath = game.filePath; // Path to ROM file (.adf, .lha, etc.)
+            if (!romPath) {
+                throw new Error('No ROM file specified for Amiga game');
+            }
+            // FS-UAE emulator command: fs-uae /roms/game.adf
+            // The ROM file is mounted into /roms inside the container
+            const romMount = await this.resolveRomMount(romPath);
+            romBind = romMount.bind;
+            romContainerPath = romMount.containerPath;
+            gameExecutable = emulatorCmd;
+            cmdArray = [emulatorCmd, romContainerPath];
+            containerWorkingDir = '/home/gameuser';
+            // Determine Amiga model from platform ID
+            let amigaModel = 'A500'; // Default
+            switch (game.platformId) {
+                case 'amiga500':
+                    amigaModel = 'A500';
+                    break;
+                case 'amiga500plus':
+                    amigaModel = 'A500+';
+                    break;
+                case 'amiga600':
+                    amigaModel = 'A600';
+                    break;
+                case 'amiga1200':
+                    amigaModel = 'A1200';
+                    break;
+                case 'amiga3000':
+                    amigaModel = 'A3000';
+                    break;
+                case 'amiga4000':
+                    amigaModel = 'A4000';
+                    break;
+                case 'cd32':
+                    amigaModel = 'CD32';
+                    break;
+            }
+            // Add model to environment variables
+            // This will be picked up by the entrypoint script to generate Default.fs-uae
+            // Note: We add it to the environment map so it gets included in the env array later
+            environment['FSUAE_AMIGA_MODEL'] = amigaModel;
+            logger_1.logger.info(`Launching Amiga game: ${game.title}`);
+            logger_1.logger.info(`  Platform ID: ${game.platformId}`);
+            logger_1.logger.info(`  Amiga Model: ${amigaModel}`);
+            logger_1.logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+            logger_1.logger.info(`  Emulator: ${emulatorCmd}`);
+            logger_1.logger.info(`  Model: ${amigaModel}`);
+            logger_1.logger.info(`  ROM file: ${romPath}`);
+            logger_1.logger.info(`  Command: ${cmdArray.join(' ')}`);
+        }
+        else if (game.platformId && mameEmulators[game.platformId]) {
+            // For MAME Arcade games
+            const emulatorCmd = mameEmulators[game.platformId];
+            if (!emulatorCmd) {
+                throw new Error(`Unknown MAME platform: ${game.platformId}`);
+            }
+            const romPath = game.filePath; // Path to ROM zip file
+            if (!romPath) {
+                throw new Error('No ROM file specified for MAME game');
+            }
+            const romMount = await this.resolveRomMount(romPath);
+            romBind = romMount.bind;
+            // MAME expects the driver name (filename without extension)
+            // The ROM directory is mounted to /roms
+            const romFilename = path_1.default.basename(romPath);
+            const driverName = romFilename.replace(/\.[^/.]+$/, ""); // Remove extension
+            gameExecutable = emulatorCmd;
+            // Pass driver name to MAME
+            // MAME will look for the zip file in the configured rompath (/roms)
+            cmdArray = [emulatorCmd, driverName];
+            containerWorkingDir = '/home/gameuser';
+            logger_1.logger.info(`Launching MAME game: ${game.title}`);
+            logger_1.logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+            logger_1.logger.info(`  Emulator: ${emulatorCmd}`);
+            logger_1.logger.info(`  Driver: ${driverName}`);
+            logger_1.logger.info(`  ROM file: ${romPath}`);
+            logger_1.logger.info(`  Command: ${cmdArray.join(' ')}`);
+        }
+        else {
+            // For native Linux games, construct the path normally
+            gameExecutable = path_1.default.posix.join('/game', launchCommand);
+            const cleanArgs = launchArgs
+                .filter(arg => arg && typeof arg === 'string')
+                .map(arg => arg.replace(/\0/g, ''));
+            cmdArray = [gameExecutable, ...cleanArgs];
+            containerWorkingDir = '/game';
+            logger_1.logger.info(`Launching game: ${game.title}`);
+            logger_1.logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+            logger_1.logger.info(`  Executable: ${gameExecutable}`);
+            logger_1.logger.info(`  Arguments: ${cleanArgs.join(' ') || '(none)'}`);
+            logger_1.logger.info(`  Working directory: ${containerWorkingDir}`);
+        }
+        // Prepare environment variables
+        const env = buildLaunchEnvironmentVariables(game.id, sessionId, environment);
+        // Apply streaming graph preset selection
+        if (isStreamingMode) {
+            try {
+                const presetFromGame = game.settings?.streaming?.presetId;
+                if (presetFromGame) {
+                    env.push(`STREAMING_PRESET_ID=${presetFromGame}`);
+                    logger_1.logger.info(`  Streaming graph preset (game override): ${presetFromGame}`);
+                }
+                else {
+                    const { StreamingGraphService } = await import('./streaming-graph');
+                    const graphService = StreamingGraphService.getInstance();
+                    const graphStore = await graphService.getGraphStore();
+                    if (graphStore.defaultPresetId) {
+                        env.push(`STREAMING_PRESET_ID=${graphStore.defaultPresetId}`);
+                        logger_1.logger.info(`  Streaming graph preset (default): ${graphStore.defaultPresetId}`);
+                    }
+                }
+            }
+            catch (err) {
+                logger_1.logger.warn('Failed to resolve streaming graph preset:', err);
+            }
+        }
+        // Debug: Log environment variables being passed
+        logger_1.logger.info('Environment variables for container:', {
+            environmentObj: environment,
+            envArray: env.filter(e => e.startsWith('RETROARCH') || e.startsWith('GAME_ID')),
+        });
+        // Inject Joystick Configuration
+        try {
+            const settingsService = settings_1.SettingsService.getInstance();
+            const joystickSettings = await settingsService.getJoystickSettings();
+            // Determine platform category for joystick mapping
+            let joystickPlatform = 'default';
+            const platformType = platform.type;
+            if (platformType === 'arcade' || game.platformId === 'mame' || game.platformId === 'arcade' || platform.configuration.containerImage?.includes('retroarch')) {
+                joystickPlatform = 'arcade';
+            }
+            else if (platformType === 'console' || ['nes', 'snes', 'genesis', 'psx', 'n64'].includes(game.platformId || '')) {
+                joystickPlatform = 'console';
+            }
+            else if (platformType === 'computer' ||
+                platformType === 'wine' ||
+                (game.platformId || '').includes('wine') ||
+                ['c64', 'amiga', 'dos', 'pc'].includes(game.platformId || '')) {
+                joystickPlatform = 'computer';
+            }
+            // Check for specific platform config first, then fallback to category
+            const joystickConfig = joystickSettings[game.platformId || ''] || joystickSettings[joystickPlatform];
+            if (joystickConfig) {
+                env.push(`JOYSTICK_DEVICE_ID=${joystickConfig.deviceId}`);
+                env.push(`JOYSTICK_DEVICE_NAME=${joystickConfig.deviceName}`);
+                logger_1.logger.info(`  Joystick configured: ${joystickConfig.deviceName} (${joystickConfig.deviceId})`);
+                // VICE joystick detection is handled by SDL2 inside the container.
+                // The entrypoint sets SDL_JOYSTICK_DEVICE to point SDL2 at the
+                // correct /dev/input/event* nodes (since udevd isn't running).
+            }
+        }
+        catch (err) {
+            logger_1.logger.warn('Failed to inject joystick configuration:', err);
+        }
+        // Pass PUID/PGID to runner so files are created with correct ownership
+        // Default to 1000:1000 which is the typical first user on Linux
+        const puid = process.env.PUID || '1000';
+        const pgid = process.env.PGID || '1000';
+        env.push(`PUID=${puid}`);
+        env.push(`PGID=${pgid}`);
+        if (options.keepAlive === true) {
+            env.push('KEEP_ALIVE=true');
+            logger_1.logger.info('  KEEP_ALIVE enabled for runner');
+        }
+        // Pass global GPU selection to runner (base entrypoint consumes GPU_VENDOR)
+        try {
+            const settingsService = settings_1.SettingsService.getInstance();
+            const gpuSettings = await settingsService.getGpuSettings();
+            if (gpuSettings?.vendor) {
+                env.push(`GPU_VENDOR=${gpuSettings.vendor}`);
+                logger_1.logger.info(`  GPU vendor preference: ${gpuSettings.vendor}`);
+            }
+        }
+        catch (err) {
+            logger_1.logger.warn('Failed to load GPU settings:', err);
+        }
+        // Add Wine-specific configuration
+        const wineConfig = game.settings?.wine;
+        if (wineConfig?.useDxvk) {
+            env.push('INSTALL_DXVK=true');
+            // DXVK_HUD is not set by default - use MangoHUD for overlays instead
+            logger_1.logger.info(`  DXVK enabled (DirectX to Vulkan translation)`);
+            // If a specific DXVK version is selected, pass it to the container
+            if (wineConfig.dxvkVersion) {
+                env.push(`DXVK_VERSION_ID=${wineConfig.dxvkVersion}`);
+                logger_1.logger.info(`  DXVK version: ${wineConfig.dxvkVersion}`);
+            }
+        }
+        // VKD3D-Proton for DirectX 12 support
+        if (wineConfig?.useVkd3dProton) {
+            env.push('INSTALL_VKD3D=true');
+            logger_1.logger.info(`  VKD3D-Proton enabled (DirectX 12 to Vulkan translation)`);
+            if (wineConfig.vkd3dVersion) {
+                env.push(`VKD3D_VERSION_ID=${wineConfig.vkd3dVersion}`);
+                logger_1.logger.info(`  VKD3D-Proton version: ${wineConfig.vkd3dVersion}`);
+            }
+        }
+        // Add Wine version selection (for GE-Proton / UMU launcher support)
+        if (wineConfig?.version && wineConfig.version !== 'system') {
+            env.push(`WINE_VERSION_ID=${wineConfig.version}`);
+            logger_1.logger.info(`  Wine version: ${wineConfig.version}`);
+            // If using GE-Proton (starts with "ge-proton"), also set UMU game ID
+            if (wineConfig.version.startsWith('ge-proton')) {
+                const umuGameId = wineConfig.umuGameId || `umu-${game.slug || game.id}`;
+                env.push(`UMU_GAME_ID=${umuGameId}`);
+                env.push(`GAME_SLUG=${game.slug || game.id}`);
+                logger_1.logger.info(`  UMU Game ID: ${umuGameId}`);
+            }
+        }
+        // Add Wine DLL overrides if configured (via registry)
+        if (wineConfig?.dlls && Object.keys(wineConfig.dlls).length > 0) {
+            const dllOverrides = Object.entries(wineConfig.dlls)
+                .map(([dll, mode]) => `${dll}=${mode}`)
+                .join(';');
+            env.push(`WINE_DLL_OVERRIDES=${dllOverrides}`);
+            logger_1.logger.info(`  Wine DLL overrides (registry): ${dllOverrides}`);
+        }
+        // Add WINEDLLOVERRIDES environment variable if configured
+        // This is the official Wine env var for runtime DLL configuration
+        // Format: "dll1=mode1;dll2=mode2" (e.g., "quartz=disabled;wmvcore=disabled")
+        if (wineConfig?.dllOverrides) {
+            env.push(`WINEDLLOVERRIDES=${wineConfig.dllOverrides}`);
+            logger_1.logger.info(`  WINEDLLOVERRIDES: ${wineConfig.dllOverrides}`);
+        }
+        // Add winetricks verbs to run before game launch
+        if (wineConfig?.winetricks && wineConfig.winetricks.length > 0) {
+            const winetricksStr = wineConfig.winetricks.join(';');
+            env.push(`WINE_WINETRICKS=${winetricksStr}`);
+            logger_1.logger.info(`  Winetricks verbs: ${winetricksStr}`);
+        }
+        // Add custom registry settings
+        if (wineConfig?.registrySettings && wineConfig.registrySettings.length > 0) {
+            // Pass as JSON string for the entrypoint to parse
+            const registryJson = JSON.stringify(wineConfig.registrySettings);
+            env.push(`WINE_REGISTRY_SETTINGS=${registryJson}`);
+            logger_1.logger.info(`  Custom registry settings: ${wineConfig.registrySettings.length} entries`);
+            for (const setting of wineConfig.registrySettings) {
+                logger_1.logger.info(`    ${setting.path}\\${setting.name} = ${setting.value} (${setting.type})`);
+            }
+        }
+        // Add Wine compatibility mode if configured
+        if (wineConfig?.compatibilityMode && wineConfig.compatibilityMode !== 'none') {
+            env.push(`WINE_COMPAT_MODE=${wineConfig.compatibilityMode}`);
+            logger_1.logger.info(`  Wine compatibility mode: ${wineConfig.compatibilityMode}`);
+        }
+        // Add Gamescope configuration if enabled
+        const gamescopeConfig = game.settings?.gamescope;
+        if (gamescopeConfig?.enabled) {
+            env.push('USE_GAMESCOPE=true', `GAMESCOPE_WIDTH=${gamescopeConfig.width || 1920}`, `GAMESCOPE_HEIGHT=${gamescopeConfig.height || 1080}`, `GAMESCOPE_REFRESH=${gamescopeConfig.refreshRate || 60}`, `GAMESCOPE_FULLSCREEN=${gamescopeConfig.fullscreen ? 'true' : 'false'}`, `GAMESCOPE_UPSCALER=${gamescopeConfig.upscaler || 'auto'}`);
+            if (gamescopeConfig.inputWidth && gamescopeConfig.inputHeight) {
+                env.push(`GAMESCOPE_INPUT_WIDTH=${gamescopeConfig.inputWidth}`, `GAMESCOPE_INPUT_HEIGHT=${gamescopeConfig.inputHeight}`);
+            }
+            if (gamescopeConfig.limitFps) {
+                env.push(`GAMESCOPE_FPS_LIMIT=${gamescopeConfig.limitFps}`);
+            }
+            logger_1.logger.info(`  Gamescope enabled: ${gamescopeConfig.width}x${gamescopeConfig.height}@${gamescopeConfig.refreshRate}Hz`);
+            logger_1.logger.info(`  Gamescope upscaler: ${gamescopeConfig.upscaler || 'auto'}`);
+        }
+        // Add MangoHUD configuration if enabled
+        const mangoHudConfig = game.settings?.mangohud;
+        if (mangoHudConfig?.enabled) {
+            env.push('ENABLE_MANGOHUD=true');
+            logger_1.logger.info(`  MangoHUD overlay enabled`);
+        }
+        // Streaming configuration (Wolf sidecar)
+        // Note: moonlightConfig is already defined at the top of launchGame()
+        if (moonlightConfig?.enabled) {
+            logger_1.logger.info('  Streaming enabled for this game (Wolf sidecar)');
+            if (moonlightConfig.bitrate) {
+                logger_1.logger.info(`  Requested bitrate: ${moonlightConfig.bitrate}Mbps`);
+            }
+            if (moonlightConfig.framerate) {
+                logger_1.logger.info(`  Requested FPS: ${moonlightConfig.framerate}`);
+            }
+            if (moonlightConfig.resolution) {
+                logger_1.logger.info(`  Requested resolution: ${moonlightConfig.resolution}`);
+            }
+            if (moonlightConfig.codec) {
+                logger_1.logger.info(`  Requested codec: ${moonlightConfig.codec}`);
+            }
+        }
+        if (isStreamingMode) {
+            logger_1.logger.info('Ensuring streaming sidecar is running for game session');
+            await this.ensureStreamerSidecar('game');
+        }
+        // Add Wine-specific configuration for Windows games
+        if (platform.type === 'wine') {
+            // The Wine container's entrypoint script expects GAME_EXECUTABLE
+            const cleanArgs = launchArgs
+                .filter(arg => arg && typeof arg === 'string')
+                .map(arg => arg.replace(/\0/g, ''))
+                .filter(arg => arg !== '')
+                .join(' ');
+            // Build WINEDEBUG environment variable from game settings
+            // Pass keepAlive flag to enable verbose logging in debug mode
+            const wineDebug = this.buildWineDebug(game, options.keepAlive === true);
+            // Check if fullscreen/virtual desktop is requested
+            const fullscreen = game.settings?.launch?.fullscreen || false;
+            const resolution = game.settings?.launch?.resolution || '1920x1080';
+            const useXrandr = game.settings?.launch?.useXrandr || false;
+            const xrandrMode = game.settings?.launch?.xrandrMode || resolution;
+            // Note: WINEARCH should NOT be set when launching with an existing prefix
+            // Wine will auto-detect the architecture from the existing prefix
+            // Setting it causes "not supported in wow64 mode" errors
+            //
+            // IMPORTANT: `gameExecutable` is set earlier in launchGame(). Use it as-is.
+            // Do NOT overwrite it with a placeholder string.
+            env.push(`WINEDEBUG=${wineDebug}`, 'WINEPREFIX=/wineprefix', `GAME_EXECUTABLE=${gameExecutable}`, `GAME_ARGS=${cleanArgs}`);
+            // Wine virtual desktop (UI label: "Launch in fullscreen (Wine virtual desktop)")
+            // The wine runner configures the registry when WINE_VIRTUAL_DESKTOP is set.
+            if (fullscreen) {
+                env.push(`WINE_VIRTUAL_DESKTOP=${resolution}`);
+                logger_1.logger.info(`  Wine virtual desktop enabled: ${resolution}`);
+            }
+            // Allow per-game selection of D3D renderer (Wine runner consumes WINE_D3D_RENDERER)
+            const renderer = game.settings?.wine?.renderer;
+            if (renderer === 'vulkan' || renderer === 'opengl' || renderer === 'gdi') {
+                env.push(`WINE_D3D_RENDERER=${renderer}`);
+                logger_1.logger.info(`  Wine renderer: ${renderer}`);
+            }
+            if (options.keepAlive === true) {
+                env.push('KEEP_ALIVE=true');
+                logger_1.logger.info('  KEEP_ALIVE enabled for Wine runner');
+            }
+            // Note: Wine virtual desktop disabled due to input handling issues
+            // Users should enable gamescope for fullscreen support instead
+            // Add xrandr resolution setting if requested
+            if (useXrandr) {
+                env.push(`XRANDR_MODE=${xrandrMode}`);
+                logger_1.logger.info(`  xrandr mode will be set to: ${xrandrMode}`);
+            }
+            logger_1.logger.info(`  WINEDEBUG=${wineDebug}`);
+            logger_1.logger.info(`  GAME_EXECUTABLE=${gameExecutable}`);
+            logger_1.logger.info(`  GAME_ARGS=${cleanArgs || '(none)'}`);
+            // Log Wine version info
+            const wineVersion = game.settings?.wine?.version || 'system';
+            const installWineVersion = game.installation?.wineVersionId || 'unknown';
+            logger_1.logger.info(`  Wine version (current): ${wineVersion}`);
+            logger_1.logger.info(`  Wine version (installed with): ${installWineVersion}`);
+            if (installWineVersion !== 'unknown' && installWineVersion !== wineVersion) {
+                logger_1.logger.warn(`  ⚠ Wine version mismatch! Game was installed with '${installWineVersion}' but launching with '${wineVersion}'`);
+            }
+        }
+        const preferX11ForVice = !isStreamingMode &&
+            (Boolean(game.platformId && viceEmulators[game.platformId]) ||
+                Boolean(platform.configuration.containerImage?.includes('runner-vice')));
+        // Get display forwarding configuration
+        const displayConfig = isStreamingMode
+            ? await this.getSidecarDisplayConfiguration()
+            : await this.getDisplayConfiguration({ preferX11: preferX11ForVice });
+        env.push(...displayConfig.env);
+        logger_1.logger.info(`  Display mode: ${displayConfig.mode}`);
+        // Determine Wine prefix path if this is a Wine game
+        // Wine prefix == installation directory (contains drive_c/)
+        const gameIdentifier = game.slug || game.id;
+        let winePrefixPath = null;
+        let winePrefixHostPath = null;
+        let winePrefixVolume = null;
+        let emulatorHomePath = null;
+        if (platform.type === 'wine') {
+            // The install path is stored as an absolute host path on a configured volume
+            // e.g., /mnt/m2fast/game-slug (directly where installed)
+            const configuredInstallPath = game.installation?.installPath;
+            if (configuredInstallPath) {
+                // Find which volume this path is on
+                const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
+                if (volumeMatch) {
+                    winePrefixVolume = volumeMatch.volume;
+                    winePrefixPath = configuredInstallPath;
+                    logger_1.logger.info(`  Wine prefix path: ${winePrefixPath}`);
+                    logger_1.logger.info(`  Wine prefix volume: ${winePrefixVolume.name} (${winePrefixVolume.dockerVolumeName})`);
+                    // Verify the prefix contains drive_c (it's a valid Wine prefix)
+                    const exists = await this.hostPathExists(path_1.default.posix.join(winePrefixPath, 'drive_c'), winePrefixVolume.dockerVolumeName);
+                    if (!exists) {
+                        logger_1.logger.warn(`  ⚠ Wine prefix does not contain drive_c: ${winePrefixPath}`);
+                        logger_1.logger.warn(`    This may indicate an incomplete installation`);
+                    }
+                }
+                else {
+                    // Path not on a configured volume - try to use it directly as a bind mount
+                    logger_1.logger.warn(`  ⚠ Install path not on a configured volume: ${configuredInstallPath}`);
+                    logger_1.logger.warn(`    Will attempt direct bind mount`);
+                    winePrefixPath = configuredInstallPath;
+                    winePrefixHostPath = this.getHostPath(configuredInstallPath);
+                    if (winePrefixHostPath !== configuredInstallPath) {
+                        logger_1.logger.info(`    Resolved host bind path: ${winePrefixHostPath}`);
+                    }
+                }
+            }
+            else {
+                logger_1.logger.warn(`  ⚠ No install path configured for Wine game: ${gameIdentifier}`);
+            }
+        }
+        else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId] || retroarchCores[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
+            // For emulator games (VICE Commodore, FS-UAE Amiga, MAME, or RetroArch), create a per-game home directory
+            // This allows each game to have its own emulator config, saves, screenshots, etc.
+            const dillingerRoot = this.storage.getDillingerRoot();
+            const emulatorHomeDir = path_1.default.join(dillingerRoot, 'emulator-homes', gameIdentifier);
+            // Use the container-accessible path for filesystem operations
+            // We'll convert to host path later when setting up Docker volume mounts
+            const containerAccessiblePath = emulatorHomeDir;
+            // Ensure the directory exists with proper permissions
+            try {
+                const fs = await import('fs-extra');
+                const { chmod } = await import('fs/promises');
+                // Create parent directory first if it doesn't exist
+                const parentDir = path_1.default.dirname(containerAccessiblePath);
+                await fs.ensureDir(parentDir);
+                // Create the game-specific directory
+                await fs.ensureDir(containerAccessiblePath);
+                // Pre-create .config/pulse directory for PulseAudio and copy the cookie
+                // We copy instead of bind-mounting because the emulator home is mounted as a whole
+                const pulseDir = path_1.default.join(containerAccessiblePath, '.config', 'pulse');
+                await fs.ensureDir(pulseDir);
+                // Pre-create RetroArch screenshots directory (for emulator platforms)
+                const screenshotsDir = path_1.default.join(containerAccessiblePath, '.config', 'retroarch', 'screenshots');
+                await fs.ensureDir(screenshotsDir);
+                await chmod(screenshotsDir, 0o777);
+                // Copy PulseAudio cookie if it exists (needed for audio in container)
+                const userHome = process.env.HOME || '/home/node';
+                const pulseCookiePaths = [
+                    `${userHome}/.config/pulse/cookie`,
+                    '/home/dillinger/.config/pulse/cookie',
+                ];
+                for (const pulseCookie of pulseCookiePaths) {
+                    if (await fs.pathExists(pulseCookie)) {
+                        const destCookie = path_1.default.join(pulseDir, 'cookie');
+                        await fs.copy(pulseCookie, destCookie);
+                        await chmod(destCookie, 0o644);
+                        logger_1.logger.info(`  Copied PulseAudio cookie to emulator home`);
+                        break;
+                    }
+                }
+                // Pre-create .cache directory for applications that expect it (like VICE)
+                const cacheDir = path_1.default.join(containerAccessiblePath, '.cache');
+                await fs.ensureDir(cacheDir);
+                // Set permissions so the container user can write to it
+                // Use 777 to ensure the container user (uid 1000) can write even if created by root
+                await chmod(containerAccessiblePath, 0o777);
+                await chmod(path_1.default.join(containerAccessiblePath, '.config'), 0o777);
+                await chmod(pulseDir, 0o777);
+                await chmod(cacheDir, 0o777);
+                // Now convert to host path for Docker volume mounting
+                emulatorHomePath = this.getHostPath(containerAccessiblePath);
+                logger_1.logger.info(`  Emulator home directory: ${containerAccessiblePath}`);
+                if (emulatorHomePath !== containerAccessiblePath) {
+                    logger_1.logger.info(`    Host path for Docker: ${emulatorHomePath}`);
+                }
+                // --- MASTER CONFIG INJECTION ---
+                // Check if this is an Arcade/RetroArch game and if we need to inject the master config
+                const platformType = platform.type;
+                if (platformType === 'arcade' || game.platformId === 'mame' || game.platformId === 'arcade' || platform.configuration.containerImage?.includes('retroarch')) {
+                    const retroArchConfigPath = path_1.default.join(containerAccessiblePath, '.config', 'retroarch', 'retroarch.cfg');
+                    // If config doesn't exist, try to copy from master
+                    if (!await fs.pathExists(retroArchConfigPath)) {
+                        const masterConfigPath = path_1.default.join(dillingerRoot, 'storage', 'platform-configs', 'arcade', 'retroarch.cfg');
+                        if (await fs.pathExists(masterConfigPath)) {
+                            logger_1.logger.info(`  Injecting Master Arcade Config from: ${masterConfigPath}`);
+                            await fs.ensureDir(path_1.default.dirname(retroArchConfigPath));
+                            await fs.copy(masterConfigPath, retroArchConfigPath);
+                            await chmod(retroArchConfigPath, 0o666); // Ensure writable
+                        }
+                        else {
+                            logger_1.logger.warn(`  Master Arcade Config not found at: ${masterConfigPath}`);
+                        }
+                    }
+                    else {
+                        logger_1.logger.info(`  Using existing game-specific config: ${retroArchConfigPath}`);
+                    }
+                }
+                // -------------------------------
+            }
+            catch (error) {
+                logger_1.logger.error(`  ✗ Failed to create emulator home directory: ${error.message}`);
+                logger_1.logger.error(`    Path: ${containerAccessiblePath}`);
+                logger_1.logger.error(`    Error code: ${error.code}`);
+                // Don't mount if we can't create the directory
+                emulatorHomePath = null;
+            }
+        }
+        // Build volume binds
+        await this.detectHostPath();
+        const binds = [
+            `dillinger_core:/data:rw`,
+            `dillinger_cache:/cache:rw`,
+            ...this.getInstalledVolumeBinds(),
+        ];
+        // For Wine games, mount the Wine prefix from the appropriate volume
+        if (platform.type === 'wine' && winePrefixPath) {
+            // Mount the Wine prefix at /wineprefix in the container
+            if (winePrefixVolume) {
+                // Use the Docker volume with the relative path to the prefix
+                const volumeMatch = await this.findVolumeForPath(winePrefixPath);
+                if (volumeMatch) {
+                    // Mount the entire volume and use a subpath for WINEPREFIX
+                    binds.push(`${winePrefixVolume.dockerVolumeName}:/mnt/game_volume:rw`);
+                    const containerPrefixPath = `/mnt/game_volume${volumeMatch.relativePath}`;
+                    // Update WINEPREFIX to point to the container path
+                    for (let i = 0; i < env.length; i++) {
+                        const entry = env[i];
+                        if (!entry)
+                            continue;
+                        if (entry.startsWith('WINEPREFIX=')) {
+                            env[i] = `WINEPREFIX=${containerPrefixPath}`;
+                            continue;
+                        }
+                        if (entry.startsWith('GAME_EXECUTABLE=/wineprefix/')) {
+                            // Transform /wineprefix/drive_c/... to /mnt/game_volume/<rel>/drive_c/...
+                            const rel = entry.substring('GAME_EXECUTABLE=/wineprefix'.length);
+                            env[i] = `GAME_EXECUTABLE=${containerPrefixPath}${rel}`;
+                        }
+                    }
+                    logger_1.logger.info(`  Mounted volume ${winePrefixVolume.dockerVolumeName} at /mnt/game_volume`);
+                    logger_1.logger.info(`  WINEPREFIX set to: ${containerPrefixPath}`);
+                }
+            }
+            else {
+                // Direct bind mount (path not on a configured volume)
+                const bindSource = winePrefixHostPath || winePrefixPath;
+                const containerPrefixPath = winePrefixPath;
+                binds.push(`${bindSource}:${containerPrefixPath}:rw`);
+                // Update WINEPREFIX and GAME_EXECUTABLE env vars to the installed path mapping
+                for (let i = 0; i < env.length; i++) {
+                    const entry = env[i];
+                    if (!entry)
+                        continue;
+                    if (entry.startsWith('WINEPREFIX=')) {
+                        env[i] = `WINEPREFIX=${containerPrefixPath}`;
+                        continue;
+                    }
+                    if (entry.startsWith('GAME_EXECUTABLE=/wineprefix/')) {
+                        const rel = entry.substring('GAME_EXECUTABLE=/wineprefix'.length);
+                        env[i] = `GAME_EXECUTABLE=${containerPrefixPath}${rel}`;
+                    }
+                }
+                logger_1.logger.info(`  Direct bind mount: ${bindSource} -> ${containerPrefixPath}`);
+            }
+            // Preflight: ensure the target executable exists within the selected prefix.
+            // This avoids launching with the wrong prefix and getting a vague Wine error.
+            try {
+                const execEnvIndex = env.findIndex((e) => e.startsWith('GAME_EXECUTABLE='));
+                if (execEnvIndex !== -1 && winePrefixVolume) {
+                    const maybeGameExecutable = env[execEnvIndex];
+                    const gameExecutable = maybeGameExecutable.substring('GAME_EXECUTABLE='.length);
+                    // Check if the executable path is under our mounted volume
+                    if (gameExecutable.startsWith('/mnt/game_volume/')) {
+                        const relPath = gameExecutable.substring('/mnt/game_volume/'.length);
+                        const { exists, actualPath } = await this.checkPathCaseInsensitiveInVolume(winePrefixVolume.dockerVolumeName, relPath);
+                        let discoveredFromDirectory = false;
+                        const resolvedRelativePath = actualPath || relPath;
+                        const regularFileExists = exists
+                            ? await this.isRegularFileInVolume(winePrefixVolume.dockerVolumeName, resolvedRelativePath)
+                            : false;
+                        if (!exists || !regularFileExists) {
+                            const dirDiscoveredRelativePath = await this.findExecutableInsideDirectoryInVolume(winePrefixVolume.dockerVolumeName, resolvedRelativePath);
+                            if (dirDiscoveredRelativePath) {
+                                const discoveredPath = `/mnt/game_volume/${dirDiscoveredRelativePath}`;
+                                logger_1.logger.warn(`  ⚠ GAME_EXECUTABLE pointed to a directory/missing path; using discovered exe:`);
+                                logger_1.logger.warn(`    Requested: ${gameExecutable}`);
+                                logger_1.logger.warn(`    Discovered: ${discoveredPath}`);
+                                env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+                                discoveredFromDirectory = true;
+                            }
+                            if (!discoveredFromDirectory) {
+                                const basename = path_1.default.posix.basename(relPath);
+                                const discoveredRelativePath = await this.findExecutableByBasenameInVolume(winePrefixVolume.dockerVolumeName, basename);
+                                if (discoveredRelativePath) {
+                                    const discoveredPath = `/mnt/game_volume/${discoveredRelativePath}`;
+                                    logger_1.logger.warn(`  ⚠ Executable missing at configured path, but discovered by basename:`);
+                                    logger_1.logger.warn(`    Requested: ${gameExecutable}`);
+                                    logger_1.logger.warn(`    Discovered: ${discoveredPath}`);
+                                    env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+                                }
+                                else {
+                                    const nearbyExecutables = await this.listNearbyExecutablesInVolume(winePrefixVolume.dockerVolumeName, relPath);
+                                    logger_1.logger.error(`  ✗ Executable not found in Wine prefix:`);
+                                    logger_1.logger.error(`    GAME_EXECUTABLE: ${gameExecutable}`);
+                                    logger_1.logger.error(`    Host path: ${winePrefixPath}`);
+                                    if (nearbyExecutables.length > 0) {
+                                        logger_1.logger.error(`    Nearby executable candidates:`);
+                                        for (const candidate of nearbyExecutables.slice(0, 5)) {
+                                            logger_1.logger.error(`      - ${candidate}`);
+                                        }
+                                    }
+                                    const hints = nearbyExecutables.length > 0
+                                        ? ` Candidates: ${nearbyExecutables.slice(0, 3).join(', ')}`
+                                        : '';
+                                    throw new Error(`Wine launch preflight failed: configured executable does not exist in prefix. ` +
+                                        `Expected '${gameExecutable}' under install path '${winePrefixPath}'.${hints} ` +
+                                        `Verify the game's launch command path and installation directory.`);
+                                }
+                            }
+                        }
+                        // If the actual path differs from requested (case mismatch), update the env
+                        if (!discoveredFromDirectory && actualPath && actualPath !== relPath) {
+                            const correctedPath = `/mnt/game_volume/${actualPath}`;
+                            logger_1.logger.info(`  ℹ️ Corrected executable path case: "${gameExecutable}" -> "${correctedPath}"`);
+                            env[execEnvIndex] = `GAME_EXECUTABLE=${correctedPath}`;
+                        }
+                    }
+                }
+                else if (execEnvIndex !== -1 && winePrefixPath) {
+                    const maybeGameExecutable = env[execEnvIndex];
+                    const gameExecutable = maybeGameExecutable.substring('GAME_EXECUTABLE='.length);
+                    const directBindPrefixPath = winePrefixPath;
+                    const directBindPrefixHostPath = winePrefixHostPath || winePrefixPath;
+                    if (gameExecutable.startsWith('/wineprefix/') || gameExecutable.startsWith(`${directBindPrefixPath}/`)) {
+                        const relPath = gameExecutable.startsWith('/wineprefix/')
+                            ? gameExecutable.substring('/wineprefix/'.length)
+                            : gameExecutable.substring(`${directBindPrefixPath}/`.length);
+                        const hostExecutablePath = path_1.default.posix.join(directBindPrefixHostPath, relPath);
+                        const exists = await this.hostPathExists(hostExecutablePath);
+                        const regularFileExists = exists
+                            ? await this.isRegularFileInBindPath(directBindPrefixHostPath, relPath)
+                            : false;
+                        if (!exists || !regularFileExists) {
+                            const dirDiscoveredRelativePath = await this.findExecutableInsideDirectoryInBindPath(directBindPrefixHostPath, relPath);
+                            if (dirDiscoveredRelativePath) {
+                                const discoveredPath = `${directBindPrefixPath}/${dirDiscoveredRelativePath}`;
+                                logger_1.logger.warn(`  ⚠ GAME_EXECUTABLE pointed to a directory/missing path; using discovered exe:`);
+                                logger_1.logger.warn(`    Requested: ${gameExecutable}`);
+                                logger_1.logger.warn(`    Discovered: ${discoveredPath}`);
+                                env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+                            }
+                            if (!dirDiscoveredRelativePath) {
+                                const basename = path_1.default.posix.basename(relPath);
+                                const discoveredRelativePath = await this.findExecutableByBasenameInBindPath(directBindPrefixHostPath, basename);
+                                if (discoveredRelativePath) {
+                                    const discoveredPath = `${directBindPrefixPath}/${discoveredRelativePath}`;
+                                    logger_1.logger.warn(`  ⚠ Executable missing at configured path, but discovered by basename:`);
+                                    logger_1.logger.warn(`    Requested: ${gameExecutable}`);
+                                    logger_1.logger.warn(`    Discovered: ${discoveredPath}`);
+                                    env[execEnvIndex] = `GAME_EXECUTABLE=${discoveredPath}`;
+                                }
+                                else {
+                                    const nearbyExecutables = await this.listNearbyExecutablesInBindPath(directBindPrefixHostPath, relPath);
+                                    logger_1.logger.error(`  ✗ Executable not found in direct-bind Wine prefix:`);
+                                    logger_1.logger.error(`    GAME_EXECUTABLE: ${gameExecutable}`);
+                                    logger_1.logger.error(`    Host path: ${directBindPrefixHostPath}`);
+                                    if (nearbyExecutables.length > 0) {
+                                        logger_1.logger.error(`    Nearby executable candidates:`);
+                                        for (const candidate of nearbyExecutables.slice(0, 5)) {
+                                            logger_1.logger.error(`      - ${candidate}`);
+                                        }
+                                    }
+                                    const hints = nearbyExecutables.length > 0
+                                        ? ` Candidates: ${nearbyExecutables.slice(0, 3).join(', ')}`
+                                        : '';
+                                    throw new Error(`Wine launch preflight failed: configured executable does not exist in direct-bind prefix. ` +
+                                        `Expected '${gameExecutable}' under install path '${directBindPrefixPath}'.${hints} ` +
+                                        `Verify the game's launch command path and installation directory.`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                // Re-throw so launch fails fast with a useful message.
+                throw err;
+            }
+            // Log the effective Wine env for debugging.
+            const effectiveWinePrefix = env.find((e) => e.startsWith('WINEPREFIX='));
+            const effectiveGameExecutable = env.find((e) => e.startsWith('GAME_EXECUTABLE='));
+            if (effectiveWinePrefix)
+                logger_1.logger.info(`  Effective ${effectiveWinePrefix}`);
+            if (effectiveGameExecutable)
+                logger_1.logger.info(`  Effective ${effectiveGameExecutable}`);
+            // Ensure the container working directory matches the executable path.
+            if (effectiveGameExecutable) {
+                const rewrittenExec = effectiveGameExecutable.substring('GAME_EXECUTABLE='.length);
+                containerWorkingDir = path_1.default.posix.dirname(rewrittenExec);
+            }
+            else if (winePrefixVolume) {
+                const volumeMatch = await this.findVolumeForPath(winePrefixPath);
+                containerWorkingDir = volumeMatch ? `/mnt/game_volume${volumeMatch.relativePath}` : '/mnt/game_volume';
+            }
+            else {
+                containerWorkingDir = winePrefixPath || '/wineprefix';
+            }
+        }
+        else if (platform.type === 'wine' && !winePrefixPath) {
+            // Without an install path, we can't mount the Wine prefix
+            throw new Error('Wine game has no installation path configured; please install the game first');
+        }
+        // For Commodore, Amiga, MAME, and RetroArch emulator games, mount the ROM file directory and per-game home
+        else if ((game.platformId && (viceEmulators[game.platformId] || amigaEmulators[game.platformId] || mameEmulators[game.platformId] || retroarchCores[game.platformId])) || platform.configuration.containerImage?.includes('runner-retroarch')) {
+            if (game.filePath && game.filePath !== 'MENU') {
+                if (romBind) {
+                    binds.push(romBind);
+                    logger_1.logger.info(`  Mounting ROM directory: ${romBind} -> /roms`);
+                }
+                else {
+                    // Fallback: attempt to resolve via resolveRomMount to handle volumes/subdirs correctly
+                    const romMount = await this.resolveRomMount(game.filePath);
+                    binds.push(romMount.bind);
+                    logger_1.logger.info(`  Mounting ROM directory (fallback): ${romMount.bind} -> /roms`);
+                }
+            }
+            // Mount per-game home directory for emulator config and saves
+            // IMPORTANT: Mount this BEFORE displayConfig.volumes so individual files can overlay
+            if (emulatorHomePath) {
+                binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
+                logger_1.logger.info(`  Mounting emulator home: ${emulatorHomePath} -> /home/gameuser`);
+            }
+            // Mount BIOS directory for Amiga
+            if (game.platformId && amigaEmulators[game.platformId]) {
+                const dillingerRoot = this.storage.getDillingerRoot();
+                const biosPath = path_1.default.join(dillingerRoot, 'bios', 'amiga');
+                // Ensure directory exists to prevent Docker from creating it as root
+                try {
+                    const fs = await import('fs-extra');
+                    await fs.ensureDir(biosPath);
+                }
+                catch (err) {
+                    logger_1.logger.warn(`Could not ensure BIOS directory exists: ${biosPath}`, err);
+                }
+                const hostBiosPath = this.getHostPath(biosPath);
+                binds.push(`${hostBiosPath}:/bios:ro`);
+                logger_1.logger.info(`  Mounting BIOS directory: ${hostBiosPath} -> /bios`);
+            }
+            // PSX BIOS: Since dillinger_core:/data is already mounted, BIOS files are available
+            // at /data/bios/psx inside the container. Pass this path via environment variable.
+            if (game.platformId === 'psx') {
+                const dillingerRoot = this.storage.getDillingerRoot();
+                const biosPath = path_1.default.join(dillingerRoot, 'bios', 'psx');
+                // Ensure directory exists
+                try {
+                    const fs = await import('fs-extra');
+                    await fs.ensureDir(biosPath);
+                }
+                catch (err) {
+                    logger_1.logger.warn(`Could not ensure PSX BIOS directory exists: ${biosPath}`, err);
+                }
+                // Tell RetroArch where to find BIOS files (path inside container via dillinger_core volume)
+                env.push(`RETROARCH_SYSTEM_DIR=/data/bios/psx`);
+                logger_1.logger.info(`  PSX BIOS directory: /data/bios/psx (via dillinger_core volume)`);
+            }
+            // Mount per-game save directories for RetroArch
+            // This ensures each game has isolated saves that persist across launches
+            if (platform.configuration.containerImage?.includes('runner-retroarch') || retroarchCores[game.platformId || '']) {
+                const dillingerRoot = this.storage.getDillingerRoot();
+                const gameId = game.id || game.slug || 'unknown';
+                const gameIdentifier = game.slug || game.id || 'unknown';
+                const savesBasePath = path_1.default.join(dillingerRoot, 'saves', gameId);
+                const sramPath = path_1.default.join(savesBasePath, 'sram');
+                const statesPath = path_1.default.join(savesBasePath, 'states');
+                const screenshotsPath = path_1.default.join(dillingerRoot, 'emulator-homes', gameIdentifier, '.config', 'retroarch', 'screenshots');
+                // Ensure directories exist with proper permissions
+                try {
+                    const fs = await import('fs-extra');
+                    await fs.ensureDir(sramPath);
+                    await fs.ensureDir(statesPath);
+                    await fs.ensureDir(screenshotsPath);
+                    // Make writable by container user (uid 1000)
+                    await fs.chmod(sramPath, 0o777);
+                    await fs.chmod(statesPath, 0o777);
+                    await fs.chmod(screenshotsPath, 0o777);
+                }
+                catch (err) {
+                    logger_1.logger.warn(`Could not ensure save directories exist:`, err);
+                }
+                // Mount save directories (dillinger_core is already mounted at /data)
+                // RetroArch will use these paths for saves
+                env.push(`RETROARCH_SAVES_DIR=/data/saves/${gameId}/sram`);
+                env.push(`RETROARCH_STATES_DIR=/data/saves/${gameId}/states`);
+                env.push(`RETROARCH_SCREENSHOTS_DIR=/data/emulator-homes/${gameIdentifier}/.config/retroarch/screenshots`);
+                logger_1.logger.info(`  Save directories: /data/saves/${gameId}/sram, /data/saves/${gameId}/states`);
+                logger_1.logger.info(`  Screenshot directory: /data/emulator-homes/${gameIdentifier}/.config/retroarch/screenshots`);
+            }
+        }
+        // For other games, mount the game directory.
+        // Wine games should NOT mount `/game` via dillinger_current_session:
+        // they run from `/wineprefix` and the session volume can accidentally
+        // point at a single ROM file (causing Docker "not a directory").
+        else if (platform.type !== 'wine') {
+            binds.push(`${this.SESSION_VOLUME}:/game:ro`);
+            logger_1.logger.info(`  Mounting game directory: ${this.SESSION_VOLUME} -> /game`);
+        }
+        // Add display configuration volumes AFTER game-specific mounts
+        // Filter out pulse cookie mount if we have an emulator home (cookie is already copied there)
+        let filteredDisplayVolumes = displayConfig.volumes;
+        if (emulatorHomePath) {
+            filteredDisplayVolumes = displayConfig.volumes.filter(v => !v.includes('pulse/cookie'));
+        }
+        binds.push(...filteredDisplayVolumes);
+        try {
+            // Get Docker settings for auto-remove policy
+            // Allow a per-launch override for debugging.
+            const settingsService = settings_1.SettingsService.getInstance();
+            const dockerSettings = await settingsService.getDockerSettings();
+            const keepContainer = options.keepContainer === true;
+            const autoRemove = keepContainer
+                ? false
+                : (dockerSettings.autoRemoveContainers !== undefined
+                    ? dockerSettings.autoRemoveContainers
+                    : true); // Default to true (clean up after close)
+            // Resolve the actual installed runner image
+            const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-linux-native';
+            const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+            // Derive a human-readable container name from the runner image
+            // e.g. "ghcr.io/thrane20/dillinger/runner-retroarch" -> "dillinger-retroarch"
+            const runnerSlug = baseImage.split('/').pop()?.replace(/^runner-/, '') || 'game';
+            const containerName = `dillinger-${runnerSlug}`;
+            // Stop and remove any existing container with the same name
+            try {
+                const existing = docker.getContainer(containerName);
+                const info = await existing.inspect();
+                if (info) {
+                    logger_1.logger.info(`Removing existing container: ${containerName}`);
+                    try {
+                        await existing.stop();
+                    }
+                    catch { /* already stopped */ }
+                    await existing.remove({ force: true });
+                }
+            }
+            catch {
+                // Container doesn't exist — that's fine
+            }
+            const supplementalGroupIds = this.getSupplementalGroupIds([
+                '/dev/input',
+                '/dev/uinput',
+                '/dev/snd',
+            ]);
+            // Create and start the container
+            const containerConfig = {
+                Image: resolvedImage,
+                name: containerName,
+                Env: env,
+                WorkingDir: containerWorkingDir,
+                Labels: {
+                    'dillinger.session': sessionId,
+                    'dillinger.game.id': game.id,
+                    'dillinger.game.title': game.title || 'Unknown',
+                    'dillinger.streaming': isStreamingMode ? 'true' : 'false',
+                },
+                HostConfig: {
+                    AutoRemove: autoRemove,
+                    Binds: binds,
+                    Devices: displayConfig.devices,
+                    GroupAdd: supplementalGroupIds.length > 0 ? supplementalGroupIds : undefined,
+                    DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
+                    IpcMode: displayConfig.ipcMode,
+                    SecurityOpt: displayConfig.securityOpt,
+                    NetworkMode: displayConfig.networkMode,
+                },
+                // For interactive testing, attach TTY
+                Tty: true,
+                OpenStdin: true,
+                AttachStdout: true,
+                AttachStderr: true,
+            };
+            if (keepContainer) {
+                logger_1.logger.info('  Keep container enabled: container will not be auto-removed');
+            }
+            // Pass the command array to the container
+            // The entrypoint script will execute it with gosu
+            containerConfig.Cmd = cmdArray;
+            // Debug: Log the RETROARCH_CORE env var before container creation
+            const retroarchEnv = env.find(e => e.startsWith('RETROARCH_CORE'));
+            logger_1.logger.info(`DEBUG: RETROARCH_CORE in env array: ${retroarchEnv || 'NOT FOUND'}`);
+            logger_1.logger.info(`DEBUG: Full env array length: ${env.length}`);
+            const container = await docker.createContainer(containerConfig);
+            await container.start();
+            const info = await container.inspect();
+            logger_1.logger.info(`✓ Game container started: ${container.id}`);
+            logger_1.logger.info(`  Container ID: ${info.Id}`);
+            logger_1.logger.info(`  Status: ${info.State.Status}`);
+            return {
+                containerId: info.Id,
+                status: info.State.Status,
+                createdAt: info.Created,
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Error launching game container:', error);
+            throw new Error(`Failed to launch game: ${error}`);
+        }
+    }
+    /**
+     * Launch a debug container for troubleshooting
+     * Returns the container info and a docker exec command to attach interactively
+     */
+    async launchDebugContainer(options) {
+        const { game, platform, sessionId } = options;
+        // Ensure host path detection
+        await this.detectHostPath();
+        const gameDirectory = game.installation?.installPath || game.filePath;
+        if (!gameDirectory) {
+            throw new Error('Game has no file path or installation path configured');
+        }
+        // Set up the session volume ONLY for non-Wine games
+        // Wine games use direct Wine prefix bind mounts, no temp volume needed
+        if (platform.type !== 'wine') {
+            const isAbsolutePath = path_1.default.isAbsolute(gameDirectory);
+            if (isAbsolutePath) {
+                await this.setCurrentSessionVolumeAbsolute(gameDirectory);
+            }
+            else {
+                await this.setCurrentSessionVolume(gameDirectory);
+            }
+        }
+        // Get Wine prefix for Wine games (same logic as launchGame)
+        const gameIdentifier = game.slug || game.id;
+        let winePrefixPath = null;
+        let emulatorHomePath = null;
+        // Map platform IDs to VICE emulator commands
+        const viceEmulators = {
+            'c64': 'x64sc',
+            'c128': 'x128',
+            'vic20': 'xvic',
+            'plus4': 'xplus4',
+            'pet': 'xpet'
+        };
+        // Map platform IDs to MAME emulator commands
+        const mameEmulators = {
+            'mame': 'mame',
+            // 'arcade': 'mame' // Removed arcade from here as it's now handled by RetroArch runner
+        };
+        if (platform.type === 'wine') {
+            // The install path is stored as an absolute host path on a configured volume
+            const configuredInstallPath = game.installation?.installPath;
+            if (configuredInstallPath) {
+                // Find which volume this path is on
+                const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
+                if (volumeMatch) {
+                    winePrefixPath = configuredInstallPath;
+                    logger_1.logger.info(`  Debug Wine prefix path: ${winePrefixPath}`);
+                    logger_1.logger.info(`  Debug Wine prefix volume: ${volumeMatch.volume.name} (${volumeMatch.volume.dockerVolumeName})`);
+                }
+                else {
+                    // Path not on a configured volume - try to use it directly
+                    logger_1.logger.warn(`  ⚠ Install path not on a configured volume: ${configuredInstallPath}`);
+                    winePrefixPath = configuredInstallPath;
+                }
+            }
+            else {
+                logger_1.logger.warn(`  ⚠ No install path configured for Wine game: ${gameIdentifier}`);
+            }
+        }
+        else if (game.platformId && (viceEmulators[game.platformId] || mameEmulators[game.platformId])) {
+            // For emulator games, prepare the per-game home directory
+            const dillingerRoot = this.storage.getDillingerRoot();
+            const emulatorHomeDir = path_1.default.join(dillingerRoot, 'emulator-homes', gameIdentifier);
+            emulatorHomePath = this.getHostPath(emulatorHomeDir);
+            // Ensure the directory exists
+            try {
+                const fs = await import('fs-extra');
+                const { chmod } = await import('fs/promises');
+                // Create parent directory first if it doesn't exist
+                const parentDir = path_1.default.dirname(emulatorHomePath);
+                await fs.ensureDir(parentDir);
+                // Create the game-specific directory
+                await fs.ensureDir(emulatorHomePath);
+                // Pre-create .config/pulse directory for PulseAudio
+                const pulseDir = path_1.default.join(emulatorHomePath, '.config', 'pulse');
+                await fs.ensureDir(pulseDir);
+                await chmod(emulatorHomePath, 0o755);
+                await chmod(path_1.default.join(emulatorHomePath, '.config'), 0o755);
+                await chmod(pulseDir, 0o755);
+                logger_1.logger.info(`  Debug emulator home: ${emulatorHomePath}`);
+            }
+            catch (error) {
+                logger_1.logger.error(`  ✗ Failed to create debug emulator home directory: ${error.message}`);
+                logger_1.logger.error(`    Path: ${emulatorHomePath}`);
+                emulatorHomePath = null;
+            }
+        }
+        // Setup display configuration
+        const preferX11ForVice = Boolean(game.platformId && viceEmulators[game.platformId]) ||
+            Boolean(platform.configuration.containerImage?.includes('runner-vice'));
+        const displayConfig = await this.getDisplayConfiguration({ preferX11: preferX11ForVice });
+        // Base environment
+        const env = [
+            ...displayConfig.env,
+            'DEBIAN_FRONTEND=noninteractive',
+        ];
+        // Pass PUID/PGID to runner if set in environment
+        if (process.env.PUID)
+            env.push(`PUID=${process.env.PUID}`);
+        if (process.env.PGID)
+            env.push(`PGID=${process.env.PGID}`);
+        // Add Wine-specific environment
+        if (platform.type === 'wine') {
+            // Build WINEDEBUG environment variable from game settings
+            // Always enable verbose logging for debug containers
+            const wineDebug = this.buildWineDebug(game, true);
+            // Note: WINEARCH should NOT be set for debug containers with existing prefixes
+            // Wine will auto-detect the architecture from the existing prefix
+            env.push('WINEPREFIX=/wineprefix');
+            env.push(`WINEDEBUG=${wineDebug}`);
+            logger_1.logger.info(`  WINEDEBUG=${wineDebug}`);
+        }
+        // Setup volume binds
+        const binds = [
+            `dillinger_core:/data:rw`,
+            ...this.getInstalledVolumeBinds(),
+            ...displayConfig.volumes
+        ];
+        if (platform.type === 'wine' && winePrefixPath) {
+            binds.push(`${winePrefixPath}:/wineprefix:rw`);
+        }
+        else if (game.platformId && (viceEmulators[game.platformId] || mameEmulators[game.platformId]) && emulatorHomePath) {
+            // Mount emulator home for debug session
+            binds.push(`${emulatorHomePath}:/home/gameuser:rw`);
+            // Also mount ROM directory if available
+            if (game.filePath) {
+                const romMount = await this.resolveRomMount(game.filePath);
+                binds.push(romMount.bind);
+            }
+        }
+        else {
+            binds.push(`${this.SESSION_VOLUME}:/game:ro`);
+        }
+        try {
+            // Resolve the actual installed runner image
+            const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-linux-native';
+            const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+            const containerConfig = {
+                Image: resolvedImage,
+                name: `dillinger-debug-${sessionId}`,
+                Env: env,
+                WorkingDir: platform.type === 'wine' ? '/wineprefix' : '/game',
+                Entrypoint: ['/bin/bash', '-c', 'tail -f /dev/null'], // Override entrypoint for debug mode
+                HostConfig: {
+                    AutoRemove: false,
+                    Binds: binds,
+                    Devices: displayConfig.devices,
+                    GroupAdd: this.getSupplementalGroupIds(['/dev/input', '/dev/uinput', '/dev/snd']),
+                    DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
+                    IpcMode: displayConfig.ipcMode,
+                    SecurityOpt: displayConfig.securityOpt,
+                    NetworkMode: displayConfig.networkMode,
+                },
+                Tty: true,
+                OpenStdin: true,
+            };
+            const container = await docker.createContainer(containerConfig);
+            await container.start();
+            const info = await container.inspect();
+            logger_1.logger.info(`✓ Debug container started: ${container.id}`);
+            logger_1.logger.info(`  Container ID: ${info.Id}`);
+            // Generate the docker exec command for interactive access
+            const execCommand = `docker exec -it ${info.Id.substring(0, 12)} /bin/bash`;
+            return {
+                containerId: info.Id,
+                status: info.State.Status,
+                createdAt: info.Created,
+                execCommand,
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Error launching debug container:', error);
+            throw new Error(`Failed to launch debug container: ${error}`);
+        }
+    }
+    /**
+     * Run registry setup scripts for Wine games
+     * Detects .cmd/.bat files with REG ADD commands and converts them to .reg format
+     */
+    async runRegistrySetup(options) {
+        const { game, platform } = options;
+        if (platform.type !== 'wine') {
+            return { success: false, message: 'Registry setup is only for Wine games' };
+        }
+        const configuredInstallPath = game.installation?.installPath;
+        if (!configuredInstallPath) {
+            return { success: false, message: 'No install path configured for this game' };
+        }
+        // Use the install path directly (it's the Wine prefix)
+        const winePrefixPath = configuredInstallPath;
+        // The game files are inside the Wine prefix at drive_c/GOG Games/<game>/
+        // We need to extract the game directory from the launch command
+        const launchCommand = game.settings?.launch?.command || '';
+        const windowsPath = launchCommand.replace(/^[A-Za-z]:/, ''); // Remove C:
+        const gameDirPath = path_1.default.dirname(windowsPath.replace(/\\/g, '/')); // Get directory
+        const gameInstallPath = path_1.default.posix.join(winePrefixPath, 'drive_c', gameDirPath.substring(1)); // Remove leading /
+        logger_1.logger.info(`Looking for registry files in: ${gameInstallPath}`);
+        // Look for registry setup files
+        const { readdir, readFile, writeFile } = await import('fs/promises');
+        try {
+            const files = await readdir(gameInstallPath);
+            const regSetupFiles = files.filter(f => (f.toLowerCase().endsWith('.cmd') || f.toLowerCase().endsWith('.bat')) &&
+                (f.toLowerCase().includes('reg') || f.toLowerCase().includes('setup')));
+            if (regSetupFiles.length === 0) {
+                return { success: false, message: 'No registry setup files found (looking for .cmd/.bat files with "reg" or "setup" in name)' };
+            }
+            logger_1.logger.info(`Found registry setup files: ${regSetupFiles.join(', ')}`);
+            // Process the first registry file found
+            const regFile = regSetupFiles[0];
+            if (!regFile) {
+                return { success: false, message: 'No registry file found in array' };
+            }
+            const cmdFilePath = path_1.default.join(gameInstallPath, regFile);
+            const cmdContent = await readFile(cmdFilePath, 'utf-8');
+            // Convert CMD format to REG format
+            const regContent = this.convertCmdToReg(cmdContent);
+            // Write the .reg file
+            const regFilePath = path_1.default.join(gameInstallPath, 'dillinger_setup.reg');
+            await writeFile(regFilePath, regContent, 'utf-8');
+            logger_1.logger.info(`Converted ${regFile} to dillinger_setup.reg`);
+            // Run wine regedit in a temporary container
+            const displayConfig = await this.getDisplayConfiguration();
+            // Build WINEDEBUG from game settings (though registry setup usually doesn't need verbose debug)
+            const wineDebug = this.buildWineDebug(game);
+            // Note: WINEARCH should NOT be set when using an existing prefix
+            // Wine will auto-detect the architecture from the existing prefix
+            // Resolve the actual installed runner image
+            const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
+            const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+            const containerConfig = {
+                Image: resolvedImage,
+                Entrypoint: ['/bin/bash', '-c'],
+                Cmd: [`cd /game && WINEPREFIX=/wineprefix wine regedit /S dillinger_setup.reg`],
+                Env: [
+                    'WINEPREFIX=/wineprefix',
+                    `WINEDEBUG=${wineDebug}`,
+                    ...displayConfig.env,
+                ],
+                HostConfig: {
+                    AutoRemove: true,
+                    Binds: [
+                        `${winePrefixPath}:/wineprefix:rw`,
+                        `${gameInstallPath}:/game:ro`,
+                    ],
+                    Devices: displayConfig.devices,
+                },
+                WorkingDir: '/game',
+            };
+            logger_1.logger.info(`Running: wine regedit /S dillinger_setup.reg (WINEDEBUG=${wineDebug})`);
+            const container = await docker.createContainer(containerConfig);
+            await container.start();
+            const result = await container.wait();
+            if (result.StatusCode === 0) {
+                logger_1.logger.info(`✓ Successfully imported registry settings from ${regFile}`);
+                return { success: true, message: `Registry settings imported from ${regFile}` };
+            }
+            else {
+                logger_1.logger.error(`Failed to import registry settings, exit code: ${result.StatusCode}`);
+                return { success: false, message: `Failed to import registry settings (exit code: ${result.StatusCode})` };
+            }
+        }
+        catch (error) {
+            logger_1.logger.error('Error running registry setup:', error);
+            return { success: false, message: `Error: ${error.message}` };
+        }
+    }
+    /**
+     * Convert Windows CMD registry script to .reg file format
+     */
+    convertCmdToReg(cmdContent) {
+        const lines = cmdContent.split('\n');
+        let regContent = 'Windows Registry Editor Version 5.00\n\n';
+        let currentKey = '';
+        // Extract regpath variable if defined
+        let regpathValue = '';
+        for (const line of lines) {
+            const regpathMatch = line.match(/SET\s+regpath=["']([^"']+)["']/i);
+            if (regpathMatch && regpathMatch[1]) {
+                regpathValue = regpathMatch[1];
+                break;
+            }
+        }
+        logger_1.logger.info(`Found regpath variable: ${regpathValue}`);
+        logger_1.logger.info(`Total lines in CMD file: ${lines.length}`);
+        let processedCount = 0;
+        let skippedCount = 0;
+        let matchedCount = 0;
+        for (const line of lines) {
+            let trimmed = line.trim();
+            // Skip empty lines, comments, and SET commands
+            if (!trimmed || trimmed.startsWith('::') || trimmed.startsWith('@') || trimmed.startsWith('SET ') || trimmed === 'exit') {
+                skippedCount++;
+                continue;
+            }
+            processedCount++;
+            const originalLine = trimmed;
+            // Replace %regpath% with actual value
+            if (regpathValue) {
+                trimmed = trimmed.replace(/%regpath%/gi, `"${regpathValue}"`);
+            }
+            logger_1.logger.debug(`[${processedCount}] Original: ${originalLine.substring(0, 80)}`);
+            logger_1.logger.debug(`[${processedCount}] After replace: ${trimmed.substring(0, 100)}`);
+            // Parse REG ADD commands - more flexible pattern
+            // Matches: REG ADD "path" /v "name" /t TYPE /d "data" /f [/reg:32]
+            const regAddMatch = trimmed.match(/REG\s+ADD\s+"([^"]+)"\s+\/v\s+"([^"]+)"\s+\/t\s+(\S+)\s+\/d\s+(.+?)(?:\s+\/f|\s+$)/i);
+            if (regAddMatch) {
+                matchedCount++;
+                logger_1.logger.debug(`[${processedCount}] MATCHED!`);
+                const keyPath = regAddMatch[1];
+                const valueName = regAddMatch[2];
+                const valueType = regAddMatch[3];
+                let valueData = regAddMatch[4]?.trim();
+                if (!keyPath || !valueName || !valueType || !valueData) {
+                    logger_1.logger.debug(`Skipping line - missing data: ${trimmed}`);
+                    continue;
+                }
+                // Remove quotes from valueData if present
+                if (valueData.startsWith('"') && valueData.includes('"')) {
+                    valueData = valueData.match(/"([^"]*)"/)?.[1] || valueData;
+                }
+                // Add key header if it changed
+                if (keyPath !== currentKey) {
+                    currentKey = keyPath;
+                    regContent += `\n[${keyPath}]\n`;
+                }
+                // Convert value based on type
+                if (valueType === 'REG_SZ') {
+                    regContent += `"${valueName}"="${valueData}"\n`;
+                }
+                else if (valueType === 'REG_DWORD') {
+                    const hexValue = parseInt(valueData).toString(16).padStart(8, '0');
+                    regContent += `"${valueName}"=dword:${hexValue}\n`;
+                }
+                else if (valueType === 'REG_BINARY') {
+                    // Convert binary data (e.g., "01000000" to "01,00,00,00")
+                    const hexBytes = valueData.match(/.{2}/g)?.join(',') || valueData;
+                    regContent += `"${valueName}"=hex:${hexBytes}\n`;
+                }
+            }
+        }
+        logger_1.logger.info(`\n=== CMD Parsing Summary ===`);
+        logger_1.logger.info(`Total lines: ${lines.length}`);
+        logger_1.logger.info(`Skipped: ${skippedCount}`);
+        logger_1.logger.info(`Processed: ${processedCount}`);
+        logger_1.logger.info(`Matched: ${matchedCount}`);
+        logger_1.logger.info(`===========================\n`);
+        logger_1.logger.info(`Generated .reg file with ${regContent.split('\n').length} lines`);
+        return regContent;
+    }
+    /**
+     * Monitor a game container and notify when it stops
+     * This runs asynchronously and updates the session status
+     */
+    async monitorGameContainer(containerId, _sessionId, onStop) {
+        try {
+            const container = docker.getContainer(containerId);
+            logger_1.logger.info(`🔍 Monitoring game container: ${containerId.substring(0, 12)}`);
+            // Capture logs in real-time in case container is auto-removed
+            let capturedLogs = [];
+            try {
+                const stream = await container.logs({
+                    follow: true,
+                    stdout: true,
+                    stderr: true,
+                    tail: 100
+                });
+                stream.on('data', (chunk) => {
+                    capturedLogs.push(chunk.toString('utf8'));
+                    if (capturedLogs.length > 200)
+                        capturedLogs.shift(); // Keep last 200 chunks
+                });
+            }
+            catch (err) {
+                logger_1.logger.warn(`Could not attach to container logs: ${err}`);
+            }
+            // Wait for container to finish (this blocks until container stops)
+            const result = await container.wait();
+            logger_1.logger.info(`✓ Game container stopped: ${containerId.substring(0, 12)}`);
+            logger_1.logger.info(`  Exit code: ${result.StatusCode}`);
+            // If exit code is non-zero, print the captured logs
+            if (result.StatusCode !== 0) {
+                logger_1.logger.error(`=== CONTAINER LOGS (Last captured) ===`);
+                logger_1.logger.error(capturedLogs.join('').trim());
+                logger_1.logger.error(`======================================`);
+                // Try to fetch from API as backup if captured logs are empty
+                if (capturedLogs.length === 0) {
+                    try {
+                        const logs = await this.getContainerLogs(containerId, 50);
+                        logger_1.logger.error(`=== CONTAINER LOGS (From API) ===\n${logs}\n=================================`);
+                    }
+                    catch (e) {
+                        logger_1.logger.warn(`Could not fetch logs from API (container likely removed): ${e}`);
+                    }
+                }
+            }
+            // Call the callback if provided
+            if (onStop) {
+                await onStop(result.StatusCode);
+            }
+        }
+        catch (error) {
+            logger_1.logger.error('Error monitoring game container:', error);
+        }
+    }
+    /**
+     * Install a game using Docker with GUI support
+     * This runs an installer (exe, msi, etc.) in a containerized environment
+     * with X11/Wayland passthrough so the user sees the installation wizard
+     */
+    async installGame(options) {
+        const { installerPath, installPath, platform, sessionId, game, installerArgs } = options;
+        logger_1.logger.info(`Installing game with installer: ${installerPath}`);
+        logger_1.logger.info(`  Installation target: ${installPath}`);
+        logger_1.logger.info(`  Platform: ${platform.name} (${platform.type})`);
+        logger_1.logger.info(`  Container Image: ${platform.configuration.containerImage}`);
+        logger_1.logger.info(`  Game slug: ${game.slug || game.id}`);
+        // Determine how to mount the installer based on its location
+        const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
+        const installerIsInInstallersVolume = typeof installerPath === 'string' && installerPath.startsWith('/cache/');
+        const installerIsInDillingerCore = typeof installerPath === 'string' && installerPath.startsWith(DILLINGER_CORE_PATH + '/');
+        const hostInstallPath = installPath;
+        const installVolumeInfo = await this.findVolumeForPath(hostInstallPath);
+        let installBindMount;
+        let installContainerPath;
+        let winePrefixContainerPath;
+        if (hostInstallPath.startsWith('/installed/')) {
+            const [, , suffix, ...rest] = hostInstallPath.split('/');
+            if (!suffix) {
+                throw new Error('Invalid /installed path, expected /installed/<suffix>/...');
+            }
+            const rel = rest.join('/');
+            installBindMount = `dillinger_installed_${suffix}:/installed/${suffix}:rw`;
+            installContainerPath = rel ? `/installed/${suffix}/${rel}` : `/installed/${suffix}`;
+            winePrefixContainerPath = installContainerPath;
+            logger_1.logger.info(`  Install volume: dillinger_installed_${suffix}`);
+            logger_1.logger.info(`  Install path in container: ${installContainerPath}`);
+        }
+        else if (installVolumeInfo) {
+            // Install path is within a managed Docker volume - mount the volume and use relative path
+            installBindMount = `${installVolumeInfo.volume.dockerVolumeName}:/mnt/install_volume:rw`;
+            installContainerPath = `/mnt/install_volume${installVolumeInfo.relativePath}`;
+            winePrefixContainerPath = installContainerPath; // Wine prefix is same as install dir
+            logger_1.logger.info(`  Install volume: ${installVolumeInfo.volume.name} (${installVolumeInfo.volume.dockerVolumeName})`);
+            logger_1.logger.info(`  Install path in container: ${installContainerPath}`);
+        }
+        else {
+            // Direct bind mount (requires directory to exist on host)
+            installBindMount = `${hostInstallPath}:/install:rw`;
+            installContainerPath = '/install';
+            winePrefixContainerPath = '/install';
+        }
+        // Get display forwarding configuration
+        const displayConfig = await this.getDisplayConfiguration();
+        logger_1.logger.info(`  Display mode: ${displayConfig.mode}`);
+        // Preferred: the install directory itself is the Wine prefix (no extra subdirectory)
+        logger_1.logger.info(`  Wine prefix (host): ${hostInstallPath}`);
+        logger_1.logger.info(`  Wine prefix (container): ${winePrefixContainerPath}`);
+        // Note: We don't pre-create the Wine prefix directory here because:
+        // 1. dillinger-core runs in a container where host paths like /mnt/linuxfast aren't accessible
+        // 2. The runner container has the volume mounted and will create the directory when Wine initializes
+        // 3. The entrypoint script in the runner handles prefix initialization
+        // Determine the installer container path based on where the installer is located
+        let installerContainerPath;
+        if (installerIsInInstallersVolume) {
+            // Installer is in /cache volume - use as-is
+            installerContainerPath = installerPath;
+            logger_1.logger.info(`  Installer source: /cache volume`);
+        }
+        else if (installerIsInDillingerCore) {
+            // Installer is within DILLINGER_CORE_PATH (/data) - mount dillinger_core volume and use same path
+            installerContainerPath = installerPath; // Path stays the same since we mount to same location
+            logger_1.logger.info(`  Installer source: dillinger_core volume (${DILLINGER_CORE_PATH})`);
+        }
+        else {
+            // Legacy: direct file path - mount as individual file
+            installerContainerPath = `/installer/${path_1.default.basename(installerPath)}`;
+            logger_1.logger.info(`  Installer source: direct bind mount`);
+        }
+        // Prepare environment variables for installation
+        const env = [
+            `INSTALLER_PATH=${installerContainerPath}`,
+            `INSTALL_TARGET=${installContainerPath}`,
+            `WINEPREFIX=${winePrefixContainerPath}`,
+            ...displayConfig.env
+        ];
+        // Optional installer args passed through to runner entrypoint
+        if (installerArgs) {
+            env.push(`INSTALLER_ARGS=${installerArgs}`);
+        }
+        // Pass PUID/PGID to runner so files are created with correct ownership
+        // Default to 1000:1000 which is the typical first user on Linux
+        const puid = process.env.PUID || '1000';
+        const pgid = process.env.PGID || '1000';
+        env.push(`PUID=${puid}`);
+        env.push(`PGID=${pgid}`);
+        logger_1.logger.info(`  File ownership: PUID=${puid} PGID=${pgid}`);
+        // Add Wine-specific configuration for Windows installers
+        if (platform.type === 'wine') {
+            // Build WINEDEBUG from game settings
+            // Enable verbose logging in debug mode for installation troubleshooting
+            const wineDebug = this.buildWineDebug(game, options.debugMode === true);
+            // Note: WINEPREFIX is already set earlier to winePrefixContainerPath
+            // We don't override it here - it points to the correct container path
+            // Note: We do NOT pass WINEARCH - modern Wine (9.x+) with WoW64 mode handles
+            // both 32-bit and 64-bit apps natively. Passing WINEARCH=win32 causes errors.
+            // The entrypoint will handle architecture detection automatically.
+            env.push(`WINEDEBUG=${wineDebug}`, // Use game's debug settings (or verbose if debugMode)
+            'DISPLAY_WINEPREFIX=1' // Signal to show Wine configuration if needed
+            );
+            // Add Wine version for installation (GE-Proton support)
+            const wineVersionId = options.wineVersionId || game.settings?.wine?.version || 'system';
+            if (wineVersionId && wineVersionId !== 'system') {
+                env.push(`WINE_VERSION_ID=${wineVersionId}`);
+                logger_1.logger.info(`  Wine version: ${wineVersionId}`);
+                // If using GE-Proton, also set UMU game ID for protonfixes
+                if (wineVersionId.startsWith('ge-proton')) {
+                    const umuGameId = `umu-${game.slug || game.id}`;
+                    env.push(`UMU_GAME_ID=${umuGameId}`);
+                    env.push(`GAME_SLUG=${game.slug || game.id}`);
+                    logger_1.logger.info(`  UMU Game ID: ${umuGameId}`);
+                }
+            }
+            else {
+                logger_1.logger.info(`  Wine version: system (default)`);
+            }
+            logger_1.logger.info(`  Wine architecture: auto (WoW64 mode)`);
+            logger_1.logger.info(`  WINEDEBUG=${wineDebug}`);
+            // Add winetricks verbs from Lutris installer script
+            if (options.winetricks && options.winetricks.length > 0) {
+                const winetricksStr = options.winetricks.join(';');
+                env.push(`WINE_WINETRICKS=${winetricksStr}`);
+                logger_1.logger.info(`  Winetricks (Lutris): ${winetricksStr}`);
+            }
+            // Add DLL overrides from Lutris installer script
+            if (options.dllOverrides) {
+                env.push(`WINEDLLOVERRIDES=${options.dllOverrides}`);
+                logger_1.logger.info(`  DLL overrides (Lutris): ${options.dllOverrides}`);
+            }
+            // Add custom environment variables from Lutris script
+            if (options.environmentVariables) {
+                for (const [key, value] of Object.entries(options.environmentVariables)) {
+                    env.push(`${key}=${value}`);
+                    logger_1.logger.info(`  Env (Lutris): ${key}=${value}`);
+                }
+            }
+            // Add Lutris execution steps as JSON environment variables
+            if (options.lutrisExtractSteps && options.lutrisExtractSteps.length > 0) {
+                env.push(`LUTRIS_EXTRACT_STEPS=${JSON.stringify(options.lutrisExtractSteps)}`);
+                logger_1.logger.info(`  Lutris extract steps: ${options.lutrisExtractSteps.length}`);
+            }
+            if (options.lutrisMoveSteps && options.lutrisMoveSteps.length > 0) {
+                env.push(`LUTRIS_MOVE_STEPS=${JSON.stringify(options.lutrisMoveSteps)}`);
+                logger_1.logger.info(`  Lutris move/merge steps: ${options.lutrisMoveSteps.length}`);
+            }
+            if (options.lutrisExecuteSteps && options.lutrisExecuteSteps.length > 0) {
+                env.push(`LUTRIS_EXECUTE_STEPS=${JSON.stringify(options.lutrisExecuteSteps)}`);
+                logger_1.logger.info(`  Lutris execute steps: ${options.lutrisExecuteSteps.length}`);
+            }
+            if (options.lutrisWineexecSteps && options.lutrisWineexecSteps.length > 0) {
+                env.push(`LUTRIS_WINEEXEC_STEPS=${JSON.stringify(options.lutrisWineexecSteps)}`);
+                logger_1.logger.info(`  Lutris wineexec steps: ${options.lutrisWineexecSteps.length}`);
+            }
+            if (options.lutrisRegistrySettings && options.lutrisRegistrySettings.length > 0) {
+                env.push(`WINE_REGISTRY_SETTINGS=${JSON.stringify(options.lutrisRegistrySettings)}`);
+                logger_1.logger.info(`  Lutris registry settings: ${options.lutrisRegistrySettings.length}`);
+            }
+        }
+        try {
+            const quoteForBash = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+            // Resolve the actual installed runner image
+            const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
+            const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+            // In debug mode, keep container for inspection; otherwise auto-remove
+            const autoRemove = !options.debugMode;
+            const containerName = options.debugMode
+                ? `dillinger-install-debug-${sessionId}`
+                : `dillinger-install-${sessionId}`;
+            if (options.debugMode) {
+                logger_1.logger.info(`  🔧 DEBUG MODE: Container will be kept after exit for inspection`);
+            }
+            // Build the bind mounts based on installer location
+            const installerBinds = [];
+            if (installerIsInInstallersVolume) {
+                // Installer is in /cache volume - already mounted below
+            }
+            else if (installerIsInDillingerCore) {
+                // Installer is in dillinger_core - mount the volume to same path
+                installerBinds.push(`dillinger_core:${DILLINGER_CORE_PATH}:ro`);
+            }
+            else {
+                // Legacy: direct bind mount - need to translate to host path
+                await this.detectHostPath();
+                const hostInstallerPath = this.getHostPath(installerPath);
+                installerBinds.push(`${hostInstallerPath}:/installer/${path_1.default.basename(installerPath)}:ro`);
+            }
+            // Create installation container with GUI passthrough
+            const container = await docker.createContainer({
+                Image: resolvedImage,
+                name: containerName,
+                Env: env,
+                HostConfig: {
+                    AutoRemove: autoRemove,
+                    Binds: [
+                        ...installerBinds,
+                        installBindMount, // Mount installation target (either volume or direct bind)
+                        `dillinger_cache:/cache:rw`,
+                        ...displayConfig.volumes
+                    ],
+                    Devices: displayConfig.devices,
+                    DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
+                    IpcMode: displayConfig.ipcMode,
+                    SecurityOpt: displayConfig.securityOpt,
+                    NetworkMode: displayConfig.networkMode,
+                },
+                // Interactive mode for installation GUI
+                Tty: true,
+                OpenStdin: true,
+                AttachStdout: true,
+                AttachStderr: true,
+                // Use default entrypoint but pass installer as command
+                Cmd: platform.type === 'wine'
+                    ? ['wine', installerContainerPath]
+                    : ['/bin/bash', '-lc', quoteForBash(installerContainerPath)],
+            });
+            await container.start();
+            const info = await container.inspect();
+            logger_1.logger.info(`✓ Installation container started: ${container.id}`);
+            logger_1.logger.info(`  Container ID: ${info.Id}`);
+            logger_1.logger.info(`  Status: ${info.State.Status}`);
+            logger_1.logger.info(`  The installation GUI should now be visible on your display`);
+            return {
+                containerId: info.Id,
+                status: info.State.Status,
+                createdAt: info.Created,
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Error starting installation container:', error);
+            throw new Error(`Failed to start installer: ${error}`);
+        }
+    }
+    /**
+     * Monitor an installation container and return completion status
+     */
+    async waitForInstallationComplete(containerId) {
+        try {
+            const container = docker.getContainer(containerId);
+            // First check if container exists
+            try {
+                await container.inspect();
+            }
+            catch (inspectError) {
+                if (inspectError.statusCode === 404) {
+                    logger_1.logger.info(`⚠️  Installation container ${containerId} no longer exists (auto-removed)`);
+                    // Container was auto-removed, assume it finished (we don't know the exit code)
+                    // Treat this as a failure since we can't verify success
+                    return { success: false, exitCode: 1 };
+                }
+                throw inspectError;
+            }
+            // Wait for container to finish
+            logger_1.logger.info(`🔍 Monitoring installation container: ${containerId}`);
+            const result = await container.wait();
+            logger_1.logger.info(`✓ Installation container finished with exit code: ${result.StatusCode}`);
+            return {
+                success: result.StatusCode === 0,
+                exitCode: result.StatusCode
+            };
+        }
+        catch (error) {
+            if (error.statusCode === 404) {
+                logger_1.logger.info(`⚠️  Installation container ${containerId} no longer exists (auto-removed during wait)`);
+                return { success: false, exitCode: 1 };
+            }
+            logger_1.logger.error('Error monitoring installation:', error);
+            return { success: false, exitCode: -1 };
+        }
+    }
+    /**
+     * Scan installation directory for game executables
+     */
+    async scanForGameExecutables(installPath) {
+        try {
+            // Find which volume this install path is on
+            const volumeMatch = await this.findVolumeForPath(installPath);
+            if (!volumeMatch) {
+                logger_1.logger.warn(`scanForGameExecutables: install path not on a configured volume: ${installPath}`);
+                return [];
+            }
+            logger_1.logger.info(`🔍 Scanning for game executables in: ${installPath}`);
+            logger_1.logger.info(`  Volume: ${volumeMatch.volume.name}`);
+            const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+            // The path inside the container when volume is mounted at /mnt/volume
+            const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
+            // Limit output size to keep scanning responsive.
+            const findCmd = [
+                `find ${shQuote(containerPath)}`,
+                '-maxdepth 12',
+                '-type f',
+                `\\( -iname '*.exe' -o -iname '*.bat' -o -iname '*.cmd' \\)`,
+                // Skip common redist/log/tmp areas
+                `-not -path '*/_redist/*'`,
+                `-not -path '*/redist/*'`,
+                `-not -path '*/__pycache__/*'`,
+                `-not -path '*/tmp/*'`,
+                `-not -path '*/temp/*'`,
+                `-not -path '*/cache/*'`,
+                `-not -path '*/logs/*'`,
+                '-print',
+                "| head -n 500",
+            ].join(' ');
+            const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd);
+            if (exitCode !== 0) {
+                logger_1.logger.warn(`  Executable scan returned exit code ${exitCode}`);
+            }
+            const absPaths = output
+                .split('\n')
+                .map((l) => l.trim())
+                .filter(Boolean)
+                .filter((p) => p.startsWith(containerPath + '/') || p === containerPath);
+            const candidates = absPaths
+                .map((p) => path_1.default.posix.relative(containerPath, p))
+                .filter((rel) => rel && rel !== '.' && !rel.startsWith('..'));
+            const executables = candidates.filter((rel) => {
+                const lower = rel.toLowerCase();
+                // Heuristic: exclude obvious non-launch executables
+                if (lower.includes('unins'))
+                    return false;
+                if (lower.includes('uninstall'))
+                    return false;
+                if (lower.includes('setup'))
+                    return false;
+                if (lower.includes('installer'))
+                    return false;
+                if (lower.includes('config'))
+                    return false;
+                if (lower.includes('settings'))
+                    return false;
+                return true;
+            });
+            const scoreExecutable = (rel) => {
+                const parts = rel.split('/');
+                const depthPenalty = parts.length * 2;
+                const base = parts[parts.length - 1]?.toLowerCase() || '';
+                const full = rel.toLowerCase();
+                let score = 0;
+                // Prefer drive_c paths for Wine
+                if (full.startsWith('drive_c/'))
+                    score += 10;
+                if (full.includes('/gog games/'))
+                    score += 8;
+                if (full.includes('/program files/'))
+                    score += 6;
+                if (full.includes('/program files (x86)/'))
+                    score += 6;
+                if (full.includes('/bin/'))
+                    score += 2;
+                // Prefer likely launchers
+                if (base.includes('game'))
+                    score += 10;
+                if (base.includes('main'))
+                    score += 8;
+                if (base.includes('start'))
+                    score += 7;
+                if (base.includes('launcher'))
+                    score += 7;
+                if (base.includes('run'))
+                    score += 5;
+                // Penalize helpers
+                if (base.includes('unins') || base.includes('uninstall'))
+                    score -= 50;
+                if (base.includes('setup') || base.includes('install'))
+                    score -= 25;
+                if (full.includes('/support/'))
+                    score -= 10;
+                if (full.includes('/tools/'))
+                    score -= 8;
+                score -= depthPenalty;
+                return score;
+            };
+            executables.sort((a, b) => scoreExecutable(b) - scoreExecutable(a));
+            for (const rel of executables.slice(0, 20)) {
+                logger_1.logger.info(`  Found executable: ${rel}`);
+            }
+            logger_1.logger.info(`✓ Found ${executables.length} potential game executables`);
+            return executables;
+        }
+        catch (error) {
+            logger_1.logger.error('Error scanning for executables:', error);
+            return [];
+        }
+    }
+    /**
+     * Scan for Windows shortcut files (.lnk) in the installation directory
+     */
+    async scanForShortcuts(installPath) {
+        try {
+            // Find which volume this install path is on
+            const volumeMatch = await this.findVolumeForPath(installPath);
+            if (!volumeMatch) {
+                logger_1.logger.warn(`scanForShortcuts: install path not on a configured volume: ${installPath}`);
+                return [];
+            }
+            logger_1.logger.info(`🔍 Scanning for shortcuts in: ${installPath}`);
+            logger_1.logger.info(`  Volume: ${volumeMatch.volume.name}`);
+            const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+            // The path inside the container when volume is mounted at /mnt/volume
+            const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
+            const findCmd = `find ${shQuote(containerPath)} -maxdepth 15 -type f -iname '*.lnk' -print`;
+            const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd);
+            if (exitCode !== 0) {
+                logger_1.logger.warn(`  Shortcut scan returned exit code ${exitCode}`);
+            }
+            const found = output
+                .split('\n')
+                .map((l) => l.trim())
+                .filter(Boolean)
+                .filter((p) => p.startsWith(containerPath + '/') || p === containerPath);
+            const shortcuts = found
+                .filter((p) => p.toLowerCase().endsWith('.lnk'))
+                .map((p) => path_1.default.posix.relative(containerPath, p))
+                .filter((rel) => rel && rel !== '.' && !rel.startsWith('..'));
+            for (const rel of shortcuts) {
+                logger_1.logger.info(`  Found shortcut: ${rel}`);
+            }
+            logger_1.logger.info(`✓ Found ${shortcuts.length} shortcut files`);
+            return shortcuts;
+        }
+        catch (error) {
+            logger_1.logger.error('Error scanning for shortcuts:', error);
+            return [];
+        }
+    }
+    /**
+     * Parse a Windows shortcut (.lnk) file to extract target information
+     * Uses direct binary parsing to work with Wine-created .lnk files on Linux
+     */
+    async parseShortcut(shortcutPath) {
+        logger_1.logger.info(`🔗 Parsing shortcut: ${shortcutPath}`);
+        try {
+            const fs = await import('fs/promises');
+            // Read the entire .lnk file
+            let buffer;
+            // Check if this path is on a configured volume
+            const volumeMatch = await this.findVolumeForPath(shortcutPath);
+            if (volumeMatch) {
+                const shQuote = (value) => `'${value.replace(/'/g, `'\\''`)}'`;
+                // The path inside the container when volume is mounted at /mnt/volume
+                const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
+                // base64 output may wrap; strip newlines.
+                const cmd = `cat ${shQuote(containerPath)} | base64 | tr -d '\\n'`;
+                const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', cmd);
+                if (exitCode !== 0) {
+                    logger_1.logger.warn(`Failed to read shortcut from volume (exit ${exitCode})`);
+                    return null;
+                }
+                const b64 = output.trim();
+                if (!b64) {
+                    logger_1.logger.warn('Empty shortcut file output');
+                    return null;
+                }
+                buffer = Buffer.from(b64, 'base64');
+            }
+            else {
+                buffer = await fs.readFile(shortcutPath);
+            }
+            // Verify it's a valid .lnk file (starts with magic bytes)
+            if (buffer.length < 76 || buffer.readUInt32LE(0) !== 0x0000004C) {
+                logger_1.logger.warn('Invalid .lnk file format');
+                return null;
+            }
+            const result = {
+                target: '',
+                arguments: '',
+                workingDirectory: '',
+                description: ''
+            };
+            const stripNullTerminators = (value) => {
+                // Windows shortcut strings are typically NUL-terminated (UTF-16LE).
+                // If we keep the terminator, it shows up in UI as a boxed "0000" glyph.
+                return value.replace(/\u0000/g, '').trim();
+            };
+            // Read LinkFlags at offset 0x14
+            const linkFlags = buffer.readUInt32LE(0x14);
+            // HasLinkTargetIDList flag (0x01)
+            const hasLinkTargetIDList = (linkFlags & 0x01) !== 0;
+            // HasLinkInfo flag (0x02)
+            const hasLinkInfo = (linkFlags & 0x02) !== 0;
+            // HasName flag (0x04)
+            const hasName = (linkFlags & 0x04) !== 0;
+            // HasRelativePath flag (0x08)
+            const hasRelativePath = (linkFlags & 0x08) !== 0;
+            // HasWorkingDir flag (0x10)
+            const hasWorkingDir = (linkFlags & 0x10) !== 0;
+            // HasArguments flag (0x20)
+            const hasArguments = (linkFlags & 0x20) !== 0;
+            let offset = 0x4C; // Start after shell link header (76 bytes)
+            // Skip LinkTargetIDList if present
+            if (hasLinkTargetIDList) {
+                const idListSize = buffer.readUInt16LE(offset);
+                offset += 2 + idListSize;
+            }
+            // Parse LinkInfo if present
+            if (hasLinkInfo && offset + 4 <= buffer.length) {
+                const linkInfoSize = buffer.readUInt32LE(offset);
+                const linkInfoStart = offset;
+                if (offset + linkInfoSize <= buffer.length) {
+                    // Try to extract local base path
+                    const linkInfoHeaderSize = buffer.readUInt32LE(offset + 4);
+                    if (linkInfoHeaderSize >= 0x1C) {
+                        const localBasePathOffset = buffer.readUInt32LE(offset + 0x10);
+                        if (localBasePathOffset > 0 && linkInfoStart + localBasePathOffset < buffer.length) {
+                            let pathEnd = linkInfoStart + localBasePathOffset;
+                            while (pathEnd < buffer.length && buffer[pathEnd] !== 0) {
+                                pathEnd++;
+                            }
+                            result.target = buffer.toString('ascii', linkInfoStart + localBasePathOffset, pathEnd);
+                        }
+                    }
+                    offset += linkInfoSize;
+                }
+            }
+            // Helper function to read a string data structure
+            const readStringData = (pos) => {
+                if (pos + 2 > buffer.length)
+                    return { str: '', nextPos: pos };
+                const charCount = buffer.readUInt16LE(pos);
+                const strStart = pos + 2;
+                const strEnd = strStart + (charCount * 2);
+                if (strEnd > buffer.length)
+                    return { str: '', nextPos: pos };
+                // Read UTF-16LE string
+                const str = buffer.toString('utf16le', strStart, strEnd);
+                return { str: stripNullTerminators(str), nextPos: strEnd };
+            };
+            // Read string data structures
+            if (hasName && offset + 2 <= buffer.length) {
+                const { str, nextPos } = readStringData(offset);
+                result.description = str;
+                offset = nextPos;
+            }
+            if (hasRelativePath && offset + 2 <= buffer.length) {
+                const { str, nextPos } = readStringData(offset);
+                if (!result.target) {
+                    result.target = str;
+                }
+                offset = nextPos;
+            }
+            if (hasWorkingDir && offset + 2 <= buffer.length) {
+                const { str, nextPos } = readStringData(offset);
+                result.workingDirectory = str;
+                offset = nextPos;
+            }
+            if (hasArguments && offset + 2 <= buffer.length) {
+                const { str, nextPos } = readStringData(offset);
+                result.arguments = str;
+                offset = nextPos;
+            }
+            // Ensure all user-visible strings are free of embedded NULs.
+            result.target = stripNullTerminators(result.target);
+            result.arguments = stripNullTerminators(result.arguments);
+            result.workingDirectory = stripNullTerminators(result.workingDirectory);
+            result.description = stripNullTerminators(result.description);
+            logger_1.logger.info(`✓ Parsed shortcut: ${result.target || 'No target found'}`);
+            logger_1.logger.info(`  Working dir: ${result.workingDirectory || 'None'}`);
+            logger_1.logger.info(`  Arguments: ${result.arguments || 'None'}`);
+            return result.target ? result : null;
+        }
+        catch (error) {
+            logger_1.logger.error('Error parsing shortcut:', error);
+            return null;
+        }
+    }
+    /**
+     * Stop a running game container and clean up its session volume
+     */
+    async stopGame(containerId, cleanupVolume = true) {
+        try {
+            const sidecarStatus = await this.getStreamerSidecarStatus();
+            if (sidecarStatus?.containerId === containerId) {
+                logger_1.logger.info('Stopping game via streaming sidecar API');
+                await this.callSidecarAPI('/stop', 'POST', {});
+                return;
+            }
+            const container = docker.getContainer(containerId);
+            // Extract session ID from container name before stopping
+            // Session ID extraction was previously used for cleanup but is no longer needed
+            // since save volumes are now per-game rather than per-session
+            if (cleanupVolume) {
+                try {
+                    const info = await container.inspect();
+                    const containerName = info.Name.replace(/^\//, ''); // Remove leading slash
+                    // Verify this is a dillinger session container
+                    if (!containerName.match(/^dillinger-/)) {
+                        logger_1.logger.warn('Container does not appear to be a dillinger container');
+                    }
+                }
+                catch (err) {
+                    logger_1.logger.warn('Could not inspect container for cleanup:', err);
+                }
+            }
+            await container.stop();
+            logger_1.logger.info(`✓ Game container stopped: ${containerId}`);
+            // If container was not created with AutoRemove, remove it now and
+            // include anonymous volumes to avoid GUID volume accumulation.
+            try {
+                const stoppedInfo = await container.inspect();
+                if (!stoppedInfo?.HostConfig?.AutoRemove) {
+                    await container.remove({ force: true, v: true });
+                    logger_1.logger.info(`✓ Game container removed after stop: ${containerId}`);
+                }
+            }
+            catch (removeErr) {
+                if (removeErr?.statusCode !== 404) {
+                    logger_1.logger.warn(`Could not remove stopped container ${containerId}: ${removeErr?.message || removeErr}`);
+                }
+            }
+            // Note: We don't clean up save volumes here anymore
+            // Save volumes are game-based (dillinger_saves_<gameId>) and persist across sessions
+            // They should only be deleted when the game itself is deleted
+        }
+        catch (error) {
+            // 304 means container is already stopped - this is fine
+            if (error.statusCode === 304) {
+                logger_1.logger.info(`ℹ Game container already stopped: ${containerId}`);
+                return;
+            }
+            // 404 means container doesn't exist - also not really an error
+            if (error.statusCode === 404) {
+                logger_1.logger.info(`ℹ Game container not found (may have been removed): ${containerId}`);
+                return;
+            }
+            logger_1.logger.error('Error stopping game container:', error);
+            throw new Error(`Failed to stop game: ${error}`);
+        }
+    }
+    /**
+     * Clean up any containers using the session volume
+     */
+    async cleanupVolumeContainers() {
+        try {
+            // List all containers (including stopped ones) that might be using the volume
+            const allContainers = await docker.listContainers({
+                all: true,
+                filters: {
+                    volume: [this.SESSION_VOLUME]
+                }
+            });
+            logger_1.logger.info(`Found ${allContainers.length} containers using ${this.SESSION_VOLUME}`);
+            for (const containerInfo of allContainers) {
+                const container = docker.getContainer(containerInfo.Id);
+                logger_1.logger.info(`Cleaning up container: ${containerInfo.Names[0]} (${containerInfo.Id.substring(0, 12)})`);
+                try {
+                    // Stop if running
+                    if (containerInfo.State === 'running') {
+                        await container.stop({ t: 2 }); // 2 second timeout
+                        logger_1.logger.info(`  Stopped container`);
+                    }
+                    // Remove the container
+                    await container.remove({ force: true });
+                    logger_1.logger.info(`  Removed container`);
+                }
+                catch (err) {
+                    logger_1.logger.error(`  Failed to cleanup container ${containerInfo.Id}: ${err.message}`);
+                    // Continue with other containers even if one fails
+                }
+            }
+        }
+        catch (error) {
+            logger_1.logger.error('Error cleaning up volume containers:', error.message);
+            // Don't throw - we'll try to proceed anyway
+        }
+    }
+    /**
+     * Get container status
+     */
+    async getContainerStatus(containerId) {
+        try {
+            const container = docker.getContainer(containerId);
+            const info = await container.inspect();
+            return info.State.Status;
+        }
+        catch (error) {
+            if (error.statusCode === 404) {
+                return 'not-found';
+            }
+            throw error;
+        }
+    }
+    /**
+     * List all running Dillinger game containers
+     */
+    async listGameContainers() {
+        try {
+            const containers = await docker.listContainers({
+                filters: {
+                    name: ['dillinger-']
+                }
+            });
+            return containers
+                .filter((c) => {
+                const name = c.Names?.[0]?.replace(/^\//, '') || '';
+                // Exclude infrastructure containers (streaming sidecar, etc.)
+                return name.startsWith('dillinger-') && !name.startsWith('dillinger-streaming-');
+            })
+                .map((container) => ({
+                containerId: container.Id,
+                status: container.State,
+                createdAt: new Date(container.Created * 1000).toISOString(),
+            }));
+        }
+        catch (error) {
+            logger_1.logger.error('Error listing game containers:', error);
+            throw new Error(`Failed to list game containers: ${error}`);
+        }
+    }
+    /**
+     * Get container logs
+     */
+    /**
+     * Check if a container exists (without throwing errors)
+     */
+    async containerExists(containerId) {
+        try {
+            const container = docker.getContainer(containerId);
+            await container.inspect();
+            return true;
+        }
+        catch (error) {
+            return false;
+        }
+    }
+    async getContainerLogs(containerId, tail = 100) {
+        try {
+            const container = docker.getContainer(containerId);
+            // Check if TTY was enabled
+            let isTty = false;
+            try {
+                const info = await container.inspect();
+                isTty = info.Config.Tty;
+            }
+            catch (e) {
+                // If container is gone, we can't inspect it. Assume false or try to parse anyway.
+                // But if it's gone, logs() might fail too unless we're lucky.
+            }
+            // Get logs as buffer (follow: false returns Buffer)
+            const logsBuffer = await container.logs({
+                stdout: true,
+                stderr: true,
+                tail,
+                timestamps: true,
+                follow: false,
+            });
+            if (isTty) {
+                // If Tty is enabled, logs are raw text
+                return logsBuffer.toString('utf8');
+            }
+            // Docker's multiplexed stream format: 8-byte header per chunk
+            // Header: [stream_type, 0, 0, 0, size1, size2, size3, size4]
+            // stream_type: 1=stdout, 2=stderr
+            const logs = [];
+            let offset = 0;
+            while (offset < logsBuffer.length) {
+                // Safety check for buffer bounds
+                if (offset + 8 > logsBuffer.length)
+                    break;
+                // Read 8-byte header (stream type at byte 0, size at bytes 4-7)
+                // Stream type: 0=stdin, 1=stdout, 2=stderr (not used here)
+                const size = logsBuffer.readUInt32BE(offset + 4);
+                // Safety check for payload bounds
+                if (offset + 8 + size > logsBuffer.length)
+                    break;
+                // Read payload
+                const payload = logsBuffer.slice(offset + 8, offset + 8 + size).toString('utf8');
+                logs.push(payload);
+                offset += 8 + size;
+            }
+            // Join and remove duplicates
+            const allLines = logs.join('').split('\n').filter(line => line.trim());
+            const uniqueLines = Array.from(new Set(allLines));
+            return uniqueLines.join('\n');
+        }
+        catch (error) {
+            // Don't log 404 errors - just rethrow silently
+            if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 404) {
+                throw new Error('Container not found');
+            }
+            logger_1.logger.error('Error getting container logs:', error);
+            throw new Error(`Failed to get container logs: ${error}`);
+        }
+    }
+    async inspectContainer(containerId) {
+        try {
+            const container = docker.getContainer(containerId);
+            return await container.inspect();
+        }
+        catch (error) {
+            if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 404) {
+                throw new Error('Container not found');
+            }
+            logger_1.logger.error('Error inspecting container:', error);
+            throw new Error(`Failed to inspect container: ${error}`);
+        }
+    }
+    async stopContainer(containerId) {
+        try {
+            const container = docker.getContainer(containerId);
+            await container.stop();
+        }
+        catch (error) {
+            if (error?.statusCode === 304) {
+                return; // already stopped
+            }
+            if (error?.statusCode === 404) {
+                throw new Error('Container not found');
+            }
+            logger_1.logger.error('Error stopping container:', error);
+            throw new Error(`Failed to stop container: ${error}`);
+        }
+    }
+    async removeContainer(containerId, force = true) {
+        try {
+            const container = docker.getContainer(containerId);
+            await container.remove({ force });
+        }
+        catch (error) {
+            if (error?.statusCode === 404) {
+                throw new Error('Container not found');
+            }
+            logger_1.logger.error('Error removing container:', error);
+            throw new Error(`Failed to remove container: ${error}`);
+        }
+    }
+    /**
+     * Resolve the host path for a mount point inside this container.
+     * When running inside a container, paths we see might be bind mounts from the host.
+     * Docker needs the HOST path to mount into child containers, not our container path.
+     *
+     * Uses /proc/self/mountinfo to find the source path on the host.
+     */
+    resolveHostPath(containerPath) {
+        try {
+            const mountinfo = (0, fs_1.readFileSync)('/proc/self/mountinfo', 'utf8');
+            const lines = mountinfo.split('\n');
+            let bestMatch = null;
+            for (const line of lines) {
+                // mountinfo format: ID parent major:minor root mountpoint options - type source opts
+                const parts = line.split(' ');
+                if (parts.length < 10)
+                    continue;
+                const mountpoint = parts[4];
+                const isExact = mountpoint === containerPath;
+                const isPrefix = containerPath.startsWith(mountpoint + '/');
+                if (!isExact && !isPrefix)
+                    continue;
+                const separatorIdx = parts.indexOf('-');
+                if (separatorIdx === -1)
+                    continue;
+                const fsType = parts[separatorIdx + 1];
+                const source = parts[separatorIdx + 2] || '';
+                const root = parts[3]; // Path within the mounted filesystem
+                if (!bestMatch || mountpoint.length > bestMatch.mountpoint.length) {
+                    bestMatch = { mountpoint, fsType, root, source, line };
+                }
+            }
+            if (bestMatch) {
+                const { mountpoint, fsType, root, source, line } = bestMatch;
+                const relativePath = containerPath === mountpoint
+                    ? ''
+                    : containerPath.slice(mountpoint.length + 1);
+                if (fsType === 'tmpfs') {
+                    const match = line.match(/mode=700,uid=1000/);
+                    if (match && root !== '/') {
+                        const hostBase = `/run/user/1000${root}`;
+                        const hostPath = relativePath ? path_1.default.posix.join(hostBase, relativePath) : hostBase;
+                        logger_1.logger.info(`  Resolved ${containerPath} → ${hostPath} (from tmpfs mount)`);
+                        return hostPath;
+                    }
+                }
+                if ((fsType === 'ext4' || fsType === 'btrfs' || fsType === 'xfs') && root !== '/') {
+                    const hostPath = relativePath ? path_1.default.posix.join(root, relativePath) : root;
+                    logger_1.logger.info(`  Resolved ${containerPath} → ${hostPath} (from ${fsType} mount)`);
+                    return hostPath;
+                }
+                if (root === '/' && source && source.startsWith('/') && !source.startsWith('/dev/')) {
+                    const hostPath = relativePath ? path_1.default.posix.join(source, relativePath) : source;
+                    logger_1.logger.info(`  Resolved ${containerPath} → ${hostPath} (from bind source)`);
+                    return hostPath;
+                }
+            }
+        }
+        catch (error) {
+            logger_1.logger.warn(`  Could not read mountinfo: ${error}`);
+        }
+        return containerPath;
+    }
+    /**
+     * Collect host device GIDs and pass them as supplemental groups to runner
+     * containers so non-root gameuser can access mounted device nodes.
+     */
+    getSupplementalGroupIds(devicePaths) {
+        const groupIds = new Set();
+        for (const devicePath of devicePaths) {
+            try {
+                if (!(0, fs_1.existsSync)(devicePath))
+                    continue;
+                const stats = (0, fs_1.statSync)(devicePath);
+                if (Number.isInteger(stats.gid) && stats.gid >= 0) {
+                    groupIds.add(String(stats.gid));
+                }
+            }
+            catch {
+                // Ignore unreadable/missing device paths
+            }
+        }
+        return Array.from(groupIds.values());
+    }
+    /**
+     * Get display forwarding configuration based on host environment
+     * Supports X11 and Wayland display protocols
+      * Prefers Wayland when both are available; falls back to X11
+     */
+    async getDisplayConfiguration(options) {
+        const display = process.env.DISPLAY;
+        const waylandDisplay = process.env.WAYLAND_DISPLAY;
+        const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() || 1000}`;
+        const waylandSocket = waylandDisplay ? `${xdgRuntimeDir}/${waylandDisplay}` : '';
+        const preferX11 = options?.preferX11 === true;
+        const xauthorityCandidates = [
+            process.env.XAUTHORITY,
+            `${process.env.HOME}/.Xauthority`,
+            '/home/ians/.Xauthority',
+            '/home/node/.Xauthority',
+        ].filter(Boolean);
+        let xauthorityPath = null;
+        let xauthorityContainerPath = null;
+        for (const candidate of xauthorityCandidates) {
+            try {
+                const stat = (0, fs_1.statSync)(candidate);
+                if (stat.isFile() && stat.size > 0) {
+                    xauthorityContainerPath = candidate;
+                    xauthorityPath = this.resolveHostPath(candidate);
+                    break;
+                }
+            }
+            catch {
+                // File doesn't exist, try next
+            }
+        }
+        // Prefer Wayland first; fall back to X11 when needed
+        const hasWaylandSocket = Boolean(waylandDisplay && xdgRuntimeDir && (0, fs_1.existsSync)(waylandSocket));
+        if (!preferX11 && hasWaylandSocket) {
+            logger_1.logger.info(`Using Wayland display: ${waylandDisplay}`);
+            // Check if GPU device exists
+            const devices = [];
+            if ((0, fs_1.existsSync)('/dev/dri')) {
+                devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
+                logger_1.logger.info(`  ✓ GPU device available`);
+            }
+            else {
+                logger_1.logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+            }
+            // Check if sound device exists
+            if ((0, fs_1.existsSync)('/dev/snd')) {
+                devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
+                logger_1.logger.info(`  ✓ Sound device available`);
+            }
+            const volumes = [];
+            if ((0, fs_1.existsSync)(xdgRuntimeDir)) {
+                const hostRuntimeDir = this.resolveHostPath(xdgRuntimeDir);
+                volumes.push(`${hostRuntimeDir}:/run/user/1000:rw`);
+            }
+            else if (waylandSocket) {
+                volumes.push(`${waylandSocket}:/run/user/1000/${waylandDisplay}:rw`);
+            }
+            if ((0, fs_1.existsSync)('/tmp/.X11-unix')) {
+                const hostX11SocketDir = this.resolveHostPath('/tmp/.X11-unix');
+                volumes.push(`${hostX11SocketDir}:/tmp/.X11-unix:rw`);
+            }
+            // Bind-mount /dev/input as a volume so the full directory tree
+            // (event*, js*) is visible inside the container.  Docker API Devices
+            // only maps individual device nodes, not directories.
+            if ((0, fs_1.existsSync)('/dev/input')) {
+                volumes.push('/dev/input:/dev/input:rw');
+                logger_1.logger.info(`  ✓ Input devices bind-mounted (/dev/input)`);
+                // Also mount /proc/bus/input/devices so we can identify devices by name
+                // Mount to /tmp/host-input-devices to avoid "inside /proc" mount errors
+                if ((0, fs_1.existsSync)('/proc/bus/input/devices')) {
+                    volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
+                }
+                // Mount /run/udev to allow libudev to query device details (names, capabilities)
+                if ((0, fs_1.existsSync)('/run/udev')) {
+                    volumes.push('/run/udev:/run/udev:ro');
+                    logger_1.logger.info(`  ✓ udev database mounted`);
+                }
+            }
+            // Add uinput for virtual input device creation (needed by some emulators)
+            if ((0, fs_1.existsSync)('/dev/uinput')) {
+                devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
+                logger_1.logger.info(`  ✓ uinput device available`);
+            }
+            // Add hidraw devices for broader gamepad compatibility in Wine/SDL.
+            try {
+                const hidrawDevices = (0, fs_1.readdirSync)('/dev').filter((name) => name.startsWith('hidraw'));
+                for (const hidrawName of hidrawDevices) {
+                    const hidrawPath = `/dev/${hidrawName}`;
+                    devices.push({ PathOnHost: hidrawPath, PathInContainer: hidrawPath, CgroupPermissions: 'rwm' });
+                }
+                if (hidrawDevices.length > 0) {
+                    logger_1.logger.info(`  ✓ hidraw devices available (${hidrawDevices.length})`);
+                }
+            }
+            catch {
+                // ignore
+            }
+            const envVars = [
+                `WAYLAND_DISPLAY=${waylandDisplay}`,
+                'XDG_RUNTIME_DIR=/run/user/1000',
+                'QT_QPA_PLATFORM=wayland',
+                'GDK_BACKEND=wayland',
+                'SDL_VIDEODRIVER=wayland',
+            ];
+            const pulseSocketDir = `${xdgRuntimeDir}/pulse`;
+            const pulseSocketPath = `${pulseSocketDir}/native`;
+            if ((0, fs_1.existsSync)(pulseSocketPath)) {
+                const hostPulseSocketDir = this.resolveHostPath(pulseSocketDir);
+                volumes.push(`${hostPulseSocketDir}:/run/user/1000/pulse:rw`);
+                envVars.push('PULSE_SERVER=unix:/run/user/1000/pulse/native');
+                const userHome = process.env.HOME || '/home/node';
+                const pulseCookiePaths = [
+                    `${userHome}/.config/pulse/cookie`,
+                    '/home/dillinger/.config/pulse/cookie',
+                ];
+                for (const pulseCookie of pulseCookiePaths) {
+                    if ((0, fs_1.existsSync)(pulseCookie)) {
+                        const hostPulseCookie = this.resolveHostPath(pulseCookie);
+                        volumes.push(`${hostPulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
+                        envVars.push('PULSE_COOKIE=/home/gameuser/.config/pulse/cookie');
+                        break;
+                    }
+                }
+            }
+            else {
+                logger_1.logger.warn(`  ⚠ No PulseAudio socket found at ${pulseSocketPath}`);
+            }
+            return {
+                mode: 'wayland',
+                env: envVars,
+                volumes,
+                devices,
+                deviceCgroupRules: ['c 13:* rwm'],
+                securityOpt: [],
+                ipcMode: 'host',
+                networkMode: 'host',
+            };
+        }
+        // Fall back to X11 when Wayland is not available
+        if (display) {
+            logger_1.logger.info(`Using X11 display: ${display}`);
+            const volumes = ['/tmp/.X11-unix:/tmp/.X11-unix:rw'];
+            if (xauthorityPath) {
+                volumes.push(`${xauthorityPath}:/home/gameuser/.Xauthority:ro`);
+                logger_1.logger.info(`  Xauthority: ${xauthorityContainerPath} → host: ${xauthorityPath}`);
+            }
+            else {
+                logger_1.logger.warn(`  ⚠ No valid Xauthority file found, using host network mode for X11 auth`);
+            }
+            // Add PulseAudio socket for audio support
+            // Check multiple possible locations for the PulseAudio socket
+            const userHome = process.env.HOME;
+            const possiblePulsePaths = [
+                `${xdgRuntimeDir}/pulse`,
+                `/run/user/1000/pulse`,
+                `/tmp/pulse-socket`,
+            ];
+            let pulseSocketPath = null;
+            for (const pulsePath of possiblePulsePaths) {
+                if ((0, fs_1.existsSync)(pulsePath)) {
+                    pulseSocketPath = pulsePath;
+                    break;
+                }
+            }
+            if (pulseSocketPath) {
+                // Resolve pulse socket path to host path
+                const hostPulseSocketPath = this.resolveHostPath(pulseSocketPath);
+                volumes.push(`${hostPulseSocketPath}:/run/user/1000/pulse:rw`);
+                logger_1.logger.info(`  ✓ PulseAudio socket: ${pulseSocketPath} → host: ${hostPulseSocketPath}`);
+                // Mount PulseAudio cookie if it exists
+                const pulseCookiePaths = [
+                    `${userHome}/.config/pulse/cookie`,
+                    '/home/dillinger/.config/pulse/cookie',
+                ];
+                for (const pulseCookie of pulseCookiePaths) {
+                    if ((0, fs_1.existsSync)(pulseCookie)) {
+                        // Resolve cookie path to host path
+                        const hostPulseCookie = this.resolveHostPath(pulseCookie);
+                        volumes.push(`${hostPulseCookie}:/home/gameuser/.config/pulse/cookie:ro`);
+                        logger_1.logger.info(`  ✓ PulseAudio cookie: ${pulseCookie} → host: ${hostPulseCookie}`);
+                        break;
+                    }
+                }
+            }
+            else {
+                logger_1.logger.warn(`  ⚠ No PulseAudio socket found (checked: ${possiblePulsePaths.join(', ')})`);
+                logger_1.logger.warn(`    XDG_RUNTIME_DIR=${process.env.XDG_RUNTIME_DIR || '(not set)'}`);
+                logger_1.logger.warn(`    Game audio may not work. Ensure PulseAudio socket is mounted into dillinger-core container.`);
+            }
+            // Check if GPU device exists
+            const devices = [];
+            if ((0, fs_1.existsSync)('/dev/dri')) {
+                devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
+                logger_1.logger.info(`  ✓ GPU device available`);
+            }
+            else {
+                logger_1.logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+            }
+            // Check if sound device exists
+            if ((0, fs_1.existsSync)('/dev/snd')) {
+                devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
+                logger_1.logger.info(`  ✓ Sound device available`);
+            }
+            // Bind-mount /dev/input as a volume so the full directory tree
+            // (event*, js*) is visible inside the container.  Docker API Devices
+            // only maps individual device nodes, not directories.
+            if ((0, fs_1.existsSync)('/dev/input')) {
+                volumes.push('/dev/input:/dev/input:rw');
+                logger_1.logger.info(`  ✓ Input devices bind-mounted (/dev/input)`);
+                // Also mount /proc/bus/input/devices so we can identify devices by name
+                // Mount to /tmp/host-input-devices to avoid "inside /proc" mount errors
+                if ((0, fs_1.existsSync)('/proc/bus/input/devices')) {
+                    volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
+                }
+                // Mount /run/udev to allow libudev to query device details (names, capabilities)
+                if ((0, fs_1.existsSync)('/run/udev')) {
+                    volumes.push('/run/udev:/run/udev:ro');
+                    logger_1.logger.info(`  ✓ udev database mounted`);
+                }
+            }
+            // Add uinput for virtual input device creation (needed by some emulators)
+            if ((0, fs_1.existsSync)('/dev/uinput')) {
+                devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
+                logger_1.logger.info(`  ✓ uinput device available`);
+            }
+            // Add hidraw devices for broader gamepad compatibility in Wine/SDL.
+            try {
+                const hidrawDevices = (0, fs_1.readdirSync)('/dev').filter((name) => name.startsWith('hidraw'));
+                for (const hidrawName of hidrawDevices) {
+                    const hidrawPath = `/dev/${hidrawName}`;
+                    devices.push({ PathOnHost: hidrawPath, PathInContainer: hidrawPath, CgroupPermissions: 'rwm' });
+                }
+                if (hidrawDevices.length > 0) {
+                    logger_1.logger.info(`  ✓ hidraw devices available (${hidrawDevices.length})`);
+                }
+            }
+            catch {
+                // ignore
+            }
+            // Get default PulseAudio sink from settings or environment variable
+            // This allows directing audio to a specific output when multiple are available
+            const settingsService = settings_1.SettingsService.getInstance();
+            const audioSettings = await settingsService.getAudioSettings();
+            const pulseSink = audioSettings.defaultSink || process.env.PULSE_SINK || '';
+            // If we have Xauthority, set it; otherwise empty triggers xhost-style auth
+            const envVars = [
+                `DISPLAY=${display}`,
+                xauthorityPath ? `XAUTHORITY=/home/gameuser/.Xauthority` : 'XAUTHORITY=',
+                'PULSE_SERVER=unix:/run/user/1000/pulse/native',
+                'PULSE_COOKIE=/home/gameuser/.config/pulse/cookie',
+            ];
+            if (preferX11) {
+                envVars.push('SDL_VIDEODRIVER=x11', 'GDK_BACKEND=x11', 'QT_QPA_PLATFORM=xcb');
+            }
+            if (pulseSink) {
+                envVars.push(`PULSE_SINK=${pulseSink}`);
+            }
+            // Always use host network mode for X11
+            // Modern display servers (Wayland with XWayland) use abstract sockets (@/tmp/.X11-unix/X0)
+            // which are in the network namespace, not accessible from containers without host network.
+            // The file socket (/tmp/.X11-unix/X0) is just a fallback that often doesn't work.
+            logger_1.logger.info(`  Display mode: x11`);
+            return {
+                mode: 'x11',
+                env: envVars,
+                volumes,
+                devices,
+                deviceCgroupRules: ['c 13:* rwm'],
+                ipcMode: 'host', // Required for X11 shared memory
+                securityOpt: ['seccomp=unconfined'], // Some X11 apps need this
+                networkMode: 'host', // Required for abstract socket access (XWayland)
+            };
+        }
+        // No display available - headless mode
+        logger_1.logger.warn('⚠ No display environment detected (DISPLAY or WAYLAND_DISPLAY not set)');
+        logger_1.logger.warn('  Games with graphical output will not be visible');
+        return {
+            mode: 'none',
+            env: [],
+            volumes: [],
+            devices: []
+        };
+    }
+    /**
+     * Get display configuration for runner containers that render into the streaming sidecar.
+     */
+    async getSidecarDisplayConfiguration() {
+        const runtimeDir = '/run/user/1000';
+        const detectedWayland = await this.detectActiveStreamingWaylandDisplay();
+        const waylandDisplay = detectedWayland || 'wayland-1';
+        const volumes = [`${this.STREAMING_RUNTIME_VOLUME}:${runtimeDir}:rw`];
+        const devices = [];
+        // Audio: bind-mount host PulseAudio socket if available.
+        // This overrides the /run/user/1000 volume subpath so the runner can talk to host Pulse.
+        const hasHostPulse = (0, fs_1.existsSync)('/run/user/1000/pulse/native');
+        if (hasHostPulse) {
+            volumes.push('/run/user/1000/pulse:/run/user/1000/pulse:rw');
+        }
+        // Pulse cookie for auth (best-effort). Only mount if it is a non-empty file.
+        let haveRunnerPulseCookie = false;
+        if (hasHostPulse) {
+            const pulseCookieCandidates = [
+                process.env.PULSE_COOKIE,
+                `${process.env.HOME || '/home/node'}/.config/pulse/cookie`,
+                '/home/dillinger/.config/pulse/cookie',
+                '/home/node/.config/pulse/cookie',
+            ].filter(Boolean);
+            for (const candidate of pulseCookieCandidates) {
+                try {
+                    const st = (0, fs_1.statSync)(candidate);
+                    if (st.isFile() && st.size > 0) {
+                        volumes.push(`${this.resolveHostPath(candidate)}:/home/gameuser/.config/pulse/cookie:ro`);
+                        haveRunnerPulseCookie = true;
+                        break;
+                    }
+                }
+                catch {
+                    // ignore
+                }
+            }
+        }
+        if ((0, fs_1.existsSync)('/dev/dri')) {
+            devices.push({ PathOnHost: '/dev/dri', PathInContainer: '/dev/dri', CgroupPermissions: 'rwm' });
+            logger_1.logger.info(`  ✓ GPU device available`);
+        }
+        else {
+            logger_1.logger.warn(`  ⚠ No GPU device (/dev/dri not found), software rendering only`);
+        }
+        if ((0, fs_1.existsSync)('/dev/snd')) {
+            devices.push({ PathOnHost: '/dev/snd', PathInContainer: '/dev/snd', CgroupPermissions: 'rwm' });
+            logger_1.logger.info(`  ✓ Sound device available`);
+        }
+        // Bind-mount /dev/input as a volume so the full directory tree
+        // (event*, js*) is visible inside the container.
+        if ((0, fs_1.existsSync)('/dev/input')) {
+            volumes.push('/dev/input:/dev/input:rw');
+            logger_1.logger.info(`  ✓ Input devices bind-mounted (/dev/input)`);
+            if ((0, fs_1.existsSync)('/proc/bus/input/devices')) {
+                volumes.push('/proc/bus/input/devices:/tmp/host-input-devices:ro');
+            }
+            if ((0, fs_1.existsSync)('/run/udev')) {
+                volumes.push('/run/udev:/run/udev:ro');
+                logger_1.logger.info(`  ✓ udev database mounted`);
+            }
+        }
+        if ((0, fs_1.existsSync)('/dev/uinput')) {
+            devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
+            logger_1.logger.info(`  ✓ uinput device available`);
+        }
+        // Add hidraw devices for broader gamepad compatibility in Wine/SDL.
+        try {
+            const hidrawDevices = (0, fs_1.readdirSync)('/dev').filter((name) => name.startsWith('hidraw'));
+            for (const hidrawName of hidrawDevices) {
+                const hidrawPath = `/dev/${hidrawName}`;
+                devices.push({ PathOnHost: hidrawPath, PathInContainer: hidrawPath, CgroupPermissions: 'rwm' });
+            }
+            if (hidrawDevices.length > 0) {
+                logger_1.logger.info(`  ✓ hidraw devices available (${hidrawDevices.length})`);
+            }
+        }
+        catch {
+            // ignore
+        }
+        // Allow directing audio to a specific sink (e.g. a null sink) so streaming audio
+        // doesn't have to play through host speakers.
+        let pulseSink = process.env.PULSE_SINK || '';
+        try {
+            const settingsService = settings_1.SettingsService.getInstance();
+            const audioSettings = await settingsService.getAudioSettings();
+            pulseSink = audioSettings.defaultSink || pulseSink;
+        }
+        catch {
+            // ignore
+        }
+        return {
+            mode: 'wayland',
+            env: [
+                `WAYLAND_DISPLAY=${waylandDisplay}`,
+                `XDG_RUNTIME_DIR=${runtimeDir}`,
+                'QT_QPA_PLATFORM=wayland',
+                'GDK_BACKEND=wayland',
+                'SDL_VIDEODRIVER=wayland',
+                ...(hasHostPulse ? ['PULSE_SERVER=unix:/run/user/1000/pulse/native'] : []),
+                ...(haveRunnerPulseCookie ? ['PULSE_COOKIE=/home/gameuser/.config/pulse/cookie'] : []),
+                ...(pulseSink ? [`PULSE_SINK=${pulseSink}`] : []),
+            ],
+            volumes,
+            devices,
+            deviceCgroupRules: ['c 13:* rwm'],
+            securityOpt: [],
+            ipcMode: 'host',
+            networkMode: 'host',
+        };
+    }
+    /**
+     * NOTE: Save volumes are no longer used
+     *
+    * Game saves are now stored in dillinger_core at /data/saves/<gameId>
+     * This eliminates the need for per-game or per-session save volumes.
+    * All save data is centralized in the dillinger_core volume.
+     *
+     * Any old dillinger_saves_* volumes can be safely deleted manually.
+     */
+    /**
+     * Get available PulseAudio sinks on the host system
+     */
+    async getAvailableAudioSinks() {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        try {
+            // Use pactl to list sinks
+            const { stdout } = await execAsync('pactl list sinks');
+            const sinks = [];
+            const lines = stdout.split('\n');
+            let currentSink = {};
+            for (const line of lines) {
+                const trimmed = line.trim();
+                // New sink entry starts
+                if (trimmed.startsWith('Sink #')) {
+                    if (currentSink.id && currentSink.name) {
+                        sinks.push({
+                            id: currentSink.id,
+                            name: currentSink.name,
+                            description: currentSink.description || currentSink.name
+                        });
+                    }
+                    currentSink = {};
+                }
+                // Parse Name field (the actual sink ID we need)
+                if (trimmed.startsWith('Name:')) {
+                    currentSink.id = trimmed.substring(5).trim();
+                    currentSink.name = currentSink.id; // Fallback if no description
+                }
+                // Parse Description field (human-readable name)
+                if (trimmed.startsWith('Description:')) {
+                    const description = trimmed.substring(12).trim();
+                    currentSink.description = description;
+                    currentSink.name = description;
+                }
+            }
+            // Add last sink if exists
+            if (currentSink.id && currentSink.name) {
+                sinks.push({
+                    id: currentSink.id,
+                    name: currentSink.name,
+                    description: currentSink.description || currentSink.name
+                });
+            }
+            return sinks;
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to get audio sinks:', error);
+            return [];
+        }
+    }
+    /**
+     * Clean up stopped game session containers
+     */
+    async cleanupStoppedContainers() {
+        try {
+            const containers = await docker.listContainers({
+                all: true,
+                filters: {
+                    name: ['dillinger-'],
+                    status: ['exited', 'dead']
+                }
+            });
+            const removed = [];
+            for (const containerInfo of containers) {
+                const name = containerInfo.Names?.[0]?.replace(/^\//, '') || '';
+                // Skip infrastructure containers
+                if (name.startsWith('dillinger-streaming-') || name === 'dillinger-core') {
+                    continue;
+                }
+                try {
+                    const container = docker.getContainer(containerInfo.Id);
+                    await container.remove({ v: true }); // Remove with volumes
+                    removed.push(containerInfo.Names[0]?.replace(/^\//, '') || containerInfo.Id);
+                    logger_1.logger.info(`✓ Removed stopped container: ${containerInfo.Id.substring(0, 12)}`);
+                }
+                catch (err) {
+                    logger_1.logger.error(`Failed to remove container ${containerInfo.Id}:`, err);
+                }
+            }
+            return {
+                removed: removed.length,
+                containers: removed
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to cleanup stopped containers:', error);
+            throw error;
+        }
+    }
+    /**
+     * Clean up orphaned Docker volumes (volumes not used by any container)
+     */
+    async cleanupOrphanedVolumes() {
+        try {
+            // Get all volumes
+            const volumeList = await docker.listVolumes();
+            const allVolumes = volumeList.Volumes || [];
+            // Get all containers (running and stopped)
+            const containers = await docker.listContainers({ all: true });
+            // Collect all volumes in use
+            const volumesInUse = new Set();
+            for (const containerInfo of containers) {
+                const container = docker.getContainer(containerInfo.Id);
+                const inspect = await container.inspect();
+                // Check mounts
+                if (inspect.Mounts) {
+                    for (const mount of inspect.Mounts) {
+                        if (mount.Type === 'volume' && mount.Name) {
+                            volumesInUse.add(mount.Name);
+                        }
+                    }
+                }
+            }
+            // Remove orphaned volumes (except system volumes)
+            const removed = [];
+            const protectedVolumes = ['dillinger_core', 'dillinger_cache'];
+            for (const vol of allVolumes) {
+                const volumeName = vol.Name;
+                // Skip protected volumes
+                if (protectedVolumes.includes(volumeName)) {
+                    continue;
+                }
+                // Skip volumes that are in use
+                if (volumesInUse.has(volumeName)) {
+                    continue;
+                }
+                // Skip non-dillinger game volumes
+                if (!volumeName.startsWith('dillinger-session-') && !volumeName.startsWith('dillinger_saves_')) {
+                    continue;
+                }
+                try {
+                    const volume = docker.getVolume(volumeName);
+                    await volume.remove();
+                    removed.push(volumeName);
+                    logger_1.logger.info(`✓ Removed orphaned volume: ${volumeName}`);
+                }
+                catch (err) {
+                    logger_1.logger.error(`Failed to remove volume ${volumeName}:`, err);
+                }
+            }
+            return {
+                removed: removed.length,
+                volumes: removed
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to cleanup orphaned volumes:', error);
+            throw error;
+        }
+    }
+    // ===== STREAMING SIDECAR MANAGEMENT =====
+    /**
+     * Container name for the streaming sidecar
+     */
+    SIDECAR_CONTAINER_NAME = 'dillinger-streamer';
+    /**
+     * Ensures the streaming sidecar container is running.
+     * If not running, starts it.
+     */
+    async ensureStreamerSidecar(reason = 'game') {
+        const settings = settings_1.SettingsService.getInstance();
+        const streamingSettings = await settings.getStreamingSettings();
+        const imageTag = process.env.DILLINGER_STREAMING_SIDECAR_VERSION || '0.3.1';
+        const image = `ghcr.io/thrane20/dillinger/streaming-sidecar:${imageTag}`;
+        // If the image for the configured tag has been rebuilt locally, its image ID will change.
+        // Restart the sidecar so it actually runs the updated bits (even when the tag is unchanged).
+        let expectedImageId = null;
+        try {
+            expectedImageId = (await docker.getImage(image).inspect()).Id || null;
+        }
+        catch {
+            expectedImageId = null;
+        }
+        const existing = await this.getStreamerSidecarStatus();
+        if (existing && existing.status === 'running') {
+            const existingMode = existing.labels?.['dillinger.streaming.mode'];
+            let needsRestart = false;
+            if (existingMode && existingMode !== reason) {
+                needsRestart = true;
+            }
+            // When starting in game mode, ensure the sidecar is sharing the runtime volume.
+            // If it was started in test mode (or older versions without labels), it may be bind-mounted
+            // to the host /run/user/1000 which runners cannot access.
+            if (!needsRestart && reason === 'game') {
+                try {
+                    const inspect = await docker.getContainer(existing.containerId).inspect();
+                    const hasSharedRuntime = (inspect.Mounts || []).some((m) => {
+                        return m?.Name === this.STREAMING_RUNTIME_VOLUME && m?.Destination === '/run/user/1000';
+                    });
+                    if (!hasSharedRuntime) {
+                        needsRestart = true;
+                    }
+                }
+                catch (err) {
+                    // Be conservative: if we can't inspect, don't force restart.
+                    logger_1.logger.debug('Could not inspect streaming sidecar mounts:', err);
+                }
+            }
+            if (!needsRestart && expectedImageId) {
+                try {
+                    const inspect = await docker.getContainer(existing.containerId).inspect();
+                    const runningImageId = inspect?.Image;
+                    if (runningImageId && runningImageId !== expectedImageId) {
+                        needsRestart = true;
+                        logger_1.logger.info('Streaming sidecar image updated; restarting to pick up new build...');
+                    }
+                }
+                catch (err) {
+                    logger_1.logger.debug('Could not inspect streaming sidecar image:', err);
+                }
+            }
+            if (needsRestart) {
+                logger_1.logger.info(`Streaming sidecar running in '${existingMode || 'unknown'}' mode; restarting for '${reason}' mode...`);
+                await this.stopStreamerSidecar();
+            }
+            else {
+                logger_1.logger.info('Streaming sidecar already running');
+                return { containerId: existing.containerId, status: 'running' };
+            }
+        }
+        if (existing) {
+            logger_1.logger.info('Streaming sidecar found but not running; restarting...');
+            await this.stopStreamerSidecar();
+        }
+        const gpuType = streamingSettings.gpuType;
+        const apiPort = process.env.DILLINGER_API_PORT || '9999';
+        logger_1.logger.info(`Starting streaming sidecar (${reason})`);
+        logger_1.logger.info(`  Image: ${image}`);
+        // Allow directing audio to a specific sink (e.g. a null sink) so streaming audio
+        // doesn't have to play through host speakers.
+        const audioSettings = await settings.getAudioSettings().catch(() => null);
+        const pulseSink = audioSettings?.defaultSink || process.env.PULSE_SINK || '';
+        const env = [
+            'DILLINGER_MODE=1',
+            `DILLINGER_API_PORT=${apiPort}`,
+            'WOLF_CFG_FOLDER=/data/wolf',
+            // Persist Wolf state (per-client app state folders, etc.) across container restarts/rebuilds.
+            // This lives inside the persisted dillinger_core volume.
+            'HOST_APPS_STATE_FOLDER=/data/wolf/apps',
+        ];
+        if (pulseSink) {
+            env.push(`PULSE_SINK=${pulseSink}`);
+        }
+        const binds = ['dillinger_core:/data:rw'];
+        const useSharedRuntime = reason === 'game';
+        if (useSharedRuntime) {
+            // Clear any stale sockets in the shared runtime volume.
+            // If the sidecar previously exited uncleanly (or the volume was used by a different sidecar),
+            // these can remain and prevent Wolf from binding to the socket path.
+            try {
+                const cleanup = await docker.createContainer({
+                    Image: 'alpine:3.20',
+                    Cmd: ['sh', '-lc', 'rm -f /mnt/wayland-* /mnt/wayland-*.lock /mnt/wolf.sock || true'],
+                    HostConfig: {
+                        AutoRemove: true,
+                        Binds: [`${this.STREAMING_RUNTIME_VOLUME}:/mnt:rw`],
+                    },
+                });
+                await cleanup.start();
+                await cleanup.wait();
+            }
+            catch (err) {
+                logger_1.logger.debug('Failed to cleanup streaming runtime volume sockets (continuing):', err);
+            }
+            binds.push(`${this.STREAMING_RUNTIME_VOLUME}:/run/user/1000:rw`);
+            env.push('XDG_RUNTIME_DIR=/run/user/1000');
+            env.push('WAYLAND_DISPLAY=wayland-1');
+            // Audio for streaming: mount host PulseAudio socket (or PipeWire-Pulse) into the container.
+            // This must be a bind mount (more specific path) because /run/user/1000 itself is a volume.
+            if ((0, fs_1.existsSync)('/run/user/1000/pulse/native')) {
+                binds.push('/run/user/1000/pulse:/run/user/1000/pulse:rw');
+                env.push('PULSE_SERVER=unix:/run/user/1000/pulse/native');
+                // Pulse cookie for auth (best-effort). Avoid mounting a directory.
+                const pulseCookieCandidates = [
+                    process.env.PULSE_COOKIE,
+                    `${process.env.HOME || '/home/node'}/.config/pulse/cookie`,
+                    '/home/dillinger/.config/pulse/cookie',
+                    '/home/node/.config/pulse/cookie',
+                ].filter(Boolean);
+                for (const candidate of pulseCookieCandidates) {
+                    try {
+                        const st = (0, fs_1.statSync)(candidate);
+                        if (st.isFile() && st.size > 0) {
+                            binds.push(`${this.resolveHostPath(candidate)}:/root/.config/pulse/cookie:ro`);
+                            break;
+                        }
+                    }
+                    catch {
+                        // ignore
+                    }
+                }
+            }
+        }
+        if (!useSharedRuntime) {
+            const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+            if (xdgRuntimeDir && (0, fs_1.existsSync)(xdgRuntimeDir)) {
+                binds.push(`${xdgRuntimeDir}:${xdgRuntimeDir}:rw`);
+                env.push(`XDG_RUNTIME_DIR=${xdgRuntimeDir}`);
+                if (!process.env.PULSE_SERVER) {
+                    env.push(`PULSE_SERVER=unix:${xdgRuntimeDir}/pulse/native`);
+                }
+            }
+            if (process.env.PULSE_SERVER) {
+                env.push(`PULSE_SERVER=${process.env.PULSE_SERVER}`);
+                if (process.env.PULSE_SERVER.startsWith('unix:')) {
+                    const socketPath = process.env.PULSE_SERVER.slice('unix:'.length);
+                    const socketDir = path_1.default.posix.dirname(socketPath);
+                    if ((0, fs_1.existsSync)(socketDir)) {
+                        binds.push(`${socketDir}:${socketDir}:rw`);
+                    }
+                }
+            }
+            const userHome = process.env.HOME || '/home/node';
+            const pulseCookiePaths = [
+                `${userHome}/.config/pulse/cookie`,
+                '/home/dillinger/.config/pulse/cookie',
+            ];
+            for (const pulseCookie of pulseCookiePaths) {
+                if ((0, fs_1.existsSync)(pulseCookie)) {
+                    binds.push(`${pulseCookie}:/root/.config/pulse/cookie:ro`);
+                    break;
+                }
+            }
+        }
+        const devices = [];
+        if (gpuType === 'amd' || gpuType === 'auto' || gpuType === 'nvidia') {
+            if ((0, fs_1.existsSync)('/dev/dri')) {
+                const driDevices = (0, fs_1.readdirSync)('/dev/dri');
+                for (const device of driDevices) {
+                    const devicePath = `/dev/dri/${device}`;
+                    devices.push({
+                        PathOnHost: devicePath,
+                        PathInContainer: devicePath,
+                        CgroupPermissions: 'rwm',
+                    });
+                }
+                logger_1.logger.info(`  📺 Mapped ${devices.length} GPU devices: ${driDevices.join(', ')}`);
+            }
+        }
+        if ((0, fs_1.existsSync)('/dev/uinput')) {
+            devices.push({
+                PathOnHost: '/dev/uinput',
+                PathInContainer: '/dev/uinput',
+                CgroupPermissions: 'rwm',
+            });
+        }
+        if ((0, fs_1.existsSync)('/dev/input')) {
+            const inputDevices = (0, fs_1.readdirSync)('/dev/input');
+            for (const device of inputDevices) {
+                const devicePath = `/dev/input/${device}`;
+                devices.push({
+                    PathOnHost: devicePath,
+                    PathInContainer: devicePath,
+                    CgroupPermissions: 'rwm',
+                });
+            }
+        }
+        const runtime = gpuType === 'nvidia' ? 'nvidia' : undefined;
+        const containerConfig = {
+            name: this.SIDECAR_CONTAINER_NAME,
+            Image: image,
+            Env: env,
+            Labels: {
+                'dillinger.managed': 'true',
+                'dillinger.streaming.sidecar': 'true',
+                'dillinger.streaming.mode': reason,
+            },
+            ExposedPorts: {
+                '47984/tcp': {},
+                '47989/tcp': {},
+                '47999/udp': {},
+                '48010/tcp': {},
+                '48100/udp': {},
+                '48200/udp': {},
+                '9999/tcp': {},
+            },
+            HostConfig: {
+                NetworkMode: 'host',
+                Devices: devices,
+                CapAdd: ['SYS_ADMIN', 'SYS_PTRACE', 'SYS_NICE'],
+                Binds: binds,
+                Tmpfs: {
+                    '/tmp': 'exec,nosuid,nodev',
+                },
+                ...(runtime ? { Runtime: runtime } : {}),
+            },
+        };
+        try {
+            const images = await docker.listImages({ filters: { reference: [image] } });
+            if (images.length === 0) {
+                logger_1.logger.info(`Pulling streaming sidecar image: ${image}`);
+                try {
+                    await new Promise((resolve, reject) => {
+                        docker.pull(image, (err, stream) => {
+                            if (err) {
+                                reject(err);
+                                return;
+                            }
+                            docker.modem.followProgress(stream, (pullErr) => {
+                                if (pullErr) {
+                                    reject(pullErr);
+                                }
+                                else {
+                                    resolve();
+                                }
+                            });
+                        });
+                    });
+                }
+                catch (pullError) {
+                    logger_1.logger.error(`Failed to pull streaming sidecar image ${image}`, pullError);
+                    throw new Error(`Streaming sidecar image not available: ${image}. ` +
+                        `Build it locally or set DILLINGER_STREAMING_SIDECAR_VERSION to a tag you have.`);
+                }
+            }
+            const container = await docker.createContainer(containerConfig);
+            await container.start();
+            logger_1.logger.info(`Streaming sidecar started: ${container.id.substring(0, 12)}`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            return {
+                containerId: container.id,
+                status: 'running',
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to start streaming sidecar:', error);
+            throw error;
+        }
+    }
+    /**
+     * Get the current status of the streaming sidecar
+     */
+    async getStreamerSidecarStatus() {
+        try {
+            const containers = await docker.listContainers({
+                all: true,
+                filters: {
+                    name: [this.SIDECAR_CONTAINER_NAME],
+                },
+            });
+            if (containers.length === 0) {
+                return null;
+            }
+            const containerInfo = containers[0];
+            return {
+                containerId: containerInfo.Id,
+                status: containerInfo.State,
+                labels: containerInfo.Labels,
+                startedAt: containerInfo.Created ? new Date(containerInfo.Created * 1000).toISOString() : undefined,
+            };
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to get streaming sidecar status:', error);
+            return null;
+        }
+    }
+    /**
+     * Stop the streaming sidecar container
+     */
+    async stopStreamerSidecar() {
+        try {
+            const containers = await docker.listContainers({
+                all: true,
+                filters: {
+                    name: [this.SIDECAR_CONTAINER_NAME],
+                },
+            });
+            if (containers.length === 0) {
+                logger_1.logger.info('Streaming sidecar not running');
+                return;
+            }
+            const container = docker.getContainer(containers[0].Id);
+            // Stop gracefully with timeout
+            try {
+                await container.stop({ t: 10 });
+            }
+            catch (stopErr) {
+                if (stopErr.statusCode !== 304) { // 304 = container already stopped
+                    throw stopErr;
+                }
+            }
+            // Remove the container
+            await container.remove({ force: true });
+            logger_1.logger.info('Streaming sidecar stopped and removed');
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to stop streaming sidecar:', error);
+            throw error;
+        }
+    }
+}
+exports.DockerService = DockerService;

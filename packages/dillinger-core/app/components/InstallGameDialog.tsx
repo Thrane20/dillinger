@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import FileExplorer from './FileExplorer';
 import type { InstallGameRequest, InstallGameResponse } from '@dillinger/shared';
 
@@ -61,7 +62,12 @@ interface InstallGameDialogProps {
   onSuccess: () => void;
 }
 
+/**
+ * @deprecated Wine installs now use the full-page wizard at `/games/{id}/install`.
+ * This dialog is kept for non-Wine platforms and backward compatibility.
+ */
 export default function InstallGameDialog({ gameId, platformId, onClose, onSuccess }: InstallGameDialogProps) {
+  const router = useRouter();
   const [installerPath, setInstallerPath] = useState('');
   const [installPath, setInstallPath] = useState('');
   const [installerArgs, setInstallerArgs] = useState('');
@@ -88,6 +94,12 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
   const [loadingGameData, setLoadingGameData] = useState(true);
   
   const isWinePlatform = platformId === 'windows-wine' || platformId.includes('wine');
+
+  useEffect(() => {
+    if (!isWinePlatform) return;
+    onClose();
+    router.push(`/games/${gameId}/install`);
+  }, [isWinePlatform, onClose, router, gameId]);
 
   // Extract Lutris script details for display
   const getLutrisWinetricks = (): string[] => {
@@ -316,6 +328,10 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
     if (!installPath) return hasLutrisInstallers ? 'Step 3: Select installation directory' : 'Step 2: Select installation directory';
     return hasLutrisInstallers ? 'Step 4: Confirm and start installation' : 'Step 3: Confirm and start installation';
   };
+
+  if (isWinePlatform) {
+    return null;
+  }
 
   return (
     <>

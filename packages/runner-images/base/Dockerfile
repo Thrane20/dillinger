@@ -300,9 +300,6 @@ RUN mkdir -p /opt/dillinger/scripts
 # Configuration and Volumes
 #######################################################
 
-# Volumes for persistent data
-VOLUME ["/game", "/saves", "/config", "/wineprefix", "/installers", "/run/user/gameuser"]
-
 # Working directory
 WORKDIR /home/gameuser
 

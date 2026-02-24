@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { JSONStorageService } from '@/lib/services/storage';
 import { DockerService } from '@/lib/services/docker-service';
 import type { Game, Platform } from '@dillinger/shared';
+import {
+  migrateGameToMultiPlatform,
+  getDefaultPlatformConfig,
+  getPlatformConfig,
+} from '@dillinger/shared';
 
 const storage = JSONStorageService.getInstance();
 const docker = DockerService.getInstance();
@@ -27,7 +32,7 @@ async function findGameAndFileKey(id: string): Promise<{ game: Game | null; file
 
 // POST /api/launch/[id]/registry-setup - Run registry setup scripts for Wine games
 export async function POST(
-  __request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -49,23 +54,31 @@ export async function POST(
       );
     }
 
-    // Check if game is installed
-    if (game.installation?.status !== 'installed') {
-      return NextResponse.json(
-        { error: 'Game must be installed first' },
-        { status: 400 }
-      );
-    }
+    const body = await request.json().catch(() => ({}));
+    const requestedPlatformId = typeof body?.platformId === 'string' ? body.platformId : undefined;
 
-    if (!game.platformId) {
+    const migratedGame = migrateGameToMultiPlatform(game);
+    const platformConfig = requestedPlatformId
+      ? getPlatformConfig(migratedGame, requestedPlatformId)
+      : getDefaultPlatformConfig(migratedGame);
+
+    if (!platformConfig) {
       return NextResponse.json(
         { error: 'Game has no platform configured' },
         { status: 400 }
       );
     }
 
+    // Check if selected platform is installed
+    if (platformConfig.installation?.status !== 'installed') {
+      return NextResponse.json(
+        { error: 'Game must be installed first' },
+        { status: 400 }
+      );
+    }
+
     // Get platform (checks user overrides, then bundled defaults)
-    const platform = await storage.readPlatform<Platform>(game.platformId);
+    const platform = await storage.readPlatform<Platform>(platformConfig.platformId);
     if (!platform) {
       return NextResponse.json(
         { error: 'Platform not found' },
@@ -73,8 +86,16 @@ export async function POST(
       );
     }
 
-    // Run registry setup
-    const result = await docker.runRegistrySetup({ game, platform });
+    const gameForAction: Game = {
+      ...game,
+      platformId: platformConfig.platformId,
+      filePath: platformConfig.filePath || game.filePath,
+      settings: platformConfig.settings,
+      installation: platformConfig.installation || game.installation,
+    };
+
+    // Run Wine regedit inside the installed prefix
+    const result = await docker.runRegistrySetup({ game: gameForAction, platform });
 
     if (result.success) {
       return NextResponse.json({

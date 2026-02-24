@@ -59,7 +59,16 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { installerPath, installPath, platformId, installerArgs, debugMode, wineVersionId, wineArch } = body;
+    const {
+      installerPath,
+      installPath,
+      platformId,
+      installerArgs,
+      debugMode,
+      wineVersionId,
+      wineArch,
+      selectedLutrisInstallerId,
+    } = body;
 
     if (!id || !installerPath || !installPath || !platformId) {
       return NextResponse.json(
@@ -121,10 +130,24 @@ export async function POST(
     let lutrisRegistrySettings: Array<{ path: string; name: string; type?: string; value: string }> = [];
     
     const platformConfig = game.platforms?.find((p: GamePlatformConfig) => p.platformId === platformId);
-    if (platformConfig?.lutrisInstaller?.script) {
-      console.log(`  🎯 Using Lutris installer: ${platformConfig.lutrisInstaller.version} (${platformConfig.lutrisInstaller.slug})`);
+    const requestedLutrisInstallerId =
+      typeof selectedLutrisInstallerId === 'number' && Number.isFinite(selectedLutrisInstallerId)
+        ? selectedLutrisInstallerId
+        : undefined;
+    const selectedLutrisInstaller =
+      requestedLutrisInstallerId !== undefined
+        ? platformConfig?.lutrisInstallers?.find((installer) => installer.id === requestedLutrisInstallerId)
+        : undefined;
+    const fallbackLutrisInstaller =
+      platformConfig?.selectedLutrisInstallerId !== undefined
+        ? platformConfig?.lutrisInstallers?.find((installer) => installer.id === platformConfig.selectedLutrisInstallerId)
+        : undefined;
+    const activeLutrisInstaller = selectedLutrisInstaller || fallbackLutrisInstaller || platformConfig?.lutrisInstaller;
+
+    if (activeLutrisInstaller?.script) {
+      console.log(`  🎯 Using Lutris installer: ${activeLutrisInstaller.version} (${activeLutrisInstaller.slug})`);
       
-      const script = platformConfig.lutrisInstaller.script;
+      const script = activeLutrisInstaller.script;
       
       // Use the comprehensive analyzer to extract all script settings
       const analysis = analyzeLutrisScript(script as any);
@@ -268,7 +291,8 @@ export async function POST(
       platformId,
       installMethod: 'automated' as const,
       wineVersionId: wineVersionId || 'system', // Store the Wine version used for installation
-      wineArch: wineArch || 'win64', // Store the Wine architecture used for installation
+      wineArch: effectiveWineArch || 'win64', // Store the Wine architecture used for installation
+      selectedLutrisInstallerId: requestedLutrisInstallerId,
     } as any);
 
     (updatedGame as any).updated = updatedAt;
@@ -294,7 +318,10 @@ export async function POST(
 
         // Try to get launch command from Lutris script's game.exe field
         const latestPlatformConfig = latest.platforms?.find((p: GamePlatformConfig) => p.platformId === platformId);
-        const lutrisScript = latestPlatformConfig?.lutrisInstaller?.script ||
+        const installSelectedLutrisInstallerId = (latest.installation as any)?.selectedLutrisInstallerId as number | undefined;
+        const lutrisScript =
+          latestPlatformConfig?.lutrisInstallers?.find((i) => i.id === installSelectedLutrisInstallerId)?.script ||
+          latestPlatformConfig?.lutrisInstaller?.script ||
           latestPlatformConfig?.lutrisInstallers?.find(i => i.id === latestPlatformConfig?.selectedLutrisInstallerId)?.script;
         const lutrisScriptExe = (lutrisScript?.game as Record<string, unknown> | undefined)?.exe as string | undefined;
 
@@ -416,7 +443,10 @@ export async function GET(
 
         // Try to get launch command from Lutris script's game.exe field
         const getPlatformConfig = game.platforms?.find((p: GamePlatformConfig) => p.platformId === installPlatformId);
-        const getLutrisScript = getPlatformConfig?.lutrisInstaller?.script ||
+        const installSelectedLutrisInstallerId = (installation as any)?.selectedLutrisInstallerId as number | undefined;
+        const getLutrisScript =
+          getPlatformConfig?.lutrisInstallers?.find((i) => i.id === installSelectedLutrisInstallerId)?.script ||
+          getPlatformConfig?.lutrisInstaller?.script ||
           getPlatformConfig?.lutrisInstallers?.find(i => i.id === getPlatformConfig?.selectedLutrisInstallerId)?.script;
         const lutrisScriptExe = (getLutrisScript?.game as Record<string, unknown> | undefined)?.exe as string | undefined;
 

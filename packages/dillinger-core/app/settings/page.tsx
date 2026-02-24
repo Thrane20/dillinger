@@ -176,15 +176,16 @@ export default function SettingsPage() {
   const [selectedAudioSink, setSelectedAudioSink] = useState('');
   
   // Docker settings
-  const [autoRemoveContainers, setAutoRemoveContainers] = useState(false);
+  const [autoRemoveContainers, setAutoRemoveContainers] = useState(true);
 
   // GPU settings
   const [gpuVendor, setGpuVendor] = useState<'auto' | 'amd' | 'nvidia'>('auto');
 
   // Download settings
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
-  const [installerCacheMode, setInstallerCacheMode] = useState<'with_game' | 'custom_volume'>('with_game');
+  const [installerCacheMode, setInstallerCacheMode] = useState<'with_game' | 'custom_volume'>('custom_volume');
   const [installerCacheVolumeId, setInstallerCacheVolumeId] = useState<string>('');
+  const [autoCheckCompatibilityDatabases, setAutoCheckCompatibilityDatabases] = useState(true);
   const [availableVolumes, setAvailableVolumes] = useState<Array<{ id: string; name: string; hostPath: string }>>([]);
   
   // Joystick settings
@@ -421,7 +422,7 @@ export default function SettingsPage() {
         throw new Error('Failed to load Docker settings');
       }
       const data = await response.json();
-      setAutoRemoveContainers(data.settings?.autoRemoveContainers || false);
+      setAutoRemoveContainers(data.settings?.autoRemoveContainers ?? true);
     } catch (error) {
       console.error('Failed to load Docker settings:', error);
     }
@@ -454,8 +455,9 @@ export default function SettingsPage() {
       }
       const data = await response.json();
       setMaxConcurrentDownloads(data.settings?.maxConcurrent || 2);
-      setInstallerCacheMode(data.settings?.installerCacheMode || 'with_game');
+      setInstallerCacheMode(data.settings?.installerCacheMode || 'custom_volume');
       setInstallerCacheVolumeId(data.settings?.installerCacheVolumeId || '');
+      setAutoCheckCompatibilityDatabases(data.settings?.autoCheckCompatibilityDatabases ?? true);
       
       // Load available volumes for the dropdown
       const volumesResponse = await fetch(`${API_BASE_URL}/api/volumes`);
@@ -1665,6 +1667,7 @@ export default function SettingsPage() {
           maxConcurrent: maxConcurrentDownloads,
           installerCacheMode,
           installerCacheVolumeId: installerCacheMode === 'custom_volume' ? installerCacheVolumeId : undefined,
+          autoCheckCompatibilityDatabases,
         }),
       });
 
@@ -3406,6 +3409,23 @@ export default function SettingsPage() {
 
               {/* Installer Cache Location */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <label className="flex items-start gap-3 mb-4 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={autoCheckCompatibilityDatabases}
+                    onChange={(e) => setAutoCheckCompatibilityDatabases(e.target.checked)}
+                    className="mt-1 h-4 w-4 text-blue-600"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      Auto-check compatibility databases
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Automatically query community databases (protonfixes, Lutris, ProtonDB) when installing a Wine game. Disable this if you prefer to check manually or have limited internet.
+                    </div>
+                  </div>
+                </label>
+
                 <label className="block text-sm font-medium mb-2">
                   Downloaded Installer Storage
                 </label>

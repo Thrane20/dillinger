@@ -17,8 +17,13 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages ./packages
 
 # Copy source code
+COPY scripts ./scripts
+COPY third_party/umu-protonfixes ./third_party/umu-protonfixes
 COPY packages/shared ./packages/shared
 COPY packages/dillinger-core ./packages/dillinger-core
+
+# Generate compatibility index from protonfixes data
+RUN pnpm run index:protonfixes
 
 # Build shared packages
 WORKDIR /app/packages/shared

@@ -28,6 +28,7 @@ echo ""
 
 XRANDR_MODE="${XRANDR_MODE:-}"
 XRANDR_OUTPUT="${XRANDR_OUTPUT:-}"
+XRANDR_RATE="${XRANDR_RATE:-}"
 
 ORIG_XRANDR_OUTPUT=""
 ORIG_XRANDR_MODE=""
@@ -56,8 +57,45 @@ detect_current_mode_for_output() {
     '
 }
 
+detect_current_rate_for_output() {
+    # Prints the currently active refresh rate token for the given output.
+    local out="$1"
+    xrandr --query 2>/dev/null | awk -v out="$out" '
+        $1 == out { found=1; next }
+        found && $1 ~ /^[0-9]+x[0-9]+$/ && $0 ~ /\*/ {
+            for (i = 2; i <= NF; i++) {
+                token = $i
+                gsub(/[+*]/, "", token)
+                if (token ~ /^[0-9]+(\.[0-9]+)?$/) { print token; exit }
+            }
+        }
+        found && NF==0 { exit }
+    '
+}
+
+detect_rate_for_mode() {
+    # Prints a refresh rate for the requested mode on the given output.
+    local out="$1"
+    local mode="$2"
+    xrandr --query 2>/dev/null | awk -v out="$out" -v mode="$mode" '
+        $1 == out { found=1; next }
+        found && $1 == mode {
+            for (i = 2; i <= NF; i++) {
+                token = $i
+                gsub(/[+*]/, "", token)
+                if (token ~ /^[0-9]+(\.[0-9]+)?$/) { print token; exit }
+            }
+        }
+        found && NF==0 { exit }
+    '
+}
+
 apply_xrandr_mode() {
     if [ -z "$XRANDR_MODE" ]; then
+        return 0
+    fi
+    if [ -n "$WAYLAND_DISPLAY" ]; then
+        echo -e "${YELLOW}⚠ XRANDR_MODE ignored under Wayland (WAYLAND_DISPLAY=${WAYLAND_DISPLAY})${NC}"
         return 0
     fi
     if ! command -v xrandr >/dev/null 2>&1; then
@@ -91,6 +129,8 @@ apply_xrandr_mode() {
 
     local current
     current="$(detect_current_mode_for_output "$out")"
+    local current_rate
+    current_rate="$(detect_current_rate_for_output "$out")"
 
     ORIG_XRANDR_OUTPUT="$out"
     ORIG_XRANDR_MODE="$current"
@@ -100,6 +140,9 @@ apply_xrandr_mode() {
         echo "  Current: $current"
     else
         echo "  Current: <unknown>"
+    fi
+    if [ -n "$current_rate" ]; then
+        echo "  Current refresh: ${current_rate}Hz"
     fi
     echo "  Target:  $XRANDR_MODE"
     
@@ -113,11 +156,37 @@ apply_xrandr_mode() {
     if xrandr_output=$(xrandr --output "$out" --mode "$XRANDR_MODE" 2>&1); then
         echo -e "${GREEN}✓ Display resolution set to $XRANDR_MODE${NC}"
     else
-        echo -e "${YELLOW}⚠ Failed to set resolution to $XRANDR_MODE${NC}"
+        echo -e "${YELLOW}⚠ Failed to set resolution to $XRANDR_MODE on first attempt${NC}"
         echo "  xrandr error: $xrandr_output"
-        # If we couldn't set it, don't attempt restore (we didn't change it).
-        ORIG_XRANDR_OUTPUT=""
-        ORIG_XRANDR_MODE=""
+
+        local retry_rate
+        retry_rate="$XRANDR_RATE"
+        if [ -z "$retry_rate" ]; then
+            retry_rate="$(detect_rate_for_mode "$out" "$XRANDR_MODE")"
+        fi
+        if [ -z "$retry_rate" ]; then
+            retry_rate="$current_rate"
+        fi
+
+        if [ -n "$retry_rate" ]; then
+            echo "  Retrying with explicit refresh rate: ${retry_rate}Hz"
+            if xrandr_output=$(xrandr --output "$out" --mode "$XRANDR_MODE" --rate "$retry_rate" 2>&1); then
+                echo -e "${GREEN}✓ Display resolution set to $XRANDR_MODE @ ${retry_rate}Hz${NC}"
+            else
+                echo -e "${YELLOW}⚠ Retry with explicit refresh also failed${NC}"
+                echo "  xrandr error: $xrandr_output"
+                echo "  Hint: this often occurs under Wayland/XWayland where display mode switching is restricted."
+                # If we couldn't set it, don't attempt restore (we didn't change it).
+                ORIG_XRANDR_OUTPUT=""
+                ORIG_XRANDR_MODE=""
+            fi
+        else
+            echo "  No refresh rate candidate found for retry."
+            echo "  Hint: this often occurs under Wayland/XWayland where display mode switching is restricted."
+            # If we couldn't set it, don't attempt restore (we didn't change it).
+            ORIG_XRANDR_OUTPUT=""
+            ORIG_XRANDR_MODE=""
+        fi
     fi
     echo ""
 }
@@ -163,6 +232,38 @@ trap restore_xrandr_mode EXIT
 UNAME="${UNAME:-gameuser}"
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
+export HOME="/home/${UNAME}"
+
+# Ensure cache home is writable for runtime GPU shader caches.
+# If /home/${UNAME} is not writable (e.g. odd bind-mount permissions),
+# fall back to /tmp to prevent Wine/Mesa permission failures.
+ensure_writable_cache_home() {
+    local preferred_cache="${HOME}/.cache"
+    local fallback_cache="/tmp/${UNAME}-cache"
+
+    mkdir -p "$preferred_cache" 2>/dev/null || true
+    if [ "$(id -u)" = "0" ]; then
+        chown -R "$PUID:$PGID" "$preferred_cache" 2>/dev/null || true
+    fi
+
+    if gosu "$UNAME" sh -lc "mkdir -p '$preferred_cache' && touch '$preferred_cache/.dillinger_write_test' && rm -f '$preferred_cache/.dillinger_write_test'" >/dev/null 2>&1; then
+        export XDG_CACHE_HOME="$preferred_cache"
+    else
+        echo -e "${YELLOW}⚠ Home cache directory not writable (${preferred_cache}); using fallback cache at ${fallback_cache}${NC}"
+        mkdir -p "$fallback_cache" 2>/dev/null || true
+        if [ "$(id -u)" = "0" ]; then
+            chown -R "$PUID:$PGID" "$fallback_cache" 2>/dev/null || true
+        fi
+        export XDG_CACHE_HOME="$fallback_cache"
+    fi
+}
+
+ensure_writable_cache_home
+export MESA_SHADER_CACHE_DIR="/tmp/${UNAME}-mesa-shader-cache"
+mkdir -p "$MESA_SHADER_CACHE_DIR" 2>/dev/null || true
+if [ "$(id -u)" = "0" ]; then
+    chown -R "$PUID:$PGID" "$MESA_SHADER_CACHE_DIR" 2>/dev/null || true
+fi
 
 # Export display and audio variables if they exist
 export DISPLAY="${DISPLAY:-:0}"
@@ -362,12 +463,12 @@ if [ "$USE_UMU" = "true" ] && command -v umu-run &> /dev/null; then
     # Set XDG_DATA_HOME to /data/storage so UMU uses /data/storage/umu directly
     # This path is accessible from both the host container and pressure-vessel
     export XDG_DATA_HOME="/data/storage"
-    export XDG_CACHE_HOME="/home/gameuser/.cache"
+    export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/home/gameuser/.cache}"
     export HOME="/home/gameuser"
-    
-    # Create cache directory
-    mkdir -p /home/gameuser/.cache
-    chown -R gameuser:gameuser /home/gameuser/.cache 2>/dev/null || true
+
+    # Ensure cache directory exists and is writable
+    mkdir -p "$XDG_CACHE_HOME" 2>/dev/null || true
+    chown -R gameuser:gameuser "$XDG_CACHE_HOME" 2>/dev/null || true
     
     # Check if Steam Runtime needs to be downloaded (first run)
     if [ ! -f "$UMU_DATA_DIR/steamrt3/toolmanifest.vdf" ]; then
@@ -1287,6 +1388,84 @@ echo ""
 
 # Apply xrandr mode *after* display has been set up and *before* launching anything.
 apply_xrandr_mode
+
+echo ""
+echo -e "${BLUE}Joystick Routing:${NC}"
+
+# For SDL-based Windows titles, limit joystick enumeration to the configured
+# device when possible. This helps when multiple controllers are present and
+# a game binds to the wrong one.
+if [ -n "${JOYSTICK_DEVICE_ID:-}" ]; then
+    JOY_ID="$JOYSTICK_DEVICE_ID"
+    if [[ "$JOY_ID" != /dev/input/* ]]; then
+        JOY_ID="/dev/input/$JOY_ID"
+    fi
+
+    if [ -c "$JOY_ID" ]; then
+        export SDL_JOYSTICK_DEVICE="$JOY_ID"
+        export SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT="$JOY_ID"
+        echo "  Using configured joystick: $JOY_ID"
+    else
+        echo -e "  ${YELLOW}Configured joystick device not found: $JOY_ID${NC}"
+    fi
+fi
+
+# Fallback: if no explicit device is configured, expose all joystick event
+# devices to SDL in a deterministic list.
+if [ -z "${SDL_JOYSTICK_DEVICE:-}" ]; then
+    INPUT_DEVICES_FILE="/tmp/host-input-devices"
+    [ -f "$INPUT_DEVICES_FILE" ] || INPUT_DEVICES_FILE="/proc/bus/input/devices"
+    SDL_JOY_DEVS=""
+
+    if [ -f "$INPUT_DEVICES_FILE" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^H:\ Handlers= ]] && [[ "$line" =~ js[0-9]+ ]]; then
+                EVENT_DEV=""
+                if [[ "$line" =~ (event[0-9]+) ]]; then
+                    EVENT_DEV="${BASH_REMATCH[1]}"
+                fi
+                if [ -n "$EVENT_DEV" ] && [ -c "/dev/input/$EVENT_DEV" ]; then
+                    [ -n "$SDL_JOY_DEVS" ] && SDL_JOY_DEVS="$SDL_JOY_DEVS,"
+                    SDL_JOY_DEVS="$SDL_JOY_DEVS/dev/input/$EVENT_DEV"
+                fi
+            fi
+        done < "$INPUT_DEVICES_FILE"
+    fi
+
+    if [ -n "$SDL_JOY_DEVS" ]; then
+        export SDL_JOYSTICK_DEVICE="$SDL_JOY_DEVS"
+        echo "  Auto-discovered SDL joystick devices: $SDL_JOYSTICK_DEVICE"
+    fi
+fi
+
+echo ""
+echo -e "${BLUE}Input Device Diagnostics:${NC}"
+if [ -d "/dev/input" ]; then
+    JS_COUNT=$(find /dev/input -maxdepth 1 -type c -name 'js*' 2>/dev/null | wc -l || true)
+    EVENT_COUNT=$(find /dev/input -maxdepth 1 -type c -name 'event*' 2>/dev/null | wc -l || true)
+    HIDRAW_COUNT=$(find /dev -maxdepth 1 -type c -name 'hidraw*' 2>/dev/null | wc -l || true)
+    echo "  /dev/input present: yes"
+    echo "  joystick nodes (js*): ${JS_COUNT}"
+    echo "  event nodes (event*): ${EVENT_COUNT}"
+    echo "  hidraw nodes: ${HIDRAW_COUNT}"
+else
+    echo "  /dev/input present: no"
+fi
+
+# If the configured executable path is stale, try to auto-discover by basename
+# within drive_c. This helps when launch command path casing/folder differs from
+# what the installer produced.
+if [ -n "$GAME_EXECUTABLE" ] && [ ! -f "$GAME_EXECUTABLE" ] && [ -d "$WINEPREFIX/drive_c" ]; then
+    GAME_EXEC_BASENAME="$(basename "$GAME_EXECUTABLE")"
+    if [ -n "$GAME_EXEC_BASENAME" ]; then
+        FOUND_EXECUTABLE="$(find "$WINEPREFIX/drive_c" -type f -iname "$GAME_EXEC_BASENAME" -print -quit 2>/dev/null || true)"
+        if [ -n "$FOUND_EXECUTABLE" ] && [ -f "$FOUND_EXECUTABLE" ]; then
+            echo -e "${YELLOW}⚠ GAME_EXECUTABLE not found at configured path${NC}"
+            echo -e "${GREEN}✓ Auto-discovered executable: ${FOUND_EXECUTABLE}${NC}"
+            export GAME_EXECUTABLE="$FOUND_EXECUTABLE"
+        fi
+    fi
+fi
 
 # Execute command as game user if provided
 if [ "$#" -gt 0 ]; then

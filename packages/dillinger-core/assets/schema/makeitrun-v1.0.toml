@@ -1,0 +1,78 @@
+schemaVersion = "1.0"
+slug = "example-game"
+title = "Example Game"
+createdAt = "2025-01-01T00:00:00.000Z"
+updatedAt = "2025-01-01T00:00:00.000Z"
+notes = "Generated MakeItRun configuration"
+
+[sources]
+importSource = "manual"
+
+[install]
+method = "standard"
+installerPath = "/cache/example-setup.exe"
+installPath = "/installed/example-game"
+wineVersionId = "system"
+wineArch = "win64"
+umuGameId = "umu-example-game"
+
+[protonfixes]
+enabled = true
+hasComplexLogic = false
+notes = "Converted from compatibility data"
+scriptPath = "gamefixes-gog/umu-example-game.py"
+flags = ["disable_esync"]
+
+[[protonfixes.commandReplacements]]
+from = "GameLauncher.exe"
+to = "Game.exe"
+
+winetricks = ["vcrun2019", "dxvk"]
+
+[dllOverrides]
+quartz = "disabled"
+wmvcore = "disabled"
+d3d9 = "native,builtin"
+
+[[registry]]
+path = "HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\Game.exe"
+name = "VideoMemorySize"
+type = "REG_SZ"
+value = "4096"
+
+[environment]
+DXVK_ASYNC = "1"
+PROTON_USE_WINED3D = "0"
+
+[rendering]
+useDxvk = true
+useVkd3dProton = false
+renderer = "vulkan"
+compatibilityMode = "none"
+
+[rendering.dxvkOptions]
+dxgi.customVendorId = "10de"
+
+[performance.gamescope]
+enabled = false
+width = 1920
+height = 1080
+refreshRate = 60
+upscaler = "auto"
+fullscreen = true
+limitFps = 60
+inputWidth = 1280
+inputHeight = 720
+
+[performance.mangohud]
+enabled = false
+
+[launch]
+command = "Game.exe"
+arguments = ["-windowed"]
+workingDirectory = "C:/GOG Games/Example Game"
+
+[launch.environment]
+MESA_VK_WSI_PRESENT_MODE = "fifo"
+
+flags = ["safe-mode"]

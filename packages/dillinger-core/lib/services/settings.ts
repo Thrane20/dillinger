@@ -14,7 +14,7 @@ export interface AudioSettings {
 }
 
 export interface DockerSettings {
-  autoRemoveContainers?: boolean; // Whether to automatically remove containers after they stop (default: false)
+  autoRemoveContainers?: boolean; // Whether to automatically remove containers after they stop (default: true)
 }
 
 export type GpuVendor = 'auto' | 'amd' | 'nvidia';
@@ -34,6 +34,8 @@ export interface DownloadSettings {
   installerCacheMode?: 'with_game' | 'custom_volume';
   /** Volume ID if installerCacheMode is 'custom_volume' */
   installerCacheVolumeId?: string;
+  /** Automatically query compatibility databases in install wizard Step 1 */
+  autoCheckCompatibilityDatabases?: boolean;
 }
 
 export interface JoystickConfig {
@@ -127,7 +129,7 @@ export class SettingsService {
 
   async getDockerSettings(): Promise<DockerSettings> {
     await this.ensureInitialized();
-    return this.settings.docker || { autoRemoveContainers: false };
+    return this.settings.docker || { autoRemoveContainers: true };
   }
 
   async updateDockerSettings(settings: Partial<DockerSettings>): Promise<void> {
@@ -169,8 +171,11 @@ export class SettingsService {
 
   async getDownloadSettings(): Promise<DownloadSettings> {
     await this.ensureInitialized();
-    return this.settings.downloads || { 
+    return {
       maxConcurrent: 2,
+      installerCacheMode: 'custom_volume',
+      autoCheckCompatibilityDatabases: true,
+      ...this.settings.downloads,
     };
   }
 
