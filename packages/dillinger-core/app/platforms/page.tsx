@@ -12,6 +12,7 @@ import {
   StarIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
+import type { RetroarchMameAspect } from '@dillinger/shared';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -126,10 +127,15 @@ interface ArcadeSettings {
 }
 
 interface RetroarchMameSettings {
-  aspect: '4:3' | 'auto';
+  aspect: RetroarchMameAspect;
   integerScale: boolean;
   borderlessFullscreen: boolean;
 }
+
+const RETROARCH_MAME_ASPECT_OPTIONS: RetroarchMameAspect[] = ['auto', '4:3', '3:4', '2:3', '5:8', '1:1', '16:15', '8:7', '16:9'];
+
+const isRetroarchMameAspect = (value: unknown): value is RetroarchMameAspect =>
+  typeof value === 'string' && RETROARCH_MAME_ASPECT_OPTIONS.includes(value as RetroarchMameAspect);
 
 interface C64Settings {
   trueDriveEmulation: boolean;
@@ -218,7 +224,7 @@ export default function PlatformsPage() {
       const data = await response.json();
       const mame = data.settings?.mame || {};
       setRetroarchMameSettings({
-        aspect: mame.aspect === '4:3' ? '4:3' : 'auto',
+        aspect: isRetroarchMameAspect(mame.aspect) ? mame.aspect : 'auto',
         integerScale: mame.integerScale !== false,
         borderlessFullscreen: mame.borderlessFullscreen !== false,
       });
@@ -1470,12 +1476,19 @@ export default function PlatformsPage() {
                   onChange={(e) =>
                     setRetroarchMameSettings((prev) => ({
                       ...prev,
-                      aspect: e.target.value === '4:3' ? '4:3' : 'auto',
+                      aspect: isRetroarchMameAspect(e.target.value) ? e.target.value : 'auto',
                     }))
                   }
                 >
-                  <option value="4:3">4:3 (Arcade)</option>
                   <option value="auto">Auto (Core Default)</option>
+                  <option value="4:3">4:3 (Arcade)</option>
+                  <option value="3:4">3:4 (Vertical)</option>
+                  <option value="2:3">2:3 (Taller Vertical)</option>
+                  <option value="5:8">5:8 (Extra Tall Vertical)</option>
+                  <option value="1:1">1:1 (Square)</option>
+                  <option value="16:15">16:15</option>
+                  <option value="8:7">8:7</option>
+                  <option value="16:9">16:9 (Wide)</option>
                 </select>
               </div>
 

@@ -1356,7 +1356,7 @@ export class DockerService {
             const retroarchSettings = await settingsService.getRetroarchSettings();
             const globalMame = retroarchSettings.mame || {};
             const gameMame = (game.settings?.emulator?.settings as {
-              mame?: { aspect?: '4:3' | 'auto'; integerScale?: boolean; borderlessFullscreen?: boolean };
+              mame?: { aspect?: 'auto' | '4:3' | '3:4' | '2:3' | '5:8' | '1:1' | '16:15' | '8:7' | '16:9'; integerScale?: boolean; borderlessFullscreen?: boolean };
             } | undefined)?.mame || {};
 
             const aspect = gameMame.aspect ?? globalMame.aspect;

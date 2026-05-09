@@ -172,6 +172,13 @@ export default function InstallConfigurationSection<TFormData extends {
                 >
                   <option value="default">Use Global</option>
                   <option value="4:3">4:3</option>
+                  <option value="3:4">3:4 (Vertical)</option>
+                  <option value="2:3">2:3 (Taller Vertical)</option>
+                  <option value="5:8">5:8 (Extra Tall Vertical)</option>
+                  <option value="1:1">1:1 (Square)</option>
+                  <option value="16:15">16:15</option>
+                  <option value="8:7">8:7</option>
+                  <option value="16:9">16:9</option>
                   <option value="auto">Auto</option>
                 </select>
               </div>

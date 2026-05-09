@@ -245,8 +245,47 @@ if [ "$RETROARCH_CORE" = "mame" ] || [ "$RETROARCH_CORE" = "mame2003" ] || [ "$R
         echo "  Aspect ratio: auto"
     else
         set_config "video_aspect_ratio_auto" "false" "$RETROARCH_CONFIG_FILE"
-        set_config "aspect_ratio_index" "1" "$RETROARCH_CONFIG_FILE"
-        echo "  Aspect ratio: 4:3"
+        # Force RetroArch to use custom aspect ratio value (index 23), otherwise
+        # existing index values (e.g., 4:3) may override video_aspect_ratio.
+        set_config "aspect_ratio_index" "23" "$RETROARCH_CONFIG_FILE"
+        case "$MAME_ASPECT" in
+            "4:3")
+                set_config "video_aspect_ratio" "1.3333333333" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 4:3"
+                ;;
+            "3:4")
+                set_config "video_aspect_ratio" "0.75" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 3:4 (vertical)"
+                ;;
+            "2:3")
+                set_config "video_aspect_ratio" "0.6666666667" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 2:3 (taller vertical)"
+                ;;
+            "5:8")
+                set_config "video_aspect_ratio" "0.625" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 5:8 (extra tall vertical)"
+                ;;
+            "1:1")
+                set_config "video_aspect_ratio" "1.0" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 1:1"
+                ;;
+            "16:15")
+                set_config "video_aspect_ratio" "1.0666666667" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 16:15"
+                ;;
+            "8:7")
+                set_config "video_aspect_ratio" "1.1428571429" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 8:7"
+                ;;
+            "16:9")
+                set_config "video_aspect_ratio" "1.7777777778" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: 16:9"
+                ;;
+            *)
+                set_config "video_aspect_ratio_auto" "true" "$RETROARCH_CONFIG_FILE"
+                echo "  Aspect ratio: auto (fallback from unsupported '$MAME_ASPECT')"
+                ;;
+        esac
     fi
     set_config "video_fullscreen" "true" "$RETROARCH_CONFIG_FILE"
     MAME_BORDERLESS="${RETROARCH_MAME_BORDERLESS:-true}"

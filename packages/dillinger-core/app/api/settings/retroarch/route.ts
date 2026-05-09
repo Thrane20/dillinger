@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SettingsService } from '@/lib/services/settings';
+import type { RetroarchMameAspect } from '@dillinger/shared';
 
 const settingsService = SettingsService.getInstance();
 
@@ -25,7 +26,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { mame } = body as { mame?: { aspect?: '4:3' | 'auto'; integerScale?: boolean; borderlessFullscreen?: boolean } };
+    const { mame } = body as { mame?: { aspect?: RetroarchMameAspect; integerScale?: boolean; borderlessFullscreen?: boolean } };
 
     await settingsService.updateRetroarchSettings({ mame });
 

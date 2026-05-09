@@ -58,35 +58,6 @@ print_info() {
     echo -e "${BLUE}→ $1${NC}"
 }
 
-# Ensure local Docker clients can access the host X server for GUI passthrough.
-# This is often required after reboot/login because xhost permissions reset.
-ensure_x11_access() {
-    if [ -z "$DISPLAY" ]; then
-        return 0
-    fi
-
-    if ! command -v xhost &> /dev/null; then
-        print_warning "xhost not found; cannot auto-configure X11 access"
-        return 0
-    fi
-
-    # Prefer a narrower rule first (allow local root, used by Docker daemon path).
-    if xhost +SI:localuser:root > /dev/null 2>&1; then
-        print_success "X11 access granted for local Docker clients (SI:localuser:root)"
-        return 0
-    fi
-
-    # Fallback for setups where SI rules are unsupported.
-    if xhost +local:docker > /dev/null 2>&1; then
-        print_success "X11 access granted for local Docker clients (local:docker)"
-        return 0
-    fi
-
-    print_warning "Could not auto-configure X11 access via xhost"
-    print_warning "You may need to run manually: xhost +local:docker"
-    return 0
-}
-
 # Check if Docker is installed
 check_docker() {
     print_info "Checking Docker installation..."
@@ -776,7 +747,6 @@ start_container() {
     # X11 Display passthrough for GUI games
     if [ -n "$DISPLAY" ]; then
         print_info "Configuring X11 display passthrough..."
-        ensure_x11_access
         DOCKER_ARGS="$DOCKER_ARGS -e DISPLAY=$DISPLAY"
         DOCKER_ARGS="$DOCKER_ARGS -v /tmp/.X11-unix:/tmp/.X11-unix:rw"
         
