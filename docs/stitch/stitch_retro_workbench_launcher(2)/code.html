@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NEO_WORKBENCH v1.0 - System Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .scanline-effect {
+            background: linear-gradient(
+                to bottom,
+                rgba(18, 16, 16, 0) 50%,
+                rgba(0, 0, 0, 0.15) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+        }
+        .window-glow {
+            box-shadow: 0 0 10px rgba(147, 204, 255, 0.3);
+        }
+        .active-window-border {
+            border: 2px solid #93ccff;
+            box-shadow: 0 0 10px rgba(147, 204, 255, 0.4);
+        }
+        .retro-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .retro-scrollbar::-webkit-scrollbar-track {
+            background: #0e0e0e;
+        }
+        .retro-scrollbar::-webkit-scrollbar-thumb {
+            background: #3e4851;
+            border: 1px solid #88929d;
+        }
+        .block-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 14px;
+            background-color: #00e55b;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#131313",
+                        "secondary-container": "#ff8a0d",
+                        "on-surface-variant": "#bec7d3",
+                        "tertiary": "#00e55b",
+                        "background": "#131313",
+                        "on-primary-fixed": "#001d31",
+                        "on-secondary-fixed-variant": "#6f3800",
+                        "on-background": "#e5e2e1",
+                        "on-primary": "#003351",
+                        "error-container": "#93000a",
+                        "inverse-surface": "#e5e2e1",
+                        "on-primary-fixed-variant": "#004b73",
+                        "tertiary-container": "#00bb48",
+                        "on-error": "#690005",
+                        "outline-variant": "#3e4851",
+                        "secondary-fixed-dim": "#ffb781",
+                        "on-surface": "#e5e2e1",
+                        "primary": "#93ccff",
+                        "inverse-primary": "#006398",
+                        "on-tertiary-fixed-variant": "#00531b",
+                        "on-secondary": "#4e2600",
+                        "tertiary-fixed-dim": "#00e55b",
+                        "surface": "#131313",
+                        "on-error-container": "#ffdad6",
+                        "primary-fixed-dim": "#93ccff",
+                        "surface-bright": "#393939",
+                        "secondary-fixed": "#ffdcc4",
+                        "surface-tint": "#93ccff",
+                        "outline": "#88929d",
+                        "surface-container-highest": "#353534",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-fixed": "#cce5ff",
+                        "tertiary-fixed": "#6bff83",
+                        "on-tertiary-container": "#004214",
+                        "on-secondary-container": "#623000",
+                        "on-tertiary": "#003911",
+                        "surface-container-low": "#1c1b1b",
+                        "surface-container-high": "#2a2a2a",
+                        "surface-container": "#201f1f",
+                        "error": "#ffb4ab",
+                        "secondary": "#ffb781",
+                        "on-primary-container": "#003c5d",
+                        "on-secondary-fixed": "#2f1400",
+                        "primary-container": "#00aaff",
+                        "inverse-on-surface": "#313030",
+                        "on-tertiary-fixed": "#002107",
+                        "surface-variant": "#353534"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "window-header-height": "32px",
+                        "container-padding": "12px",
+                        "unit": "4px",
+                        "border-width": "2px",
+                        "margin": "24px"
+                    },
+                    "fontFamily": {
+                        "headline-xl": ["Anybody"],
+                        "body-md": ["JetBrains Mono"],
+                        "body-lg": ["JetBrains Mono"],
+                        "label-md": ["JetBrains Mono"],
+                        "headline-lg-mobile": ["Anybody"],
+                        "headline-lg": ["Anybody"],
+                        "headline-md": ["Anybody"]
+                    },
+                    "fontSize": {
+                        "headline-xl": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                        "body-md": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "label-md": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["28px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                        "headline-lg": ["32px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                        "headline-md": ["24px", {"lineHeight": "1.2", "fontWeight": "700"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md overflow-hidden selection:bg-tertiary selection:text-black">
+<div class="scanline-effect"></div>
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full h-[48px] bg-surface-container-high dark:bg-surface-container-high flex justify-between items-center px-gutter border-b-2 border-outline-variant shadow-[0_0_10px_rgba(147,204,255,0.3)] z-50">
+<div class="flex items-center gap-6">
+<span class="font-headline-md text-headline-md font-bold text-primary italic">NEO_WORKBENCH v1.0</span>
+<div class="hidden md:flex gap-4">
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 px-2 py-1" href="#">Home</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 px-2 py-1" href="#">Library</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-primary border-b-2 border-primary pb-1 px-2 py-1" href="#">Settings</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 px-2 py-1" href="#">About</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="hidden sm:block">
+<div class="bg-surface-container-lowest border-b-2 border-outline-variant px-3 py-1 flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary text-[18px]">search</span>
+<input class="bg-transparent border-none text-label-md font-label-md focus:ring-0 text-on-surface w-32 placeholder:text-outline-variant" placeholder="RUN COMMAND..." type="text"/>
+</div>
+</div>
+<button class="material-symbols-outlined text-primary hover:bg-primary hover:text-on-primary p-1 active:translate-y-0.5" data-icon="terminal">terminal</button>
+<button class="material-symbols-outlined text-primary hover:bg-primary hover:text-on-primary p-1 active:translate-y-0.5" data-icon="power_settings_new">power_settings_new</button>
+</div>
+</nav>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-[48px] w-[200px] h-[calc(100vh-48px)] bg-surface-dim dark:bg-surface-dim border-r-2 border-outline-variant flex flex-col py-4 z-40">
+<div class="px-4 mb-6">
+<div class="flex items-center gap-3 mb-2">
+<div class="w-8 h-8 border-2 border-secondary overflow-hidden bg-surface-container">
+<img alt="Avatar" class="w-full h-full object-cover" data-alt="A pixel-art avatar of a 1980s computer operator wearing a headset and reflective aviator glasses. The portrait is composed of limited colors including electric blue, neon green, and deep charcoal. The style is strictly 8-bit aesthetic with sharp edges and visible pixels, set against a dark, tech-themed background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBKXYOB2lm7c2sd1mBoEpgVz6VLAAfYRBNE0lDptZjOYrkUGu6BIAWJRcTc-35S8dRtR7Fzf6OfTQP9MAYAJZeRlRXvzdX7rquBdMdgVKtfY8W9s2tKdD9xRoVOcPiVsyWI_o71OtQCWFqfGg6WGHEKfhDKJv0q6Plr695EoNNc3DztZyqIoDyOiYJvG262e7Ylp_e2DocSBsj831qdq6OcvpKaXCu49W5swicgsW6pNFAbPNkWYdoHv_3MRvoup_WQVcPWEwFVYmc"/>
+</div>
+<div>
+<h3 class="font-label-md text-label-md text-secondary leading-none">PLATFORMS</h3>
+<p class="text-[10px] text-outline opacity-70">/dev/sda1</p>
+</div>
+</div>
+<button class="w-full border-2 border-primary text-primary font-label-md py-1 mt-2 hover:bg-primary hover:text-on-primary transition-all active:translate-y-0.5">LAUNCH DISK</button>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" data-icon="computer">computer</span>
+<span class="font-body-md text-body-md">Amiga</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" data-icon="keyboard">keyboard</span>
+<span class="font-body-md text-body-md">Commodore 64</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" data-icon="terminal">terminal</span>
+<span class="font-body-md text-body-md">DOS</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" data-icon="videogame_asset">videogame_asset</span>
+<span class="font-body-md text-body-md">NES</span>
+</a>
+</nav>
+<div class="mt-auto border-t-2 border-outline-variant pt-4 space-y-1">
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" data-icon="memory">memory</span>
+<span class="font-body-md text-body-md">SysInfo</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" data-icon="lan">lan</span>
+<span class="font-body-md text-body-md">Network</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="ml-[200px] mt-[48px] h-[calc(100vh-48px)] p-6 bg-surface-dim relative overflow-y-auto retro-scrollbar">
+<!-- System Settings Window -->
+<div class="max-w-4xl mx-auto space-y-6 pb-20">
+<section class="border-2 border-primary active-window-border bg-surface-container-low overflow-hidden">
+<!-- Window Header -->
+<div class="h-window-header-height bg-primary flex justify-between items-center px-3">
+<span class="font-label-md text-on-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]" data-icon="settings">settings</span>
+                        SYSTEM PREFERENCES v2.4
+                    </span>
+<div class="flex items-center gap-2">
+<button class="w-4 h-4 border-2 border-on-primary bg-transparent flex items-center justify-center">
+<div class="w-2 h-[2px] bg-on-primary"></div>
+</button>
+<button class="w-4 h-4 border-2 border-on-primary bg-transparent flex items-center justify-center font-bold text-[10px] leading-none text-on-primary">X</button>
+</div>
+</div>
+<!-- Window Tabs -->
+<div class="flex border-b-2 border-outline-variant bg-surface-container-high">
+<button class="px-6 py-2 bg-surface-container-low text-primary font-bold border-r-2 border-outline-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="grid_view">grid_view</span>
+                        Graphics
+                    </button>
+<button class="px-6 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-colors border-r-2 border-outline-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="volume_up">volume_up</span>
+                        Audio
+                    </button>
+<button class="px-6 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-colors border-r-2 border-outline-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="videogame_asset">videogame_asset</span>
+                        Input
+                    </button>
+<button class="px-6 py-2 text-on-surface-variant hover:bg-surface-container-highest transition-colors border-r-2 border-outline-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="chip">Chair</span>
+                        Emulation
+                    </button>
+</div>
+<!-- Window Content -->
+<div class="p-container-padding grid grid-cols-1 md:grid-cols-2 gap-8">
+<!-- Hardware Switches (Column 1) -->
+<div class="space-y-6">
+<div>
+<label class="font-label-md text-secondary block mb-4">VIDEO MODE SELECTION</label>
+<div class="space-y-3">
+<label class="flex items-center justify-between group cursor-pointer">
+<span class="text-on-surface group-hover:text-primary transition-colors">AGA Enhanced Graphics</span>
+<div class="w-12 h-6 bg-surface-container-highest border-2 border-outline-variant relative transition-all">
+<div class="absolute top-[2px] left-[2px] w-4 h-4 bg-tertiary shadow-[0_0_5px_rgba(0,229,91,0.5)]"></div>
+<input checked="" class="hidden" type="checkbox"/>
+</div>
+</label>
+<label class="flex items-center justify-between group cursor-pointer">
+<span class="text-on-surface-variant group-hover:text-primary transition-colors">Interlaced High-Res</span>
+<div class="w-12 h-6 bg-surface-container-highest border-2 border-outline-variant relative transition-all">
+<div class="absolute top-[2px] right-[2px] w-4 h-4 bg-outline-variant"></div>
+<input class="hidden" type="checkbox"/>
+</div>
+</label>
+<label class="flex items-center justify-between group cursor-pointer">
+<span class="text-on-surface group-hover:text-primary transition-colors">Phosphor Trail Emulation</span>
+<div class="w-12 h-6 bg-surface-container-highest border-2 border-outline-variant relative transition-all">
+<div class="absolute top-[2px] left-[2px] w-4 h-4 bg-tertiary shadow-[0_0_5px_rgba(0,229,91,0.5)]"></div>
+<input checked="" class="hidden" type="checkbox"/>
+</div>
+</label>
+</div>
+</div>
+<div>
+<label class="font-label-md text-secondary block mb-4">COLOR DEPTH SLIDER</label>
+<div class="flex items-center gap-4">
+<span class="text-[10px] font-bold text-outline">8-BIT</span>
+<div class="flex-1 h-8 bg-surface-container-lowest border-2 border-outline-variant flex items-center px-2 relative">
+<div class="h-2 bg-primary w-3/4"></div>
+<div class="absolute left-3/4 -ml-2 w-4 h-6 border-2 border-primary bg-background shadow-[0_0_8px_rgba(147,204,255,0.4)]"></div>
+</div>
+<span class="text-[10px] font-bold text-primary">32-BIT</span>
+</div>
+</div>
+</div>
+<!-- Hardware Toggles (Column 2) -->
+<div class="space-y-6">
+<div>
+<label class="font-label-md text-secondary block mb-4">DISPLAY RESOLUTION</label>
+<select class="w-full bg-surface-container-highest border-2 border-outline-variant text-on-surface font-body-md py-2 px-3 focus:border-tertiary outline-none appearance-none">
+<option>320 x 256 (Original Pal)</option>
+<option>640 x 480 (VGA High)</option>
+<option selected="">1280 x 720 (HD-Retro)</option>
+<option>1920 x 1080 (Modern Warp)</option>
+</select>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container-lowest border-2 border-outline-variant p-3">
+<span class="text-[10px] block text-outline uppercase mb-2">Scanline Density</span>
+<div class="flex gap-1">
+<div class="h-4 flex-1 bg-tertiary"></div>
+<div class="h-4 flex-1 bg-tertiary"></div>
+<div class="h-4 flex-1 bg-tertiary"></div>
+<div class="h-4 flex-1 bg-outline-variant"></div>
+<div class="h-4 flex-1 bg-outline-variant"></div>
+</div>
+</div>
+<div class="bg-surface-container-lowest border-2 border-outline-variant p-3">
+<span class="text-[10px] block text-outline uppercase mb-2">Brightness Peak</span>
+<div class="flex gap-1">
+<div class="h-4 flex-1 bg-secondary"></div>
+<div class="h-4 flex-1 bg-secondary"></div>
+<div class="h-4 flex-1 bg-secondary"></div>
+<div class="h-4 flex-1 bg-secondary"></div>
+<div class="h-4 flex-1 bg-secondary"></div>
+</div>
+</div>
+</div>
+<div class="pt-4 flex gap-4">
+<button class="flex-1 border-2 border-tertiary text-tertiary font-label-md py-2 hover:bg-tertiary hover:text-black transition-all">SAVE CONFIG</button>
+<button class="flex-1 border-2 border-outline text-on-surface-variant font-label-md py-2 hover:border-error hover:text-error transition-all">RESET DEFAULTS</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Expansion Ports & Cards (Bento Grid Style) -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="md:col-span-2 border-2 border-outline-variant bg-surface-container p-4">
+<h4 class="font-label-md text-primary mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined" data-icon="memory">memory</span>
+                        VIRTUAL EXPANSION SLOTS
+                    </h4>
+<div class="space-y-4">
+<div class="flex items-center justify-between border-b-2 border-outline-variant/30 pb-3">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container-highest border-2 border-tertiary flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary" data-icon="sd_card">sd_card</span>
+</div>
+<div>
+<p class="text-on-surface font-bold">Fast RAM Module v2</p>
+<p class="text-[10px] text-outline">SLOT 0: 8MB EXPANSION DETECTED</p>
+</div>
+</div>
+<span class="text-tertiary text-[10px] font-bold">ACTIVE</span>
+</div>
+<div class="flex items-center justify-between border-b-2 border-outline-variant/30 pb-3">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container-highest border-2 border-outline-variant flex items-center justify-center">
+<span class="material-symbols-outlined text-outline" data-icon="add">add</span>
+</div>
+<div>
+<p class="text-on-surface-variant">Empty Expansion Slot</p>
+<p class="text-[10px] text-outline">SLOT 1: NO HARDWARE DETECTED</p>
+</div>
+</div>
+<button class="text-primary text-[10px] font-bold hover:underline">MOUNT IMAGE</button>
+</div>
+</div>
+</div>
+<div class="border-2 border-outline-variant bg-surface-container p-4 flex flex-col items-center justify-center text-center">
+<div class="w-20 h-20 mb-4 border-2 border-secondary bg-surface-container-highest relative overflow-hidden">
+<img alt="CPU" class="w-full h-full opacity-50" data-alt="A stylized, glowing microchip processor rendered in a retro-futuristic blueprint style. The chip is outlined in vibrant electric blue and orange neon lines on a deep black background. Digital data streams in the form of binary code float around the central processor unit, creating an atmosphere of advanced vintage computing power." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBFeFCrr3h3UTqOMQMnbKDUST-y8QrBqGgcCy-lS5azCDKyqeOWoXRziuNnznpGA_Q2w5bI3NIuczWNdqW2-0kksnEevXFbpWt6a3xEETAISBlg0Mb1msd2Sl_mRjHoTYFi3cZ4-RWrmhLtJxL1a1SyFRwe7q-O8MDrmnriJqr3axMG79iHl5VW460QUXvGdBfwRMgcGJVv7QnmgOFLSyHamlzWULS14dKe6uidFZoUk1wGQtXdB7djao7foFNdmRq6DH7UwjUJ6nY"/>
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-4xl" data-icon="bolt">bolt</span>
+</div>
+</div>
+<p class="font-label-md text-secondary mb-1">CPU TURBO MODE</p>
+<p class="text-[10px] text-outline mb-4">Boost clock to 14.2MHz</p>
+<button class="w-full py-2 border-2 border-secondary text-secondary hover:bg-secondary hover:text-black transition-all">ENGAGE</button>
+</div>
+</div>
+<!-- Terminal Log Window -->
+<section class="border-2 border-outline-variant bg-surface-container-lowest">
+<div class="h-8 bg-outline-variant flex justify-between items-center px-3">
+<span class="text-[10px] font-bold text-on-surface tracking-tighter uppercase">system.log - console_output</span>
+<span class="text-[10px] text-on-surface opacity-50">TTY01</span>
+</div>
+<div class="p-3 font-body-md text-[12px] text-tertiary h-40 overflow-y-auto retro-scrollbar space-y-1 bg-[#080808]">
+<p><span class="opacity-50">[0.000000]</span> Initializing NeoWorkbench Kernel v1.0.4-release...</p>
+<p><span class="opacity-50">[0.001042]</span> Probing hardware on expansion bus...</p>
+<p><span class="opacity-50">[0.002155]</span> Found 8MB Fast RAM at 0x00200000</p>
+<p><span class="opacity-50">[0.003981]</span> AGA Chipset detected: Revision 4A</p>
+<p><span class="opacity-50">[0.045012]</span> Mounting local drive /dev/sda1 (Workbench)...</p>
+<p><span class="opacity-50">[0.125663]</span> Loading intuition.library version 40.42</p>
+<p><span class="opacity-50">[0.126001]</span> System preferences loaded from S:System-Configuration</p>
+<p><span class="opacity-50">[0.552109]</span> Awaiting user input...<span class="block-cursor"></span></p>
+</div>
+</section>
+</div>
+</main>
+<!-- Contextual FAB (Only visible if core action matches) -->
+<!-- Not rendered on Settings page per logic -->
+</body></html>

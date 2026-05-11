@@ -1,6 +1,8 @@
 import path from 'path';
 import fs from 'fs/promises';
 import Docker from 'dockerode';
+import { JSONStorageService } from './storage';
+import type { Volume, VolumePurpose, VolumeStorageType } from '@dillinger/shared';
 
 type FirstClassVolumeCategory = 'core' | 'roms' | 'cache' | 'installed';
 
@@ -27,10 +29,12 @@ function parseFirstClassVolume(volumeName: string): {
 const DILLINGER_CORE_PATH = process.env.DILLINGER_CORE_PATH || '/data';
 const VOLUME_METADATA_FILE = path.join(DILLINGER_CORE_PATH, 'storage', 'volume-metadata.json');
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+const storage = JSONStorageService.getInstance();
 
 export interface VolumeMetadata {
   friendlyName?: string;
-  storageType?: 'ssd' | 'platter' | 'archive';
+  storageType?: VolumeStorageType;
+  purpose?: VolumePurpose;
 }
 
 export interface VolumeMetadataStore {
@@ -46,6 +50,7 @@ export interface FirstClassDetectedVolume {
   storageType?: 'ssd' | 'platter' | 'archive';
   dockerVolumeName?: string;
   firstClassCategory: FirstClassVolumeCategory | null;
+  purpose?: VolumePurpose;
 }
 
 export interface FirstClassStatus {
@@ -111,15 +116,31 @@ async function getDockerVolumeNames(): Promise<Set<string>> {
   }
 }
 
+function purposeToFirstClassCategory(purpose?: VolumePurpose): FirstClassVolumeCategory | null {
+  if (purpose === 'core' || purpose === 'roms' || purpose === 'cache' || purpose === 'installed') {
+    return purpose;
+  }
+  return null;
+}
+
+async function getConfiguredVolumes(): Promise<Volume[]> {
+  try {
+    return await storage.listEntities<Volume>('volumes');
+  } catch {
+    return [];
+  }
+}
+
 export async function detectFirstClassVolumes(): Promise<{
   volumes: FirstClassDetectedVolume[];
   firstClassStatus: FirstClassStatus;
 }> {
-  const [mountsContent, metadata, mountToVolumeName, dockerVolumeNames] = await Promise.all([
+  const [mountsContent, metadata, mountToVolumeName, dockerVolumeNames, configuredVolumes] = await Promise.all([
     fs.readFile('/proc/mounts', 'utf-8'),
     getVolumeMetadata(),
     getMountInfoVolumeLookup(),
     getDockerVolumeNames(),
+    getConfiguredVolumes(),
   ]);
 
   const lines = mountsContent.trim().split('\n');
@@ -182,7 +203,31 @@ export async function detectFirstClassVolumes(): Promise<{
       storageType: meta.storageType,
       dockerVolumeName,
       firstClassCategory: parsedFirstClass?.category ?? mountPathFallbackCategory,
+      purpose: meta.purpose,
     });
+  }
+
+  const seenHostPaths = new Set(volumes.map((volume) => volume.mountPath));
+  const seenDockerVolumeNames = new Set(volumes.map((volume) => volume.dockerVolumeName).filter(Boolean));
+  for (const configured of configuredVolumes) {
+    if (configured.status !== 'active' || !configured.hostPath) continue;
+    if (seenHostPaths.has(configured.hostPath) || seenDockerVolumeNames.has(configured.dockerVolumeName)) continue;
+
+    const meta = metadata.volumes[configured.hostPath] || {};
+    const parsedFirstClass = parseFirstClassVolume(configured.dockerVolumeName);
+    volumes.push({
+      mountPath: configured.hostPath,
+      device: configured.dockerVolumeName,
+      fsType: configured.type,
+      isSystem: configured.purpose === 'core',
+      friendlyName: meta.friendlyName,
+      storageType: meta.storageType,
+      dockerVolumeName: configured.dockerVolumeName,
+      firstClassCategory: purposeToFirstClassCategory(configured.purpose) ?? parsedFirstClass?.category ?? null,
+      purpose: configured.purpose ?? meta.purpose,
+    });
+    seenHostPaths.add(configured.hostPath);
+    seenDockerVolumeNames.add(configured.dockerVolumeName);
   }
 
   volumes.sort((a, b) => {

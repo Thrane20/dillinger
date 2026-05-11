@@ -13,6 +13,7 @@ import { compareVersions, fetchRemoteVersions, getLocalImageVersion } from '../u
 import { confirm } from '../utils/prompts.js';
 import { createDockerVolume, volumeExists } from '../utils/volume.js';
 import { hasUdevRulesInstalled, installUdevRules } from '../utils/udev.js';
+import { startNativeCore } from '../utils/native.js';
 
 export type StartOptions = {
   port?: string;
@@ -23,6 +24,7 @@ export type StartOptions = {
   display?: boolean;
   input?: boolean;
   yes?: boolean;
+  native?: boolean;
 };
 
 export function buildStartDockerArgs(
@@ -83,6 +85,33 @@ export async function startCommand(options: StartOptions): Promise<void> {
   const volumeName = config.volumeName;
   const imageName = config.imageName;
   const hostPort = Number(options.port ?? config.port);
+
+  if (options.native) {
+    if (!Number.isInteger(hostPort) || hostPort <= 0) {
+      log.error(`Invalid port: ${options.port ?? config.port}`);
+      process.exit(1);
+    }
+
+    try {
+      const status = await startNativeCore({ port: hostPort, volumeName });
+      if (status.started) {
+        log.success('Dillinger Core native runtime started');
+      } else {
+        log.warn('Dillinger Core native runtime was already running.');
+      }
+      log.info(`Data: ${status.dataPath ?? 'unknown'}`);
+      log.info(`PID: ${status.pid ?? 'unknown'}`);
+      log.info(`Logs: ${status.logFile}`);
+      log.info(`Open http://localhost:${status.port ?? hostPort}`);
+      if (status.runtime && !status.runtime.hasBundledNode) {
+        log.warn('Using the current Node.js runtime because the native artifact does not include node/bin/node.');
+      }
+      return;
+    } catch (error) {
+      log.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  }
 
   if (!(await isDockerInstalled())) {
     log.error('Docker is not installed.');

@@ -50,8 +50,9 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['Fira Code', 'Monaco', 'Consolas', 'monospace'],
+        sans: ['var(--font-body)', 'JetBrains Mono', 'monospace'],
+        mono: ['var(--font-body)', 'JetBrains Mono', 'monospace'],
+        display: ['var(--font-display)', 'system-ui', 'sans-serif'],
       },
       spacing: {
         '18': '4.5rem',

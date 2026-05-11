@@ -30,11 +30,12 @@ export async function GET() {
  * - mountPath: string (required) - the path to update
  * - friendlyName?: string - custom name for the volume
  * - storageType?: 'ssd' | 'platter' | 'archive' | null - storage type
+ * - purpose?: 'core' | 'roms' | 'cache' | 'installed' | 'downloads' | 'installers' | null
  */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { mountPath, friendlyName, storageType } = body;
+    const { mountPath, friendlyName, storageType, purpose } = body;
 
     if (!mountPath) {
       return NextResponse.json(
@@ -65,6 +66,14 @@ export async function PUT(request: NextRequest) {
         data.volumes[mountPath].storageType = storageType;
       } else {
         delete data.volumes[mountPath].storageType;
+      }
+    }
+
+    if (purpose !== undefined) {
+      if (purpose) {
+        data.volumes[mountPath].purpose = purpose;
+      } else {
+        delete data.volumes[mountPath].purpose;
       }
     }
 

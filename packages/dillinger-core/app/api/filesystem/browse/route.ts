@@ -40,7 +40,7 @@ async function findVolumeForPath(hostPath: string): Promise<{ volume: Volume; re
   }
 }
 
-// Browse a path inside a Docker volume
+// Browse a path inside a legacy Docker volume
 async function browseVolume(
   dockerVolumeName: string, 
   relativePath: string,
@@ -105,7 +105,7 @@ async function browseViaDocker(hostPath: string): Promise<{ items: FileItem[]; p
     
     // Check if mount failed
     if (stderr && stderr.includes('no such file or directory')) {
-      throw new Error('Path not accessible. You can only traverse Docker volumes already created. Full access to the file system is not possible without adding a volume mount first.');
+      throw new Error('Path not accessible. You can only traverse paths registered in Settings.');
     }
     
     const lines = stdout.trim().split('\n').filter(Boolean);
@@ -147,7 +147,7 @@ async function browseViaDocker(hostPath: string): Promise<{ items: FileItem[]; p
   } catch (err) {
     console.error('Docker browse failed:', err);
     const errorMsg = err instanceof Error ? err.message : 'Cannot access path';
-    throw new Error(errorMsg.includes('volume mount') ? errorMsg : `Cannot access path: ${absolutePath}. You can only traverse Docker volumes already created. Full access to the file system is not possible without adding a volume mount first.`);
+    throw new Error(errorMsg.includes('registered in Settings') ? errorMsg : `Cannot access path: ${absolutePath}. Register the path in Settings before browsing it.`);
   }
 }
 
@@ -163,11 +163,13 @@ export async function GET(request: NextRequest) {
     const volumeMatch = await findVolumeForPath(absolutePath);
     if (volumeMatch) {
       try {
-        const { items, parentPath } = await browseVolume(
-          volumeMatch.volume.dockerVolumeName,
-          volumeMatch.relativePath,
-          absolutePath
-        );
+        const { items, parentPath } = volumeMatch.volume.type === 'docker'
+          ? await browseVolume(
+              volumeMatch.volume.dockerVolumeName,
+              volumeMatch.relativePath,
+              absolutePath
+            )
+          : await browseViaDocker(absolutePath);
         return NextResponse.json({
           success: true,
           data: {

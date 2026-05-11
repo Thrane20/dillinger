@@ -79,12 +79,39 @@ pnpm dev
 # The app will be available at http://localhost:3010
 ```
 
-By default, dev mode writes data and logs under `packages/dillinger-core/data`.
-To override the dev data root, set `DILLINGER_CORE_PATH_DEV`:
+`pnpm dev` is the container/devcontainer workflow. It expects the `dillinger_core`
+Docker volume to be mounted at `/data`, matching production and the VS Code
+devcontainer.
+
+If you run the Next.js dev server directly on the host, `/data` is not the
+Docker volume mount inside the app container. Use the host script and point it at
+a real host path:
 
 ```bash
-DILLINGER_CORE_PATH_DEV=/data pnpm dev
+# Host-only scratch data, separate from the production Docker volume
+pnpm --filter @dillinger/core dev:host
+
+# Or use an explicit host data directory
+DILLINGER_CORE_PATH=/mnt/linuxfast/dillinger_core pnpm --filter @dillinger/core dev:host
 ```
+
+To use the same data from both host dev and the Dillinger container, create the
+`dillinger_core` volume as a bind-backed Docker volume:
+
+```bash
+mkdir -p /mnt/linuxfast/dillinger_core
+docker volume create \
+  --driver local \
+  --opt type=none \
+  --opt device=/mnt/linuxfast/dillinger_core \
+  --opt o=bind \
+  dillinger_core
+
+DILLINGER_CORE_PATH=/mnt/linuxfast/dillinger_core pnpm --filter @dillinger/core dev:host
+```
+
+Do not point a host-run dev server at `/data` unless you have deliberately
+mounted or created a writable host directory there.
 
 This runs the core application in development mode with:
 - Hot module reloading

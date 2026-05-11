@@ -142,6 +142,17 @@ pnpm docker:build:retroarch:no-cache  # Depends on base
 - Host GPU: AMD Radeon (uses Mesa/Vulkan drivers, VA-API encoding)
 - Base OS for runners: Arch Linux (pacman package manager)
 
+## UI Design References
+
+- Respect the Stitch plans in `docs/stitch/` for all UI work.
+- Start with `docs/stitch/DESIGN.md` to choose the correct reference surface:
+  - Dashboard: `docs/stitch/stitch_retro_workbench_launcher(1)/`
+  - Library / platform library: `docs/stitch/stitch_retro_workbench_launcher/`
+  - Settings: `docs/stitch/stitch_retro_workbench_launcher(2)/`
+  - Game detail: `docs/stitch/stitch_retro_workbench_launcher(3)/`
+- Treat Stitch exports as design references only. Keep existing routes, data fetching, state, APIs, and app architecture intact while translating the visuals into the existing React, Tailwind, and component patterns.
+- Preserve the shared Retro-Modern Workbench language: dark CRT-style shell, zero-radius panels, 2px borders, 32px title bars, electric blue active states, cyber green success/readiness states, neon orange highlights, dense windowed layouts, and avoid soft rounded marketing-card styling.
+
 ## Notes for AI Agents
 
 1. **Always run pnpm commands from project root** (`/workspaces/dillinger`)

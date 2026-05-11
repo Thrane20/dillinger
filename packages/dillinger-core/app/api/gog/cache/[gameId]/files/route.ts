@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { JSONStorageService } from '@/lib/services/storage';
 import type { Game } from '@dillinger/shared';
+import { getVolumeDefaults } from '@/lib/services/volume-defaults';
 
 const storage = JSONStorageService.getInstance();
 
@@ -11,17 +12,9 @@ const storage = JSONStorageService.getInstance();
  */
 async function resolveDefaultVolumePath(purpose: 'downloads' | 'installers'): Promise<string | null> {
   try {
-    // Read volume defaults from storage
-    const volumeDefaults = await storage.readEntity<any>('settings', 'volume-defaults');
-    const volumeId = volumeDefaults?.[purpose];
-    if (!volumeId) return null;
-    
-    // Get all volumes
-    const volumes = await storage.listEntities<any>('volumes');
-    const volume = volumes.find((v: any) => v.id === volumeId);
-    
-    return volume?.hostPath || null;
-  } catch (err) {
+    const defaults = await getVolumeDefaults();
+    return defaults.defaults[purpose] || null;
+  } catch {
     return null;
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Docker from 'dockerode';
-import { RUNNER_IMAGES } from '../../route';
+import { RUNNER_IMAGES } from '@/lib/runners';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 

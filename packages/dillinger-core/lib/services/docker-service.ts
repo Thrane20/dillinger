@@ -56,6 +56,7 @@ export class DockerService {
   // Volume name for the current game session
   private readonly SESSION_VOLUME = 'dillinger_current_session';
   private readonly STREAMING_RUNTIME_VOLUME = 'dillinger_streaming_runtime';
+  private readonly EXTRA_RUNNER_VOLUME_ROOT = '/mnt/dillinger-volumes';
 
   private async detectActiveStreamingWaylandDisplay(): Promise<string | null> {
     // Wolf may rotate Wayland socket names across sessions (wayland-1, wayland-2, ...).
@@ -85,7 +86,7 @@ export class DockerService {
   private mounts: any[] = []; // Store all mounts for path translation
   
   // Cache for configured volumes
-  private volumeCache: Array<{ id: string; name: string; dockerVolumeName: string; hostPath: string }> | null = null;
+  private volumeCache: Array<{ id: string; name: string; dockerVolumeName: string; hostPath: string; type: 'docker' | 'bind' }> | null = null;
   private volumeCacheTime: number = 0;
   private readonly VOLUME_CACHE_TTL = 30000; // 30 seconds
 
@@ -104,7 +105,7 @@ export class DockerService {
   /**
    * Get all configured volumes from storage with caching
    */
-  private async getConfiguredVolumes(): Promise<Array<{ id: string; name: string; dockerVolumeName: string; hostPath: string }>> {
+  private async getConfiguredVolumes(): Promise<Array<{ id: string; name: string; dockerVolumeName: string; hostPath: string; type: 'docker' | 'bind' }>> {
     const now = Date.now();
     if (this.volumeCache && (now - this.volumeCacheTime) < this.VOLUME_CACHE_TTL) {
       return this.volumeCache;
@@ -117,6 +118,7 @@ export class DockerService {
         name: v.name,
         dockerVolumeName: v.dockerVolumeName,
         hostPath: v.hostPath,
+        type: v.type === 'bind' ? 'bind' : 'docker',
       }));
       this.volumeCacheTime = now;
       return this.volumeCache;
@@ -130,7 +132,7 @@ export class DockerService {
    * Find a configured volume that contains the given host path.
    * Returns the volume info and the relative path within the volume.
    */
-  private async findVolumeForPath(hostPath: string): Promise<{ volume: { name: string; dockerVolumeName: string; hostPath: string }; relativePath: string } | null> {
+  private async findVolumeForPath(hostPath: string): Promise<{ volume: { name: string; dockerVolumeName: string; hostPath: string; type: 'docker' | 'bind' }; relativePath: string } | null> {
     const volumes = await this.getConfiguredVolumes();
     
     // Sort by hostPath length descending to match the most specific volume first
@@ -190,6 +192,82 @@ export class DockerService {
     }
 
     return binds;
+  }
+
+  private isReservedRunnerVolume(volumeName: string): boolean {
+    return (
+      volumeName === 'dillinger_core' ||
+      volumeName === 'dillinger_cache' ||
+      volumeName === 'dillinger_roms' ||
+      volumeName === this.SESSION_VOLUME ||
+      volumeName === this.STREAMING_RUNTIME_VOLUME ||
+      volumeName.startsWith('dillinger_installed_')
+    );
+  }
+
+  private getExtraRunnerVolumeMountPath(volumeName: string): string {
+    const safeSegment = volumeName
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'volume';
+
+    return path.posix.join(this.EXTRA_RUNNER_VOLUME_ROOT, safeSegment);
+  }
+
+  private async appendConfiguredRunnerVolumes(
+    binds: string[],
+    env?: string[],
+  ): Promise<void> {
+    const configuredVolumes = await this.getConfiguredVolumes();
+    if (configuredVolumes.length === 0) {
+      return;
+    }
+
+    const mountedSources = new Set<string>();
+    const mountedTargets = new Set<string>();
+    for (const bind of binds) {
+      const [source, target] = bind.split(':');
+      if (source) mountedSources.add(source);
+      if (target) mountedTargets.add(target);
+    }
+
+    const mountedExtras: Array<{
+      name: string;
+      dockerVolumeName: string;
+      hostPath: string;
+      mountPath: string;
+    }> = [];
+
+    for (const volume of configuredVolumes) {
+      if (!volume.dockerVolumeName || this.isReservedRunnerVolume(volume.dockerVolumeName)) {
+        continue;
+      }
+
+      const source = volume.type === 'bind' ? volume.hostPath : volume.dockerVolumeName;
+      if (mountedSources.has(source)) {
+        continue;
+      }
+
+      const mountPath = this.getExtraRunnerVolumeMountPath(volume.dockerVolumeName);
+      if (mountedTargets.has(mountPath)) {
+        continue;
+      }
+
+      binds.push(`${source}:${mountPath}:rw`);
+      mountedSources.add(source);
+      mountedTargets.add(mountPath);
+      mountedExtras.push({
+        name: volume.name,
+        dockerVolumeName: volume.dockerVolumeName,
+        hostPath: volume.hostPath,
+        mountPath,
+      });
+    }
+
+    if (env && mountedExtras.length > 0) {
+      env.push(`DILLINGER_EXTRA_VOLUMES=${JSON.stringify(mountedExtras)}`);
+      env.push(`DILLINGER_EXTRA_VOLUME_ROOT=${this.EXTRA_RUNNER_VOLUME_ROOT}`);
+    }
   }
 
   private normalizeWineRegistrySettings(settings: Array<{
@@ -263,7 +341,10 @@ export class DockerService {
         ? path.posix.join('/roms', relative, romFilename)
         : path.posix.join('/roms', romFilename);
 
-      return { bind: `${volumeMatch.volume.dockerVolumeName}:/roms:ro`, containerPath };
+      const bindSource = volumeMatch.volume.type === 'bind'
+        ? volumeMatch.volume.hostPath
+        : volumeMatch.volume.dockerVolumeName;
+      return { bind: `${bindSource}:/roms:ro`, containerPath };
     }
 
     // Fallback: try to preserve subdirectory structure when the ROM path
@@ -1891,13 +1972,20 @@ export class DockerService {
         const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
         
         if (volumeMatch) {
-          winePrefixVolume = volumeMatch.volume;
           winePrefixPath = configuredInstallPath;
+          if (volumeMatch.volume.type === 'docker') {
+            winePrefixVolume = volumeMatch.volume;
+          } else {
+            winePrefixHostPath = this.getHostPath(configuredInstallPath);
+          }
           logger.info(`  Wine prefix path: ${winePrefixPath}`);
-          logger.info(`  Wine prefix volume: ${winePrefixVolume.name} (${winePrefixVolume.dockerVolumeName})`);
+          logger.info(`  Wine prefix source: ${volumeMatch.volume.type === 'docker' ? `${volumeMatch.volume.name} (${volumeMatch.volume.dockerVolumeName})` : 'host bind path'}`);
           
           // Verify the prefix contains drive_c (it's a valid Wine prefix)
-          const exists = await this.hostPathExists(path.posix.join(winePrefixPath, 'drive_c'), winePrefixVolume.dockerVolumeName);
+          const exists = await this.hostPathExists(
+            path.posix.join(winePrefixPath, 'drive_c'),
+            winePrefixVolume?.dockerVolumeName
+          );
           
           if (!exists) {
             logger.warn(`  ⚠ Wine prefix does not contain drive_c: ${winePrefixPath}`);
@@ -2366,6 +2454,7 @@ export class DockerService {
       filteredDisplayVolumes = displayConfig.volumes.filter(v => !v.includes('pulse/cookie'));
     }
     binds.push(...filteredDisplayVolumes);
+    await this.appendConfiguredRunnerVolumes(binds, env);
 
     try {
       // Get Docker settings for auto-remove policy
@@ -2622,6 +2711,8 @@ export class DockerService {
       binds.push(`${this.SESSION_VOLUME}:/game:ro`);
     }
 
+    await this.appendConfiguredRunnerVolumes(binds, env);
+
     try {
       // Resolve the actual installed runner image
       const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-linux-native';
@@ -2690,7 +2781,7 @@ export class DockerService {
     let containerPrefixPath: string;
 
     const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
-    if (volumeMatch) {
+    if (volumeMatch?.volume.type === 'docker') {
       bindSource = volumeMatch.volume.dockerVolumeName;
       containerPrefixPath = `/mnt/game_volume${volumeMatch.relativePath}`;
     } else {
@@ -2705,19 +2796,21 @@ export class DockerService {
     const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
     const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
 
-    const binds = volumeMatch
+    const binds = volumeMatch?.volume.type === 'docker'
       ? [`${bindSource}:/mnt/game_volume:rw`, ...displayConfig.volumes]
       : [`${bindSource}:${containerPrefixPath}:rw`, ...displayConfig.volumes];
+    const env = [
+      `WINEPREFIX=${containerPrefixPath}`,
+      `WINEDEBUG=${wineDebug}`,
+      `WINE_VERSION_ID=${wineVersionId}`,
+      ...displayConfig.env,
+    ];
+    await this.appendConfiguredRunnerVolumes(binds, env);
 
     const containerConfig: any = {
       Image: resolvedImage,
       Cmd: ['bash', '-lc', 'wine regedit'],
-      Env: [
-        `WINEPREFIX=${containerPrefixPath}`,
-        `WINEDEBUG=${wineDebug}`,
-        `WINE_VERSION_ID=${wineVersionId}`,
-        ...displayConfig.env,
-      ],
+      Env: env,
       WorkingDir: containerPrefixPath,
       HostConfig: {
         AutoRemove: true,
@@ -2788,7 +2881,7 @@ export class DockerService {
     let containerPrefixPath: string;
 
     const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
-    if (volumeMatch) {
+    if (volumeMatch?.volume.type === 'docker') {
       bindSource = volumeMatch.volume.dockerVolumeName;
       containerPrefixPath = `/mnt/game_volume${volumeMatch.relativePath}`;
     } else {
@@ -2803,9 +2896,17 @@ export class DockerService {
     const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
     const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
 
-    const binds = volumeMatch
+    const binds = volumeMatch?.volume.type === 'docker'
       ? [`${bindSource}:/mnt/game_volume:rw`, ...displayConfig.volumes]
       : [`${bindSource}:${containerPrefixPath}:rw`, ...displayConfig.volumes];
+    const env = [
+      `WINEPREFIX=${containerPrefixPath}`,
+      `WINEDEBUG=${wineDebug}`,
+      `WINE_VERSION_ID=${wineVersionId}`,
+      `DILLINGER_REGISTRY_SETTINGS=${JSON.stringify(normalizedSettings)}`,
+      ...displayConfig.env,
+    ];
+    await this.appendConfiguredRunnerVolumes(binds, env);
 
     const pythonRegistryApplyScript = [
       'import json, os, subprocess, sys',
@@ -2875,13 +2976,7 @@ export class DockerService {
     const containerConfig: any = {
       Image: resolvedImage,
       Cmd: ['python3', '-c', pythonRegistryApplyScript],
-      Env: [
-        `WINEPREFIX=${containerPrefixPath}`,
-        `WINEDEBUG=${wineDebug}`,
-        `WINE_VERSION_ID=${wineVersionId}`,
-      `DILLINGER_REGISTRY_SETTINGS=${JSON.stringify(normalizedSettings)}`,
-        ...displayConfig.env,
-      ],
+      Env: env,
       WorkingDir: containerPrefixPath,
       HostConfig: {
       AutoRemove: false,
@@ -3038,13 +3133,20 @@ export class DockerService {
       winePrefixContainerPath = installContainerPath;
       logger.info(`  Install volume: dillinger_installed_${suffix}`);
       logger.info(`  Install path in container: ${installContainerPath}`);
-    } else if (installVolumeInfo) {
-      // Install path is within a managed Docker volume - mount the volume and use relative path
+    } else if (installVolumeInfo?.volume.type === 'docker') {
+      // Legacy Docker-volume path.
       installBindMount = `${installVolumeInfo.volume.dockerVolumeName}:/mnt/install_volume:rw`;
       installContainerPath = `/mnt/install_volume${installVolumeInfo.relativePath}`;
-      winePrefixContainerPath = installContainerPath; // Wine prefix is same as install dir
+      winePrefixContainerPath = installContainerPath;
       logger.info(`  Install volume: ${installVolumeInfo.volume.name} (${installVolumeInfo.volume.dockerVolumeName})`);
       logger.info(`  Install path in container: ${installContainerPath}`);
+    } else if (installVolumeInfo?.volume.type === 'bind') {
+      // Native path management: pass the selected install location as a host bind mount.
+      const bindSource = this.getHostPath(hostInstallPath);
+      installBindMount = `${bindSource}:/install:rw`;
+      installContainerPath = '/install';
+      winePrefixContainerPath = '/install';
+      logger.info(`  Install bind path: ${bindSource} -> /install`);
     } else {
       // Direct bind mount (requires directory to exist on host)
       installBindMount = `${hostInstallPath}:/install:rw`;
@@ -3218,18 +3320,21 @@ export class DockerService {
       }
 
       // Create installation container with GUI passthrough
+      const binds = [
+        ...installerBinds,
+        installBindMount,
+        `dillinger_cache:/cache:rw`,
+        ...displayConfig.volumes,
+      ];
+      await this.appendConfiguredRunnerVolumes(binds, env);
+
       const container = await docker.createContainer({
         Image: resolvedImage,
         name: containerName,
         Env: env,
         HostConfig: {
           AutoRemove: autoRemove,
-          Binds: [
-            ...installerBinds,
-            installBindMount, // Mount installation target (either volume or direct bind)
-            `dillinger_cache:/cache:rw`,
-            ...displayConfig.volumes
-          ],
+          Binds: binds,
           Devices: displayConfig.devices,
           DeviceCgroupRules: displayConfig.deviceCgroupRules || [],
           IpcMode: displayConfig.ipcMode,
@@ -3344,7 +3449,9 @@ export class DockerService {
         "| head -n 500",
       ].join(' ');
 
-      const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd);
+      const { exitCode, output } = volumeMatch.volume.type === 'docker'
+        ? await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd)
+        : await this.runInBindPath(volumeMatch.volume.hostPath, '/mnt/volume', findCmd);
       if (exitCode !== 0) {
         logger.warn(`  Executable scan returned exit code ${exitCode}`);
       }
@@ -3436,7 +3543,9 @@ export class DockerService {
       const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
       const findCmd = `find ${shQuote(containerPath)} -maxdepth 15 -type f -iname '*.lnk' -print`;
 
-      const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd);
+      const { exitCode, output } = volumeMatch.volume.type === 'docker'
+        ? await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', findCmd)
+        : await this.runInBindPath(volumeMatch.volume.hostPath, '/mnt/volume', findCmd);
       if (exitCode !== 0) {
         logger.warn(`  Shortcut scan returned exit code ${exitCode}`);
       }
@@ -3490,7 +3599,9 @@ export class DockerService {
         const containerPath = `/mnt/volume${volumeMatch.relativePath}`;
         // base64 output may wrap; strip newlines.
         const cmd = `cat ${shQuote(containerPath)} | base64 | tr -d '\\n'`;
-        const { exitCode, output } = await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', cmd);
+        const { exitCode, output } = volumeMatch.volume.type === 'docker'
+          ? await this.runInVolume(volumeMatch.volume.dockerVolumeName, '/mnt/volume', cmd)
+          : await this.runInBindPath(volumeMatch.volume.hostPath, '/mnt/volume', cmd);
         if (exitCode !== 0) {
           logger.warn(`Failed to read shortcut from volume (exit ${exitCode})`);
           return null;

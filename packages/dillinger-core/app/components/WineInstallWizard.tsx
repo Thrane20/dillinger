@@ -663,14 +663,28 @@ export default function WineInstallWizard({ gameId }: WineInstallWizardProps) {
 
   const fetchInstalledMounts = async () => {
     try {
-      const response = await fetch('/api/volumes/detected');
-      const result = await response.json();
-      if (!response.ok || !result.success) return;
+      const [managedResponse, detectedResponse] = await Promise.all([
+        fetch('/api/volumes'),
+        fetch('/api/volumes/detected'),
+      ]);
 
-      const mounts = (result.data?.firstClassStatus?.installed?.mounts || []) as Array<{
-        dockerVolumeName: string;
-        mountPath: string;
-      }>;
+      const managedResult = await managedResponse.json();
+      const detectedResult = await detectedResponse.json();
+
+      const managedMounts = managedResponse.ok && managedResult.success
+        ? ((managedResult.data || []) as Array<{ name: string; dockerVolumeName: string; hostPath: string; purpose?: string; status?: string }>)
+            .filter((volume) => volume.status !== 'error' && volume.purpose === 'installed' && !!volume.hostPath)
+            .map((volume) => ({ dockerVolumeName: volume.name || volume.dockerVolumeName, mountPath: volume.hostPath }))
+        : [];
+
+      const detectedMounts = detectedResponse.ok && detectedResult.success
+        ? (detectedResult.data?.firstClassStatus?.installed?.mounts || []) as Array<{
+            dockerVolumeName: string;
+            mountPath: string;
+          }>
+        : [];
+
+      const mounts = [...managedMounts, ...detectedMounts];
 
       const seenMountPaths = new Set<string>();
       const normalized = mounts.reduce<InstalledMount[]>((acc, mount) => {
@@ -1781,11 +1795,11 @@ export default function WineInstallWizard({ gameId }: WineInstallWizardProps) {
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-text">Step 5: Install Directory</h2>
           <p className="text-sm text-muted">
-            Each game gets its own Wine prefix (a virtual Windows environment). Choose a Docker volume with enough space.
+            Each game gets its own Wine prefix (a virtual Windows environment). Choose an install path with enough space.
           </p>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-muted">Volume Quick Select</label>
+            <label className="mb-2 block text-sm font-medium text-muted">Path Quick Select</label>
             <div className="flex flex-wrap gap-2">
               {installedMounts.length === 0 && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">

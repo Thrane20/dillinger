@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs/promises';
 import { JSONStorageService } from '@/lib/services/storage';
 import type { Volume } from '@dillinger/shared';
 
@@ -42,7 +43,15 @@ export async function POST(
         errorMessage = 'Docker volume not found';
       }
     } else {
-      isAccessible = true;
+      try {
+        const stat = await fs.stat(volume.hostPath);
+        isAccessible = stat.isDirectory();
+        if (!isAccessible) {
+          errorMessage = 'Path is not a directory';
+        }
+      } catch {
+        errorMessage = 'Path not found';
+      }
     }
 
     const updatedVolume: Volume = {

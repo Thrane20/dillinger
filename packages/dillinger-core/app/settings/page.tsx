@@ -41,7 +41,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 // Settings sections for navigation
 const SETTINGS_SECTIONS = [
   { id: 'docker', label: 'Docker', icon: '🐳' },
-  { id: 'volumes', label: 'Docker Volumes', icon: '💾' },
+  { id: 'volumes', label: 'Paths', icon: '💾' },
   { id: 'platforms', label: 'Platforms', icon: '🎯' },
   { id: 'scrapers', label: 'Scrapers', icon: '🔍' },
   { id: 'gpu', label: 'GPU', icon: '💻' },
@@ -58,7 +58,7 @@ const SETTINGS_SECTIONS = [
 function SaveIndicator({ show, message }: { show: boolean; message: string }) {
   if (!show) return null;
   return (
-    <div className="absolute top-2 right-2 flex items-center gap-2 bg-green-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-lg animate-pulse">
+    <div className="absolute right-3 top-3 z-10 flex items-center gap-2 border-2 border-success bg-success-soft px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-success shadow-[0_0_14px_rgba(71,255,156,0.18)]">
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
       </svg>
@@ -164,6 +164,7 @@ export default function SettingsPage() {
 
   // Section refs for scrolling
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Active section for sidebar highlight
   const [activeSection, setActiveSection] = useState('docker');
@@ -311,7 +312,7 @@ export default function SettingsPage() {
           }
         });
       },
-      { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
+      { threshold: 0.3, root: contentScrollRef.current, rootMargin: '-80px 0px -45% 0px' }
     );
 
     Object.values(sectionRefs.current).forEach((ref) => {
@@ -1851,47 +1852,67 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-xl">Loading settings...</div>
+      <div className="workbench-window flex min-h-[320px] items-center justify-center">
+        <div className="workbench-titlebar w-full max-w-md justify-center border-b-0">LOADING.SYSTEM_PREFERENCES</div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full">
+    <div className="settings-workbench grid gap-4 lg:h-[calc(100vh-var(--workbench-topbar)-2rem)] lg:grid-cols-[240px_minmax(0,1fr)]">
       {/* Sidebar Navigation */}
-      <nav className="w-56 flex-shrink-0 pr-4 h-full overflow-y-auto">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
-          <h2 className="text-lg font-semibold mb-4 text-text">Settings</h2>
-          <ul className="space-y-1">
+      <nav className="lg:sticky lg:top-4 lg:self-start">
+        <div className="workbench-window overflow-hidden">
+          <div className="workbench-titlebar">
+            <span>SYSTEM.PREFERENCES</span>
+            <span className="text-secondary">12 MODULES</span>
+          </div>
+          <div className="border-b-2 border-border bg-background/70 px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-muted">
+              Configure runtime, storage, streaming, and UI behavior.
+            </p>
+          </div>
+          <div className="max-h-[calc(100vh-var(--workbench-topbar)-10rem)] overflow-y-auto p-2 scrollbar-visible">
+            <ul className="space-y-1">
             {SETTINGS_SECTIONS.map((section) => (
               <li key={section.id}>
                 <button
                   onClick={() => scrollToSection(section.id)}
-                  className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                  className={`settings-nav-button ${
                     activeSection === section.id
-                      ? 'bg-primary text-white'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-text'
+                      ? 'settings-nav-button-active'
+                      : 'settings-nav-button-idle'
                   }`}
                 >
-                  <span>{section.icon}</span>
-                  <span>{section.label}</span>
+                  <span className="text-base">{section.icon}</span>
+                  <span className="flex-1">{section.label}</span>
+                  <span className="text-[10px] text-outline">::</span>
                 </button>
               </li>
             ))}
-          </ul>
+            </ul>
+          </div>
         </div>
       </nav>
 
       {/* Main Content Area */}
-      <div className="flex-1 h-full overflow-y-auto pl-6">
-        <div className="p-1">
+      <section className="workbench-window flex min-h-0 flex-col overflow-hidden">
+        <div className="workbench-titlebar">
+          <span>CONTROL PANEL :: SETTINGS</span>
+          <span className="text-secondary">RETRO WORKBENCH</span>
+        </div>
+        <div className="border-b-2 border-border bg-background/70 px-4 py-3">
+          <p className="text-xs uppercase tracking-[0.14em] text-muted">
+            The submenu stays docked. Only the configuration panels below should scroll.
+          </p>
+        </div>
+        <div ref={contentScrollRef} className="settings-content flex-1 overflow-y-auto p-4 scrollbar-visible">
           {message && (
             <div
-              className={`mb-6 p-4 rounded-lg ${
+              className={`settings-status-banner ${
                 message.type === 'success'
-                  ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100'
-                  : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100'
+                  ? 'settings-status-banner-success'
+                  : 'settings-status-banner-error'
               }`}
             >
               {message.text}
@@ -1904,7 +1925,7 @@ export default function SettingsPage() {
             <div 
               id="scrapers" 
               ref={(el) => { sectionRefs.current['scrapers'] = el; }}
-              className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[4]"
+              className="settings-panel relative order-[4]"
             >
             <SaveIndicator show={!!savedSections['igdb']} message={savedSections['igdb'] || ''} />
             <div className="flex items-center justify-between mb-4">
@@ -1989,9 +2010,9 @@ export default function SettingsPage() {
           <div
             id="volumes"
             ref={(el) => { sectionRefs.current['volumes'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[2]"
+            className="settings-panel relative order-[2]"
           >
-            <h2 className="text-xl font-semibold mb-4">💾 Docker Volumes</h2>
+            <h2 className="text-xl font-semibold mb-4">💾 Paths</h2>
             <VolumesSettings />
           </div>
 
@@ -1999,7 +2020,7 @@ export default function SettingsPage() {
           <div 
             id="ai" 
             ref={(el) => { sectionRefs.current['ai'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[8]"
+            className="settings-panel relative order-[8]"
           >
             <SaveIndicator show={!!savedSections['ai']} message={savedSections['ai'] || ''} />
             <div className="flex items-center justify-between mb-4">
@@ -2076,7 +2097,7 @@ export default function SettingsPage() {
           <div 
             id="audio" 
             ref={(el) => { sectionRefs.current['audio'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[6]"
+            className="settings-panel relative order-[6]"
           >
             <SaveIndicator show={!!savedSections['audio']} message={savedSections['audio'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🔊 Audio Settings</h2>
@@ -2151,7 +2172,7 @@ export default function SettingsPage() {
           <div 
             id="platforms" 
             ref={(el) => { sectionRefs.current['platforms'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[3]"
+            className="settings-panel relative order-[3]"
           >
             <SaveIndicator show={!!savedSections['platforms']} message={savedSections['platforms'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🎯 Configure Platforms</h2>
@@ -2227,7 +2248,7 @@ export default function SettingsPage() {
           <div 
             id="docker" 
             ref={(el) => { sectionRefs.current['docker'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[1]"
+            className="settings-panel relative order-[1]"
           >
             <SaveIndicator show={!!savedSections['docker']} message={savedSections['docker'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🐳 Docker Settings</h2>
@@ -2270,7 +2291,7 @@ export default function SettingsPage() {
           <div 
             id="gpu" 
             ref={(el) => { sectionRefs.current['gpu'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[5]"
+            className="settings-panel relative order-[5]"
           >
             <SaveIndicator show={!!savedSections['gpu']} message={savedSections['gpu'] || ''} />
             <h2 className="text-xl font-semibold mb-4">💻 GPU Settings</h2>
@@ -2312,7 +2333,7 @@ export default function SettingsPage() {
           <div 
             id="streaming" 
             ref={(el) => { sectionRefs.current['streaming'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[7]"
+            className="settings-panel relative order-[7]"
           >
             <SaveIndicator show={!!savedSections['streaming']} message={savedSections['streaming'] || ''} />
             <h2 className="text-xl font-semibold mb-4">📺 Streaming Settings</h2>
@@ -3380,7 +3401,7 @@ export default function SettingsPage() {
           <div 
             id="downloads" 
             ref={(el) => { sectionRefs.current['downloads'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[9]"
+            className="settings-panel relative order-[9]"
           >
             <SaveIndicator show={!!savedSections['downloads']} message={savedSections['downloads'] || ''} />
             <h2 className="text-xl font-semibold mb-4">📥 Download Settings</h2>
@@ -3491,7 +3512,7 @@ export default function SettingsPage() {
                       </select>
                       {availableVolumes.length === 0 && (
                         <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                          No volumes configured. Use the Docker Volumes section to configure mounts and metadata first.
+                          No paths configured. Use the Paths section to configure installer storage first.
                         </p>
                       )}
                     </div>
@@ -3502,7 +3523,7 @@ export default function SettingsPage() {
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <p className="text-sm text-blue-700 dark:text-blue-300">
                   💡 <strong>Tip:</strong> Default install/download paths follow first-class volume conventions.
-                  Use the Docker Volumes section to verify and tag storage types for placement workflows.
+                  Use the Paths section to register ROM libraries, installer folders, and Wine install roots.
                 </p>
               </div>
 
@@ -3520,7 +3541,7 @@ export default function SettingsPage() {
           <div 
             id="maintenance" 
             ref={(el) => { sectionRefs.current['maintenance'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[10]"
+            className="settings-panel relative order-[10]"
           >
             <h2 className="text-xl font-semibold mb-4">🔧 Maintenance</h2>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
@@ -3560,7 +3581,7 @@ export default function SettingsPage() {
           <div 
             id="ui" 
             ref={(el) => { sectionRefs.current['ui'] = el; }}
-            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-lg shadow-md order-[11]"
+            className="settings-panel relative order-[11]"
           >
             <SaveIndicator show={!!savedSections['ui']} message={savedSections['ui'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🎨 UI Settings</h2>
@@ -3607,7 +3628,7 @@ export default function SettingsPage() {
           <div 
             id="danger" 
             ref={(el) => { sectionRefs.current['danger'] = el; }}
-            className="relative p-6 rounded-lg border-2 border-red-500 bg-white dark:bg-gray-800 shadow-md order-[12]"
+            className="settings-panel settings-panel-danger relative order-[12]"
           >
             <h2 className="text-xl font-semibold mb-4 text-red-600 dark:text-red-400">⚠️ Danger Zone</h2>
             
@@ -3674,7 +3695,7 @@ export default function SettingsPage() {
           </div>
         </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

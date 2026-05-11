@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as fs from 'fs-extra';
+import * as fs from 'node:fs/promises';
 import * as path from 'path';
 import { JSONStorageService } from '@/lib/services/storage';
 
@@ -21,7 +21,9 @@ export async function GET(
       biosPath = path.join(biosPath, platformId);
     }
     
-    if (!(await fs.pathExists(biosPath))) {
+    try {
+      await fs.access(biosPath);
+    } catch {
       return NextResponse.json({ files: [] });
     }
     
@@ -62,7 +64,7 @@ export async function POST(
       destPath = path.join(destPath, platformId);
     }
     
-    await fs.ensureDir(destPath);
+    await fs.mkdir(destPath, { recursive: true });
 
     const formData = await request.formData();
     const files = formData.getAll('files') as File[];

@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    .scanline-effect {
+      background: linear-gradient(
+        to bottom,
+        rgba(18, 16, 16, 0) 50%,
+        rgba(0, 0, 0, 0.15) 50%
+      );
+      background-size: 100% 4px;
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+    }
+    .window-glow {
+      box-shadow: 0 0 10px rgba(147, 204, 255, 0.3);
+    }
+    .active-window-glow {
+      box-shadow: 0 0 15px rgba(147, 204, 255, 0.5);
+    }
+    .retro-scrollbar::-webkit-scrollbar {
+      width: 8px;
+    }
+    .retro-scrollbar::-webkit-scrollbar-track {
+      background: #080808;
+    }
+    .retro-scrollbar::-webkit-scrollbar-thumb {
+      background: #3e4851;
+      border: 2px solid #131313;
+    }
+    .retro-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #00e55b;
+    }
+    body {
+      background-color: #121212;
+      overflow: hidden;
+    }
+  </style>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface-dim": "#131313",
+            "secondary-container": "#ff8a0d",
+            "on-surface-variant": "#bec7d3",
+            "tertiary": "#00e55b",
+            "background": "#131313",
+            "on-primary-fixed": "#001d31",
+            "on-secondary-fixed-variant": "#6f3800",
+            "on-background": "#e5e2e1",
+            "on-primary": "#003351",
+            "error-container": "#93000a",
+            "inverse-surface": "#e5e2e1",
+            "on-primary-fixed-variant": "#004b73",
+            "tertiary-container": "#00bb48",
+            "on-error": "#690005",
+            "outline-variant": "#3e4851",
+            "secondary-fixed-dim": "#ffb781",
+            "on-surface": "#e5e2e1",
+            "primary": "#93ccff",
+            "inverse-primary": "#006398",
+            "on-tertiary-fixed-variant": "#00531b",
+            "on-secondary": "#4e2600",
+            "tertiary-fixed-dim": "#00e55b",
+            "surface": "#131313",
+            "on-error-container": "#ffdad6",
+            "primary-fixed-dim": "#93ccff",
+            "surface-bright": "#393939",
+            "secondary-fixed": "#ffdcc4",
+            "surface-tint": "#93ccff",
+            "outline": "#88929d",
+            "surface-container-highest": "#353534",
+            "surface-container-lowest": "#0e0e0e",
+            "primary-fixed": "#cce5ff",
+            "tertiary-fixed": "#6bff83",
+            "on-tertiary-container": "#004214",
+            "on-secondary-container": "#623000",
+            "on-tertiary": "#003911",
+            "surface-container-low": "#1c1b1b",
+            "surface-container-high": "#2a2a2a",
+            "surface-container": "#201f1f",
+            "error": "#ffb4ab",
+            "secondary": "#ffb781",
+            "on-primary-container": "#003c5d",
+            "on-secondary-fixed": "#2f1400",
+            "primary-container": "#00aaff",
+            "inverse-on-surface": "#313030",
+            "on-tertiary-fixed": "#002107",
+            "surface-variant": "#353534"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "gutter": "16px",
+            "window-header-height": "32px",
+            "container-padding": "12px",
+            "unit": "4px",
+            "border-width": "2px",
+            "margin": "24px"
+          },
+          "fontFamily": {
+            "headline-xl": ["Anybody"],
+            "body-md": ["JetBrains Mono"],
+            "body-lg": ["JetBrains Mono"],
+            "label-md": ["JetBrains Mono"],
+            "headline-lg-mobile": ["Anybody"],
+            "headline-lg": ["Anybody"],
+            "headline-md": ["Anybody"]
+          },
+          "fontSize": {
+            "headline-xl": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+            "body-md": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+            "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+            "label-md": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600"}],
+            "headline-lg-mobile": ["28px", {"lineHeight": "1.2", "fontWeight": "700"}],
+            "headline-lg": ["32px", {"lineHeight": "1.2", "fontWeight": "700"}],
+            "headline-md": ["24px", {"lineHeight": "1.2", "fontWeight": "700"}]
+          }
+        },
+      },
+    }
+  </script>
+</head>
+<body class="font-body-md text-on-surface">
+<div class="scanline-effect"></div>
+<!-- Shared Component: TopNavBar -->
+<header class="fixed top-0 w-full h-[48px] bg-surface-container-high dark:bg-surface-container-high flex justify-between items-center px-gutter border-b-2 border-outline-variant shadow-[0_0_10px_rgba(147,204,255,0.3)] z-50">
+<div class="font-headline-md text-headline-md font-bold text-primary italic">NEO_WORKBENCH v1.0</div>
+<nav class="hidden md:flex items-center space-x-6 h-full">
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 active:translate-y-0.5 px-2" href="#">Home</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-primary border-b-2 border-primary pb-1 active:translate-y-0.5 px-2" href="#">Library</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 active:translate-y-0.5 px-2" href="#">Settings</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 active:translate-y-0.5 px-2" href="#">About</a>
+</nav>
+<div class="flex items-center space-x-4">
+<div class="relative flex items-center">
+<input class="bg-[#080808] border-b-2 border-outline-variant text-primary font-label-md px-2 py-1 focus:border-tertiary focus:outline-none placeholder:text-outline-variant" placeholder="SEARCH_FILES..." type="text"/>
+</div>
+<div class="flex items-center space-x-2">
+<button class="material-symbols-outlined text-primary hover:text-tertiary active:translate-y-0.5" data-icon="terminal">terminal</button>
+<button class="material-symbols-outlined text-primary hover:text-tertiary active:translate-y-0.5" data-icon="power_settings_new">power_settings_new</button>
+</div>
+</div>
+</header>
+<!-- Shared Component: SideNavBar -->
+<aside class="fixed left-0 top-[48px] w-[200px] h-[calc(100vh-48px)] bg-surface-dim dark:bg-surface-dim border-r-2 border-outline-variant flex flex-col py-4 space-y-2 z-40">
+<div class="px-4 mb-6">
+<div class="flex items-center space-x-2 mb-2">
+<img alt="System Operator Avatar" class="w-8 h-8 rounded-full border border-primary" data-alt="A gritty, high-contrast close-up of a futuristic cybernetic eye with glowing blue circuits reflected in the iris. The lighting is low-key, emphasizing deep shadows and sharp, luminous highlights against a dark, metallic background. The overall aesthetic is industrial and tech-focused, inspired by 80s cyberpunk noir." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCkVm5M0F2V1oViHDkgqwv8B5msa5R__CM7C8IIUczY-n6j8AiQBIGiV5ADYe64BgyYs2Fi0VXFrbbiLAkwrMin-PZL9hW2FFxr_Yu8dE1fEzSfxHxEOAkQcxKlzQQT4Dqx2xgchyZUG1zMEE_OxWDtwlpZPa4bg-SKyLx1YikZs7bQh7f1zPaRJVALXAx2HMojkjtNCkMu3f0N3VIkZzH8T6suD7RXpXhJrVKOSanlo1n0tf2nYM-zyOdaLifGf0p5df5fwBdamcc"/>
+<div class="overflow-hidden">
+<div class="font-label-md text-secondary truncate">PLATFORMS</div>
+<div class="text-[10px] text-on-surface-variant truncate">/dev/sda1</div>
+</div>
+</div>
+<button class="w-full border-2 border-primary text-primary font-label-md py-1 hover:bg-primary hover:text-surface transition-all active:translate-y-0.5 uppercase">LAUNCH DISK</button>
+</div>
+<div class="flex-grow">
+<a class="bg-tertiary text-on-tertiary font-bold flex items-center px-4 py-2 hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="computer">computer</span>
+<span class="font-body-md text-body-md">Amiga</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="keyboard">keyboard</span>
+<span class="font-body-md text-body-md">Commodore 64</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="terminal">terminal</span>
+<span class="font-body-md text-body-md">DOS</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="videogame_asset">videogame_asset</span>
+<span class="font-body-md text-body-md">NES</span>
+</a>
+</div>
+<div class="border-t border-outline-variant pt-4">
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="memory">memory</span>
+<span class="font-body-md text-body-md">SysInfo</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="lan">lan</span>
+<span class="font-body-md text-body-md">Network</span>
+</a>
+</div>
+</aside>
+<!-- Main Desktop Area -->
+<main class="ml-[200px] mt-[48px] p-6 h-[calc(100vh-48px)] bg-surface-lowest overflow-hidden flex flex-col gap-6">
+<!-- Library Controls Window -->
+<section class="border-2 border-outline-variant bg-surface-container-low flex flex-col shrink-0">
+<header class="h-[32px] bg-outline-variant flex items-center justify-between px-3">
+<div class="font-label-md text-surface uppercase">Filter_Gadgets.lib</div>
+<div class="flex space-x-1">
+<div class="w-3 h-3 border border-surface bg-surface-dim"></div>
+<div class="w-3 h-3 border border-surface bg-surface-dim"></div>
+</div>
+</header>
+<div class="p-container-padding flex flex-wrap items-center gap-4">
+<div class="flex flex-col gap-1">
+<label class="text-[10px] text-secondary uppercase font-bold">Sort_By</label>
+<select class="bg-[#080808] border-b-2 border-outline-variant text-primary font-label-md px-2 py-1 focus:border-tertiary focus:outline-none appearance-none">
+<option>ALPHABETICAL</option>
+<option>RELEASE_YEAR</option>
+<option>PUBLISHER</option>
+<option>RATING</option>
+</select>
+</div>
+<div class="flex flex-col gap-1">
+<label class="text-[10px] text-secondary uppercase font-bold">Year_Range</label>
+<div class="flex items-center space-x-2">
+<input class="w-16 bg-[#080808] border-b-2 border-outline-variant text-primary font-label-md px-2 py-1 text-center" type="text" value="1985"/>
+<span class="text-outline">TO</span>
+<input class="w-16 bg-[#080808] border-b-2 border-outline-variant text-primary font-label-md px-2 py-1 text-center" type="text" value="1994"/>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<label class="text-[10px] text-secondary uppercase font-bold">Genre_Class</label>
+<div class="flex gap-2">
+<button class="px-3 py-1 border-2 border-primary text-primary text-[10px] hover:bg-primary hover:text-black">SHMUP</button>
+<button class="px-3 py-1 border-2 border-outline-variant text-outline text-[10px] hover:border-tertiary hover:text-tertiary">RPG</button>
+<button class="px-3 py-1 border-2 border-outline-variant text-outline text-[10px] hover:border-tertiary hover:text-tertiary">SPORTS</button>
+<button class="px-3 py-1 border-2 border-outline-variant text-outline text-[10px] hover:border-tertiary hover:text-tertiary">TOOL</button>
+</div>
+</div>
+<div class="ml-auto">
+<button class="border-2 border-tertiary text-tertiary font-label-md px-4 py-2 hover:bg-tertiary hover:text-black active:translate-y-0.5">REFRESH_CACHE</button>
+</div>
+</div>
+</section>
+<!-- Games Grid Window -->
+<section class="border-2 border-primary bg-surface-container-low flex flex-col flex-grow active-window-glow min-h-0">
+<header class="h-[32px] bg-primary flex items-center justify-between px-3">
+<div class="font-label-md text-surface uppercase font-extrabold">Volume: AMIGA_TITLES (984 Entries)</div>
+<div class="flex space-x-1">
+<div class="w-3 h-3 border border-surface bg-surface-dim"></div>
+<button class="w-3 h-3 border border-surface bg-error"></button>
+</div>
+</header>
+<div class="p-4 overflow-y-auto retro-scrollbar h-full">
+<div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
+<!-- Game Card 1 -->
+<div class="group relative bg-[#080808] border-2 border-outline-variant hover:border-primary transition-all">
+<div class="aspect-[3/4] relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="A vibrant 16-bit style pixel art landscape from a classic science fiction adventure game. High-contrast purples, teals, and blacks create a nostalgic nocturnal atmosphere. The scene features glowing alien flora and a sleek futuristic craft in the distance, capturing the distinct aesthetic of early 90s computing graphics with sharp, defined pixels." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB1yLhCT-LPz5iomFnZm3nWvh0ZloEVg3Cv44SXzJWLMx_vITLc61qhCeMLMTkgFdRhQMAEzZ8GMF6LPt3DUmUi-mQJeu4ySxabT1_FD2AftsRZgZmYXO1rxBSFwQ26AZiB46ZEeMeezdbx47K2Y3oQg4kLpAyGZTyf3Dq0DZKpYt3bcff-1NVi3b3cRDLcNofHIYHeW_u7voTFHvT5ReazHgvDosPCbOHEe3qiY3R81kW7Dc6MnLH-uQ2oREWuX3ZuwL3NvIuu6Fw"/>
+<!-- Hover Overlay Actions -->
+<div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-4 space-y-2">
+<button class="w-full border-2 border-tertiary text-tertiary text-[10px] py-1 font-bold hover:bg-tertiary hover:text-black">LAUNCH</button>
+<button class="w-full border-2 border-primary text-primary text-[10px] py-1 font-bold hover:bg-primary hover:text-black">CONFIG</button>
+<button class="w-full border-2 border-secondary text-secondary text-[10px] py-1 font-bold hover:bg-secondary hover:text-black">SAVE STATE</button>
+</div>
+</div>
+<div class="p-2 border-t-2 border-outline-variant">
+<h3 class="font-label-md text-primary truncate">ANOTHER_WORLD</h3>
+<div class="flex justify-between text-[10px] text-on-surface-variant mt-1">
+<span>1991</span>
+<span>DELPHINE</span>
+</div>
+</div>
+</div>
+<!-- Game Card 2 -->
+<div class="group relative bg-[#080808] border-2 border-outline-variant hover:border-primary transition-all">
+<div class="aspect-[3/4] relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="Intricate technical schematic of a vintage personal computer motherboard with glowing neon green highlights over a dark obsidian circuit pattern. The image evokes a feeling of retro-engineering and hardware mastery, featuring 80s tech aesthetics with high-contrast lines and a dark, immersive color palette of emerald and charcoal." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAWUBfc6Xbo8PgRgoA50jopa2hspQ8eyQOrrJucXYwlEFtUgeSYD1Xn03DQe-mlDOuyEO85XlR2XJLjB6ctpiziL5Id5DAtrrSbY2em2789zGs7af1v94idDDJTuqRvLEB6kkxgrMQ_0gT6MyoYjRpJIaU5R8VNRn8-I5lysLbKA9ZPnJoTKEQWq6Zcvbq15oC1Jk3n9552IMvX7t3J1US6KLoJejb6KrsHMjrEz_dm-9Cu1PABf3lKCA1FWxI8ovKEmGZrMlSkgx0"/>
+<div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-4 space-y-2">
+<button class="w-full border-2 border-tertiary text-tertiary text-[10px] py-1 font-bold hover:bg-tertiary hover:text-black">LAUNCH</button>
+<button class="w-full border-2 border-primary text-primary text-[10px] py-1 font-bold hover:bg-primary hover:text-black">CONFIG</button>
+<button class="w-full border-2 border-secondary text-secondary text-[10px] py-1 font-bold hover:bg-secondary hover:text-black">SAVE STATE</button>
+</div>
+</div>
+<div class="p-2 border-t-2 border-outline-variant">
+<h3 class="font-label-md text-primary truncate">TURRICAN_II</h3>
+<div class="flex justify-between text-[10px] text-on-surface-variant mt-1">
+<span>1991</span>
+<span>FACTOR_5</span>
+</div>
+</div>
+</div>
+<!-- Game Card 3 -->
+<div class="group relative bg-[#080808] border-2 border-outline-variant hover:border-primary transition-all">
+<div class="aspect-[3/4] relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="Digital art featuring a stack of vintage 3.5 inch floppy disks labeled with handwritten marker in a dark, atmospheric room. A single ray of cyan light illuminates the labels, creating sharp shadows and emphasizing the tactile, utilitarian texture of the plastic. The scene is nocturnal and focused, celebrating the physical media of the golden age of computing." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBDSgGnP50YPLKzv34F2W3yVLqfG9ENH4a9sa5ryBiStZ6TqfumVCuLwiOaB9ioTOaWFDw8cX-FGSukvRdU9x5rM6FN_-lcPggsvQKi3IObXfY6of40wyHhTlRtmbw9NLKUSth1YJPr0D58vJZZj9YmlxVHcFD5yCwohpqAa-BaSunlW30UEPqkFjgyQdjrRGlg50y3NM8CUeFAz-84sMVTTkC5t0bTn5ib96-Z_-ASYQTr_W7CoRRhQdJSknCDdtuhAstCpTTympM"/>
+<div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-4 space-y-2">
+<button class="w-full border-2 border-tertiary text-tertiary text-[10px] py-1 font-bold hover:bg-tertiary hover:text-black">LAUNCH</button>
+<button class="w-full border-2 border-primary text-primary text-[10px] py-1 font-bold hover:bg-primary hover:text-black">CONFIG</button>
+<button class="w-full border-2 border-secondary text-secondary text-[10px] py-1 font-bold hover:bg-secondary hover:text-black">SAVE STATE</button>
+</div>
+</div>
+<div class="p-2 border-t-2 border-outline-variant">
+<h3 class="font-label-md text-primary truncate">SENSIBLE_SOCCER</h3>
+<div class="flex justify-between text-[10px] text-on-surface-variant mt-1">
+<span>1992</span>
+<span>SWOS</span>
+</div>
+</div>
+</div>
+<!-- Game Card 4 -->
+<div class="group relative bg-[#080808] border-2 border-outline-variant hover:border-primary transition-all">
+<div class="aspect-[3/4] relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="A top-down view of a vintage mechanical keyboard with semi-translucent keys being struck by a finger, with a vibrant electric blue light emitting from beneath the switches. The scene captures the tactile and mechanical essence of classic workstations, using high-speed photography to freeze the motion in a high-tech, nocturnal setting dominated by blacks and luminous blues." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCHmgE83fRMqnhcekL2sP56y-YQACj3t57us8Yog0O8ZTSVAX0DoGM7apBtLad7RDVpG8Himc5BNsSeGJBBxnDzruIr_hp4mo3YgpJ26p0RQzzjNU59cNsIrRxbPDq4r4V2oEpzNvVM2bBZHp_jzU_n7C5s-_Dv5nKE35QsyReFWO8m2VOD5K5KOs7J27A_OLNok31zvapfgxm-huKd1YUXEp_1z0gj0kdUy69yHMlE4NfLQymQKM-RvbFxjm4fFuePtmtAOo2qq6E"/>
+<div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-4 space-y-2">
+<button class="w-full border-2 border-tertiary text-tertiary text-[10px] py-1 font-bold hover:bg-tertiary hover:text-black">LAUNCH</button>
+<button class="w-full border-2 border-primary text-primary text-[10px] py-1 font-bold hover:bg-primary hover:text-black">CONFIG</button>
+<button class="w-full border-2 border-secondary text-secondary text-[10px] py-1 font-bold hover:bg-secondary hover:text-black">SAVE STATE</button>
+</div>
+</div>
+<div class="p-2 border-t-2 border-outline-variant">
+<h3 class="font-label-md text-primary truncate">THE_SETTLERS</h3>
+<div class="flex justify-between text-[10px] text-on-surface-variant mt-1">
+<span>1993</span>
+<span>BLUE_BYTE</span>
+</div>
+</div>
+</div>
+<!-- Game Card 5 -->
+<div class="group relative bg-[#080808] border-2 border-outline-variant hover:border-primary transition-all">
+<div class="aspect-[3/4] relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="Rows of cascading green code on a dark monitor screen, reminiscent of early terminal interfaces. The text has a soft phosphor glow and slight ghosting effect, mimicking the persistence of a vintage CRT display. The composition is geometric and dense, highlighting the raw data aesthetic of 80s computing with a vibrant matrix green palette against a deep black void." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBxIdJC9RM8657OQPSCiRxlkXtMlt2aQ2e7BarF59_Q2y0az4Fp8ascg1UQ0RK9yR3rb3deldh_bVguoF0IqjnFqRQbtw784c86Ac9JUVRHafvUbJ5tec7Jn6bI5zWsM-kM9KGAfN2LxwJSuYQ99b-Ck-h3oWualqG3hkVGH4gVTLqfOb1BgWMoZAR-ZkKVpxNUqetWu9DmzGUXQPVvU2hOHqm6JHSOg7L3sqk4x7m6_4y4aKWQjzCRTssmNI2h2j2g1ZybJFRrlCs"/>
+<div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-4 space-y-2">
+<button class="w-full border-2 border-tertiary text-tertiary text-[10px] py-1 font-bold hover:bg-tertiary hover:text-black">LAUNCH</button>
+<button class="w-full border-2 border-primary text-primary text-[10px] py-1 font-bold hover:bg-primary hover:text-black">CONFIG</button>
+<button class="w-full border-2 border-secondary text-secondary text-[10px] py-1 font-bold hover:bg-secondary hover:text-black">SAVE STATE</button>
+</div>
+</div>
+<div class="p-2 border-t-2 border-outline-variant">
+<h3 class="font-label-md text-primary truncate">SYNDICATE</h3>
+<div class="flex justify-between text-[10px] text-on-surface-variant mt-1">
+<span>1993</span>
+<span>BULLFROG</span>
+</div>
+</div>
+</div>
+<!-- Game Card 6 -->
+<div class="group relative bg-[#080808] border-2 border-outline-variant hover:border-primary transition-all">
+<div class="aspect-[3/4] relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="A retro gaming joystick with a bright red fire button, reflecting the glow of a nearby blue monitor. The object is captured in a cinematic close-up with shallow depth of field, emphasizing its iconic 80s shape and industrial plastic texture. The lighting creates a high-tech nocturnal vibe, using a palette of electric blue, vibrant red, and deep shadows." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBT2BvFZSgS1DqRvhIMDMph54GgifWtUu9kPoWLvbsoi0a8kGds6vY9oUY-BBdSOMbmwkv9GcQt4k8Rd04OESWoPmFT8duVkjTjGMhrKSZmVNNfLP7ARUol-w3IqQs6UgGDyUJPKjyZx9BYapLJQMy3haMj4kERgA7J2C4avpVaLeJxkBPLzUDG_Ew0HF2ltq_7hEF0fFvxHYmaInohucPcq-eHTLV6p51H7wZ3z2EXkSZzC6KYPHnr5VGzUlN1X32LjWUPJq3VbjA"/>
+<div class="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center p-4 space-y-2">
+<button class="w-full border-2 border-tertiary text-tertiary text-[10px] py-1 font-bold hover:bg-tertiary hover:text-black">LAUNCH</button>
+<button class="w-full border-2 border-primary text-primary text-[10px] py-1 font-bold hover:bg-primary hover:text-black">CONFIG</button>
+<button class="w-full border-2 border-secondary text-secondary text-[10px] py-1 font-bold hover:bg-secondary hover:text-black">SAVE STATE</button>
+</div>
+</div>
+<div class="p-2 border-t-2 border-outline-variant">
+<h3 class="font-label-md text-primary truncate">SPEEDBALL_2</h3>
+<div class="flex justify-between text-[10px] text-on-surface-variant mt-1">
+<span>1990</span>
+<span>BIT_MAP_BROTHERS</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<footer class="h-[24px] bg-surface-container-high border-t border-outline-variant flex items-center px-3 justify-between">
+<div class="text-[10px] text-on-surface-variant uppercase">Disk Drive DF0: IDLE</div>
+<div class="flex items-center space-x-3 text-[10px] text-tertiary">
+<span>MEM: 2.0MB CHIP / 8.0MB FAST</span>
+<span class="w-2 h-2 bg-tertiary rounded-full animate-pulse"></span>
+</div>
+</footer>
+</section>
+</main>
+<!-- Mobile Bottom Nav (Suppressed in main view but available via responsive pivot) -->
+<nav class="md:hidden fixed bottom-0 w-full bg-surface-container-high flex justify-around items-center h-16 border-t-2 border-outline-variant z-50">
+<button class="flex flex-col items-center text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+<span class="text-[10px]">HOME</span>
+</button>
+<button class="flex flex-col items-center text-primary">
+<span class="material-symbols-outlined" data-icon="library_books">library_books</span>
+<span class="text-[10px]">LIBRARY</span>
+</button>
+<button class="flex flex-col items-center text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="text-[10px]">SETUP</span>
+</button>
+</nav>
+</body></html>

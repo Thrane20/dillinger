@@ -35,4 +35,7 @@ TypeScript 5.x with Node.js 18+: Follow standard conventions
 
 <!-- MANUAL ADDITIONS START -->
 - Streaming sidecar: Wolf built from source, no legacy compositor stack, no config.toml in Dillinger mode. REST API on port 9999.
+- UI work must follow the Stitch plans in `docs/stitch/`. Start with `docs/stitch/DESIGN.md` as the routing guide, then use the matching surface reference: dashboard -> `stitch_retro_workbench_launcher(1)/`, library -> `stitch_retro_workbench_launcher/`, settings -> `stitch_retro_workbench_launcher(2)/`, game detail -> `stitch_retro_workbench_launcher(3)/`.
+- Treat Stitch exports as visual references only. Preserve existing routes, data fetching, state, APIs, and component patterns; translate the designs into the app's existing React and Tailwind implementation.
+- Preserve the shared Retro-Modern Workbench system for UI changes: dark CRT workbench shell, zero-radius panels, 2px borders, 32px window title bars, electric blue active states, cyber green ok/launch states, neon orange highlight/warning states, dense utility-first layouts, and no soft marketing-card styling.
 <!-- MANUAL ADDITIONS END -->

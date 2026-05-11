@@ -8,6 +8,9 @@ dist/
 build/
 .next/
 out/
+/release/
+/packages/cli/native/*/app/
+/packages/cli/native/*/node/
 
 # Development
 .env*
@@ -106,6 +109,7 @@ Thumbs.db
 
 # Game data (will be in Docker volumes)
 /data/
+/packages/dillinger-core/data/
 /opt/games/
 
 # Backend local data (except README)

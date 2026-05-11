@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { detectFirstClassVolumes, getVolumeMetadataStore } from '@/lib/services/volume-manager';
+import { getVolumeDefaults } from '@/lib/services/volume-defaults';
 
 // Type definitions
 export interface VolumeDefaults {
@@ -15,24 +15,16 @@ export interface VolumeDefaults {
 }
 
 async function getDefaults(): Promise<VolumeDefaults> {
-  const [detected, metadata] = await Promise.all([
-    detectFirstClassVolumes(),
-    getVolumeMetadataStore(),
-  ]);
-
-  const installersPath = detected.firstClassStatus.cache.mountPath || '/cache';
-  const downloadsPath = detected.firstClassStatus.cache.mountPath || '/cache';
-  const installedPath = detected.firstClassStatus.installed.mounts[0]?.mountPath || '/installed';
-  const romsPath = detected.firstClassStatus.roms.mountPath || '/roms';
+  const resolved = await getVolumeDefaults();
 
   return {
     defaults: {
-      installers: installersPath,
-      downloads: downloadsPath,
-      installed: installedPath,
-      roms: romsPath,
+      installers: resolved.defaults.installers,
+      downloads: resolved.defaults.downloads,
+      installed: resolved.defaults.installed,
+      roms: resolved.defaults.roms,
     },
-    volumeMetadata: metadata.volumes,
+    volumeMetadata: resolved.volumeMetadata,
   };
 }
 
@@ -60,7 +52,7 @@ export async function PUT(request: NextRequest) {
     const data = await getDefaults();
     return NextResponse.json({
       success: true,
-      message: 'Volume defaults are now convention-based and read-only',
+      message: 'Volume defaults follow managed volume roles and are read-only',
       data,
     });
   } catch (error) {

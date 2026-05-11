@@ -198,21 +198,31 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
   useEffect(() => {
     const loadData = async () => {
       try {
-        const detectedResponse = await fetch('/api/volumes/detected');
-        if (detectedResponse.ok) {
-          const detectedData = await detectedResponse.json();
-          if (detectedData.success && detectedData.data?.volumes) {
-            const mounted = detectedData.data.volumes
+        const [managedResponse, detectedResponse] = await Promise.all([
+          fetch('/api/volumes'),
+          fetch('/api/volumes/detected'),
+        ]);
+        const managedData = await managedResponse.json();
+        const detectedData = await detectedResponse.json();
+        const managed = managedResponse.ok && managedData.success
+          ? (managedData.data || [])
+              .filter((v: any) => v.status !== 'error' && v.purpose === 'installed' && typeof v.hostPath === 'string')
+              .map((v: any) => ({ name: v.name || v.dockerVolumeName || v.hostPath, mountPath: v.hostPath }))
+          : [];
+        const detected = detectedResponse.ok && detectedData.success && detectedData.data?.volumes
+          ? detectedData.data.volumes
               .filter((v: any) => typeof v.mountPath === 'string' && v.mountPath.startsWith('/installed'))
               .map((v: any) => ({
                 name: v.dockerVolumeName || v.mountPath,
                 mountPath: v.mountPath,
-              }));
-            setInstalledMounts(mounted);
-            if (mounted[0]) {
-              setSelectedVolume(mounted[0].mountPath);
-            }
-          }
+              }))
+          : [];
+        const byPath = new Map<string, InstalledMount>();
+        [...managed, ...detected].forEach((mount) => byPath.set(mount.mountPath, mount));
+        const mounted = Array.from(byPath.values());
+        setInstalledMounts(mounted);
+        if (mounted[0]) {
+          setSelectedVolume(mounted[0].mountPath);
         }
 
         // Load available Wine versions (for Wine platform)
@@ -611,10 +621,10 @@ export default function InstallGameDialog({ gameId, platformId, onClose, onSucce
                   </p>
                 </div>
 
-                {/* Volume Quick Select */}
+                {/* Path Quick Select */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-muted mb-2">
-                    📦 Quick Select Volume
+                    📦 Quick Select Path
                   </label>
                   <div className="flex flex-wrap gap-2">
                     {installedMounts.length > 0 ? (

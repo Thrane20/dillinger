@@ -6,6 +6,7 @@
 
 import { JSONStorageService } from './storage';
 import type { Volume } from '@dillinger/shared';
+import { getVolumeMetadataStore } from './volume-manager';
 
 export interface VolumeDefaults {
   defaults: {
@@ -16,6 +17,7 @@ export interface VolumeDefaults {
   };
   volumeMetadata: Record<string, {
     storageType?: 'ssd' | 'platter' | 'archive';
+    purpose?: Volume['purpose'];
   }>;
 }
 
@@ -25,14 +27,25 @@ export type DefaultType = 'installers' | 'downloads' | 'installed' | 'roms';
  * Get the current volume defaults configuration
  */
 export async function getVolumeDefaults(): Promise<VolumeDefaults> {
+  const volumes = await getAllVolumes();
+  const metadata = await getVolumeMetadataStore();
+  const pickVolume = (...purposes: Array<NonNullable<Volume['purpose']>>) =>
+    volumes.find((volume) => volume.status === 'active' && volume.hostPath && purposes.includes(volume.purpose as NonNullable<Volume['purpose']>));
+
+  const cacheVolume = pickVolume('cache');
+  const downloadsVolume = pickVolume('downloads') ?? cacheVolume;
+  const installersVolume = pickVolume('installers') ?? cacheVolume;
+  const installedVolume = pickVolume('installed');
+  const romsVolume = pickVolume('roms');
+
   return {
     defaults: {
-      installers: '/cache',
-      downloads: '/cache',
-      installed: '/installed',
-      roms: '/roms',
+      installers: installersVolume?.hostPath || '/cache',
+      downloads: downloadsVolume?.hostPath || '/cache',
+      installed: installedVolume?.hostPath || '/installed',
+      roms: romsVolume?.hostPath || '/roms',
     },
-    volumeMetadata: {},
+    volumeMetadata: metadata.volumes,
   };
 }
 

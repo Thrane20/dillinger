@@ -1,13 +1,33 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
+import {
+  AdjustmentsHorizontalIcon,
+  ArrowDownTrayIcon,
+  BugAntIcon,
+  Cog6ToothIcon,
+  PlayIcon,
+  SignalIcon,
+  StopIcon,
+  TrashIcon,
+} from '@heroicons/react/24/outline';
 import type { Game as SharedGame } from '@dillinger/shared';
+import { formatLastPlayed, formatPlayTime } from './utils/timeFormat';
 import ConfirmationModal from './components/ConfirmationModal';
-import GameDetailModal from './components/GameDetailModal';
+import DownloadMonitor from './components/DownloadMonitor';
+import LogPanel from './components/LogPanel';
 
-// Frontend Game interface (extends shared but allows UI-specific statuses and properties)
+interface DownloadStatus {
+  gameId?: string;
+  status?: string;
+  progress?: {
+    totalProgress?: number;
+  };
+}
+
 interface Game extends Omit<SharedGame, 'installation'> {
   installation?: {
     status?: string;
@@ -18,6 +38,7 @@ interface Game extends Omit<SharedGame, 'installation'> {
     containerId?: string;
     error?: string;
     downloadProgress?: number;
+    wineVersionId?: string;
   };
 }
 
@@ -28,98 +49,111 @@ interface Session {
   containerId?: string;
 }
 
-const getPlatformName = (id: string) => {
-  const names: Record<string, string> = {
-    'linux-native': 'Linux',
-    'windows-wine': 'Wine',
-    proton: 'Proton',
-    dosbox: 'DOSBox',
-    scummvm: 'ScummVM',
-    c64: 'C64',
-    c128: 'C128',
-    vic20: 'VIC-20',
-    plus4: 'Plus/4',
-    pet: 'PET',
-    amiga: 'Amiga',
-    amiga500: 'A500',
-    amiga500plus: 'A500+',
-    amiga600: 'A600',
-    amiga1200: 'A1200',
-    amiga3000: 'A3000',
-    amiga4000: 'A4000',
-    cd32: 'CD32',
-    mame: 'Arcade',
-  };
-  return names[id] || id;
+type SortKey = 'title' | 'lastPlayed' | 'rating' | 'created';
+
+const platformNames: Record<string, string> = {
+  'linux-native': 'Linux',
+  'windows-wine': 'Wine',
+  proton: 'Proton',
+  dosbox: 'DOSBox',
+  scummvm: 'ScummVM',
+  c64: 'C64',
+  c128: 'C128',
+  vic20: 'VIC-20',
+  plus4: 'Plus/4',
+  pet: 'PET',
+  amiga: 'Amiga',
+  amiga500: 'A500',
+  amiga500plus: 'A500+',
+  amiga600: 'A600',
+  amiga1200: 'A1200',
+  amiga3000: 'A3000',
+  amiga4000: 'A4000',
+  cd32: 'CD32',
+  mame: 'Arcade',
+  arcade: 'Arcade',
 };
 
-// Helper to extract GOG ID from game
-// Handles both old format "gog-{gogId}" and new format "gog-{slug}-{gogId}"
-const getGogIdFromGame = (game: { id: string; slug?: string }): string | null => {
+const platformGroups: Record<string, string[]> = {
+  amiga: ['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'],
+  c64: ['c64', 'c128', 'vic20', 'plus4', 'pet'],
+  mame: ['mame', 'arcade'],
+};
+
+function getPlatformName(id?: string) {
+  return id ? platformNames[id] || id : 'Unknown';
+}
+
+function getGamePlatformIds(game: Game) {
+  const ids = new Set<string>();
+  if (game.defaultPlatformId) ids.add(game.defaultPlatformId);
+  if (game.platformId) ids.add(game.platformId);
+  for (const platform of game.platforms || []) ids.add(platform.platformId);
+  return Array.from(ids);
+}
+
+function platformMatches(game: Game, selectedPlatform: string) {
+  if (selectedPlatform === 'all') return true;
+  const candidates = platformGroups[selectedPlatform] || [selectedPlatform];
+  return getGamePlatformIds(game).some((id) => candidates.includes(id));
+}
+
+function getConfiguredPlatforms(game: Game) {
+  return (game.platforms || []).filter((p) => {
+    const emulatorPlatform = ['c64', 'c128', 'vic20', 'plus4', 'pet', 'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(p.platformId);
+    return p.filePath || p.settings?.launch?.command || (emulatorPlatform && p.filePath);
+  });
+}
+
+function getRequiredRunner(platformId: string): string | null {
+  if (['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(platformId)) return 'vice';
+  if (['arcade', 'mame', 'nes', 'snes', 'genesis'].includes(platformId)) return 'retroarch';
+  if (['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(platformId)) return 'fs-uae';
+  if (platformId === 'windows-wine') return 'wine';
+  if (platformId === 'linux-native') return 'linux-native';
+  return null;
+}
+
+function getGogIdFromGame(game: { id: string; slug?: string }): string | null {
   const extractGogId = (str: string): string | null => {
     if (!str.startsWith('gog-')) return null;
     const withoutPrefix = str.replace('gog-', '');
-    // New format: "gog-{slug}-{gogId}" - GOG IDs are 10-digit numbers at the end
     const gogIdMatch = withoutPrefix.match(/(\d{10})$/);
-    if (gogIdMatch) {
-      return gogIdMatch[1];
-    }
-    // Old format: "gog-{gogId}" - the whole thing after prefix is the ID
-    if (/^\d+$/.test(withoutPrefix)) {
-      return withoutPrefix;
-    }
-    return null;
+    if (gogIdMatch) return gogIdMatch[1];
+    return /^\d+$/.test(withoutPrefix) ? withoutPrefix : null;
   };
-  
   return extractGogId(game.id) || (game.slug ? extractGogId(game.slug) : null);
-};
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
 
 export default function GamesPage() {
   const router = useRouter();
   const [bootstrapChecked, setBootstrapChecked] = useState(false);
   const [isInitialized, setIsInitialized] = useState(true);
   const [bootstrapPreview, setBootstrapPreview] = useState<{ directories: string[]; files: string[] } | null>(null);
-  const [bootstrapDillingerRoot, setBootstrapDillingerRoot] = useState<string>('/data');
+  const [bootstrapDillingerRoot, setBootstrapDillingerRoot] = useState('/data');
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [games, setGames] = useState<Game[]>([]);
-  const [filteredGames, setFilteredGames] = useState<Game[]>([]);
-  const [filterText, setFilterText] = useState('');
   const [sessions, setSessions] = useState<Record<string, Session>>({});
   const [runners, setRunners] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
-  const [hoveredGameId, setHoveredGameId] = useState<string | null>(null);
-  const [backdropFadeDuration, setBackdropFadeDuration] = useState(0.5);
-  const [displayedBackdrop, setDisplayedBackdrop] = useState<string | null>(
-    null
-  );
-  const [backdropOpacity, setBackdropOpacity] = useState(0);
-  const [gridColumns, setGridColumns] = useState(2); // Default to 2 columns
-
+  const [filterText, setFilterText] = useState('');
+  const [selectedPlatform, setSelectedPlatform] = useState('all');
+  const [sortKey, setSortKey] = useState<SortKey>('title');
+  const [gridColumns, setGridColumns] = useState(4);
   const [debugDialogOpenForGameId, setDebugDialogOpenForGameId] = useState<string | null>(null);
   const [streamDebugDialogOpenForGameId, setStreamDebugDialogOpenForGameId] = useState<string | null>(null);
-  const [selectedGameForModal, setSelectedGameForModal] = useState<Game | null>(null);
-
-  // Compact mode for zoom levels 4-6
-  const isCompactMode = gridColumns >= 4;
-
-  // Delete game with download confirmation
-  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
-    gameId: string;
-    gameTitle: string;
-    hasDownload: boolean;
-    downloadProgress: number;
-  } | null>(null);
-
-  // Resume download with cache confirmation
-  const [cacheConfirmModal, setCacheConfirmModal] = useState<{
-    game: Game;
-    cacheSize: number;
-    fileCount: number;
-  } | null>(null);
-
-  // Wine version mismatch warning
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ gameId: string; gameTitle: string; hasDownload: boolean; downloadProgress: number } | null>(null);
+  const [cacheConfirmModal, setCacheConfirmModal] = useState<{ game: Game; cacheSize: number; fileCount: number } | null>(null);
   const [wineVersionMismatchModal, setWineVersionMismatchModal] = useState<{
     gameId: string;
     gameTitle: string;
@@ -131,72 +165,12 @@ export default function GamesPage() {
   } | null>(null);
 
   useEffect(() => {
-    if (!debugDialogOpenForGameId && !streamDebugDialogOpenForGameId) return;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setDebugDialogOpenForGameId(null);
-        setStreamDebugDialogOpenForGameId(null);
-      }
-    };
-
-    const onMouseDown = (e: MouseEvent) => {
-      const path = (e.composedPath?.() || []) as EventTarget[];
-      const clickedInside = path.some((t) => {
-        return (
-          typeof t === 'object' &&
-          t !== null &&
-          'getAttribute' in (t as any) &&
-          typeof (t as any).getAttribute === 'function' &&
-          (t as any).getAttribute('data-debug-menu') === 'true'
-        );
-      });
-
-      if (!clickedInside) {
-        setDebugDialogOpenForGameId(null);
-        setStreamDebugDialogOpenForGameId(null);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('mousedown', onMouseDown);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('mousedown', onMouseDown);
-    };
-  }, [debugDialogOpenForGameId, streamDebugDialogOpenForGameId]);
-
-  const hoveredGame = hoveredGameId
-    ? games.find((g) => g.id === hoveredGameId)
-    : null;
-  const backdropImage = hoveredGame?.metadata?.backdropImage;
-
-  // Handle backdrop changes with proper fade timing
-  useEffect(() => {
-    if (backdropImage === displayedBackdrop) return undefined;
-
-    if (!backdropImage) {
-      // Fade out
-      setBackdropOpacity(0);
-      const timeout = setTimeout(() => {
-        setDisplayedBackdrop(null);
-      }, backdropFadeDuration * 1000);
-      return () => clearTimeout(timeout);
-    } else if (!displayedBackdrop) {
-      // Fade in from nothing
-      setDisplayedBackdrop(backdropImage);
-      setTimeout(() => setBackdropOpacity(0.4), 50);
-      return undefined;
-    } else {
-      // Crossfade: fade out current, then fade in new
-      setBackdropOpacity(0);
-      const timeout = setTimeout(() => {
-        setDisplayedBackdrop(backdropImage);
-        setTimeout(() => setBackdropOpacity(0.4), 50);
-      }, backdropFadeDuration * 1000);
-      return () => clearTimeout(timeout);
-    }
-  }, [backdropImage, displayedBackdrop, backdropFadeDuration]);
+    const params = new URLSearchParams(window.location.search);
+    setSelectedPlatform(params.get('platform') || 'all');
+    setFilterText(params.get('q') || '');
+    const savedColumns = localStorage.getItem('gridColumns');
+    if (savedColumns) setGridColumns(parseInt(savedColumns, 10));
+  }, []);
 
   useEffect(() => {
     const checkBootstrap = async () => {
@@ -208,424 +182,177 @@ export default function GamesPage() {
         setBootstrapPreview(data.preview || null);
         if (typeof data.dillingerRoot === 'string') setBootstrapDillingerRoot(data.dillingerRoot);
       } catch {
-        // If the bootstrap status fails, default to existing behavior.
         setIsInitialized(true);
       } finally {
         setBootstrapChecked(true);
       }
     };
-
-    checkBootstrap();
-
-    // Only load the app data after bootstrap is confirmed.
-    // This prevents other components from touching /api/health and implicitly creating directories.
-    // loadGames() will be called in a follow-up effect once initialized.
-
-    // Load backdrop fade duration from settings
-    const loadBackdropSettings = () => {
-      const duration = parseFloat(
-        localStorage.getItem('backdropFadeDuration') || '0.5'
-      );
-      setBackdropFadeDuration(duration);
-    };
-
-    // Load grid columns from localStorage
-    const savedColumns = localStorage.getItem('gridColumns');
-    if (savedColumns) {
-      setGridColumns(parseInt(savedColumns, 10));
-    }
-
-    loadBackdropSettings();
-
-    // Listen for settings changes
-    const handleSettingsChange = () => {
-      loadBackdropSettings();
-    };
-
-    window.addEventListener('backdropSettingsChanged', handleSettingsChange);
-
-    return () => {
-      window.removeEventListener(
-        'backdropSettingsChanged',
-        handleSettingsChange
-      );
-    };
+    void checkBootstrap();
   }, []);
 
   useEffect(() => {
-    if (!bootstrapChecked) return;
-    if (!isInitialized) {
-      setLoading(false);
-      return;
-    }
-    loadGames();
-    loadRunners();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!bootstrapChecked || !isInitialized) return;
+    void loadGames();
+    void loadRunners();
   }, [bootstrapChecked, isInitialized]);
 
   useEffect(() => {
-    if (!bootstrapChecked) return;
-    if (!isInitialized) return;
-
-    // Poll for updates while downloads / installs are in progress
-    const pollInterval = setInterval(() => {
-      loadGames(true);
-    }, 5000);
-
+    if (!bootstrapChecked || !isInitialized) return;
+    const pollInterval = setInterval(() => void loadGames(true), 5000);
     return () => clearInterval(pollInterval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrapChecked, isInitialized]);
 
-  const runBootstrap = async () => {
-    setIsBootstrapping(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/bootstrap/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || `Bootstrap failed (${res.status})`);
-      }
-      // Reload to start the app fresh against the now-scaffolded volume.
-      window.location.reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Bootstrap failed');
-      setIsBootstrapping(false);
-    }
-  };
-
-  const bootstrapLoadingView = (
-    <div className="min-h-screen bg-background text-text flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl bg-surface border border-border rounded-xl p-6">
-        <h1 className="text-xl font-semibold">Checking your Dillinger setup…</h1>
-        <p className="mt-2 text-sm text-muted">
-          Looking for an existing database under{' '}
-          <span className="font-mono">{bootstrapDillingerRoot}</span>.
-        </p>
-      </div>
-    </div>
-  );
-
-  const onboardingView = (() => {
-    const preview = bootstrapPreview || { directories: [], files: [] };
-    return (
-      <div className="min-h-screen bg-background text-text flex items-center justify-center p-6">
-        <div className="w-full max-w-3xl bg-surface border border-border rounded-xl p-6">
-          <h1 className="text-2xl font-semibold">Oh hi there… looks like you’re new here…</h1>
-          <p className="mt-3 text-sm text-muted">
-            Your <span className="font-mono">dillinger_core</span> volume is configured and mounted, but it looks empty.
-            When you click OK, Dillinger will scaffold the base folders and config files it needs, then start fresh.
-          </p>
-
-          <div className="mt-5">
-            <h2 className="text-sm font-semibold text-text">What will be created</h2>
-            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-lg border border-border bg-background p-3">
-                <div className="text-xs font-semibold text-muted">Directories (relative to {bootstrapDillingerRoot})</div>
-                <ul className="mt-2 text-sm text-text space-y-1">
-                  {preview.directories.map((d) => (
-                    <li key={d} className="font-mono">{d}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-lg border border-border bg-background p-3">
-                <div className="text-xs font-semibold text-muted">Files (relative to {bootstrapDillingerRoot})</div>
-                <ul className="mt-2 text-sm text-text space-y-1">
-                  {preview.files.map((f) => (
-                    <li key={f} className="font-mono">{f}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-lg border border-border bg-background p-4">
-            <h2 className="text-sm font-semibold text-text">Already have a Dillinger database?</h2>
-            <p className="mt-2 text-sm text-muted">
-              If you expected your library to show up, please double-check your volume / file mapping.
-              Dillinger expects the host data directory to be mounted as the <span className="font-mono">dillinger_core</span> volume at <span className="font-mono">/data</span> in the container.
-            </p>
-            <pre className="mt-3 text-xs overflow-auto p-3 rounded-md bg-surface border border-border">
-docker volume create \\
-  --driver local \\
-  --opt type=none \\
-  --opt device=/path/to/your/dillinger/data \\
-  --opt o=bind \\
-  dillinger_core
-
-docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
-            </pre>
-          </div>
-
-          {error && (
-            <div className="mt-4 rounded-lg border border-border bg-background p-3 text-sm text-danger">
-              {error}
-            </div>
-          )}
-
-          <div className="mt-6 flex items-center justify-end gap-3">
-            <button
-              onClick={() => router.refresh()}
-              disabled={isBootstrapping}
-              className="px-4 py-2 text-sm font-medium text-text bg-surface border border-border rounded-lg hover:bg-hover transition-colors disabled:opacity-50"
-            >
-              Re-check
-            </button>
-            <button
-              onClick={runBootstrap}
-              disabled={isBootstrapping}
-              className="px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {isBootstrapping ? 'Scaffolding…' : 'OK'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  })();
-
-  // Filter games when search text changes
   useEffect(() => {
-    if (filterText.trim() === '') {
-      setFilteredGames(games);
-    } else {
-      const searchLower = filterText.toLowerCase();
-      const filtered = games.filter((game) =>
-        game.title.toLowerCase().includes(searchLower)
-      );
-      setFilteredGames(filtered);
-    }
-  }, [filterText, games]);
-
-  // Handle scroll to game from URL param
-  useEffect(() => {
-    if (!bootstrapChecked) return;
-    if (!isInitialized) return;
-    const params = new URLSearchParams(window.location.search);
-    const scrollTo = params.get('scrollTo');
-    if (scrollTo) {
-      // If we have a scrollTo param, reload games to ensure the new game is in the list
-      loadGames().then(() => {
-        // Wait a bit for the DOM to render
-        setTimeout(() => {
-          const element = document.getElementById(`game-${scrollTo}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Add a highlight effect
-            element.classList.add('ring-4', 'ring-blue-500');
-            setTimeout(() => {
-              element.classList.remove('ring-4', 'ring-blue-500');
-            }, 2000);
-          }
-        }, 100);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bootstrapChecked, isInitialized]);
-
-  // Poll running sessions to detect when containers stop
-  useEffect(() => {
-    if (!bootstrapChecked) return;
-    if (!isInitialized) return;
+    const runningSessions = Object.entries(sessions).filter(([, session]) => session.status === 'running');
+    if (runningSessions.length === 0) return;
     const pollInterval = setInterval(async () => {
-      // Check if we have any running sessions
-      const runningSessions = Object.entries(sessions).filter(
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        ([_, session]) => session.status === 'running'
-      );
-
-      if (runningSessions.length === 0) {
-        return; // Nothing to poll
-      }
-
-      // Check each running session
       for (const [gameId, session] of runningSessions) {
         try {
           const response = await fetch(`/api/launch/${gameId}/sessions`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.sessions) {
-              // Find the current session
-              const currentSession = data.sessions.find(
-                (s: any) => s.id === session.id
-              );
-
-              if (currentSession && currentSession.status !== 'running') {
-                // Session is no longer running - remove from local state
-                console.log(
-                  `Session for game ${gameId} is no longer running (status: ${currentSession.status})`
-                );
-                setSessions((prev) => {
-                  const newSessions = { ...prev };
-                  delete newSessions[gameId];
-                  return newSessions;
-                });
-              }
-            }
+          if (!response.ok) continue;
+          const data = await response.json();
+          const currentSession = data.success && data.sessions?.find((s: Session) => s.id === session.id);
+          if (currentSession && currentSession.status !== 'running') {
+            setSessions((prev) => {
+              const next = { ...prev };
+              delete next[gameId];
+              return next;
+            });
           }
         } catch (err) {
           console.error(`Error polling session for game ${gameId}:`, err);
         }
       }
-    }, 3000); // Poll every 3 seconds
-
+    }, 3000);
     return () => clearInterval(pollInterval);
-  }, [bootstrapChecked, isInitialized, sessions]); // Re-run when sessions change
+  }, [sessions]);
+
+  const filteredGames = useMemo(() => {
+    const searchLower = filterText.trim().toLowerCase();
+    const filtered = games.filter((game) => {
+      const matchesText = !searchLower || game.title.toLowerCase().includes(searchLower) || game.metadata?.developer?.toLowerCase().includes(searchLower);
+      return matchesText && platformMatches(game, selectedPlatform);
+    });
+
+    return filtered.sort((a, b) => {
+      if (sortKey === 'lastPlayed') {
+        return new Date(b.metadata?.lastPlayed || 0).getTime() - new Date(a.metadata?.lastPlayed || 0).getTime();
+      }
+      if (sortKey === 'rating') {
+        return (b.metadata?.rating || 0) - (a.metadata?.rating || 0);
+      }
+      if (sortKey === 'created') {
+        return new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime();
+      }
+      return a.title.localeCompare(b.title);
+    });
+  }, [filterText, games, selectedPlatform, sortKey]);
 
   async function loadRunners() {
     try {
       const response = await fetch('/api/runners');
       const data = await response.json();
-
       if (data.success) {
         const runnerMap: Record<string, boolean> = {};
-        data.runners.forEach((runner: any) => {
+        data.runners.forEach((runner: { id: string; installed: boolean }) => {
           runnerMap[runner.id] = runner.installed;
         });
         setRunners(runnerMap);
       }
-    } catch (error) {
-      console.error('Failed to load runners:', error);
+    } catch (err) {
+      console.error('Failed to load runners:', err);
     }
   }
 
   async function loadGames(silent = false) {
     try {
       const response = await fetch('/api/games');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          const games = data.data || [];
-
-          // Fetch all active download statuses in one request to avoid per-game polling.
-          const activeDownloadsByGameId = new Map<string, any>();
-          try {
-            const downloadsResponse = await fetch('/api/online-sources/gog/downloads');
-            if (downloadsResponse.ok) {
-              const downloadsData = await downloadsResponse.json();
-              for (const dl of downloadsData.downloads || []) {
-                if (dl?.gameId) {
-                  activeDownloadsByGameId.set(dl.gameId, dl);
-                }
-              }
-            }
-          } catch {
-            // Ignore download-status aggregation errors and continue with base game list.
-          }
-
-          const gamesWithDownloadStatus = games.map((game: any) => {
-            const dlStatus = activeDownloadsByGameId.get(game.id);
-            if (!dlStatus) {
-              return game;
-            }
-
-            if (dlStatus.status === 'failed' || dlStatus.status === 'paused') {
-              return {
-                ...game,
-                installation: {
-                  ...game.installation,
-                  status: 'download_cancelled',
-                  downloadProgress: dlStatus.progress?.totalProgress ?? 0,
-                },
-              };
-            }
-
-            if (dlStatus.status === 'downloading' || dlStatus.status === 'queued') {
-              return {
-                ...game,
-                installation: {
-                  ...game.installation,
-                  status: 'downloading',
-                  downloadProgress: dlStatus.progress?.totalProgress ?? 0,
-                },
-              };
-            }
-
-            return game;
-          });
-
-          setGames(gamesWithDownloadStatus);
-          // Clear any previous errors on successful load
-          if (!silent) {
-            setError(null);
-          }
-        }
-      } else {
-        if (!silent) {
-          setError('Failed to load games from API');
-        }
+      if (!response.ok) {
+        if (!silent) setError('Failed to load games from API');
+        return;
       }
+      const data = await response.json();
+      if (!data.success) return;
+
+      const activeDownloadsByGameId = new Map<string, DownloadStatus>();
+      try {
+        const downloadsResponse = await fetch('/api/online-sources/gog/downloads');
+        if (downloadsResponse.ok) {
+          const downloadsData = await downloadsResponse.json();
+          for (const dl of downloadsData.downloads || []) {
+            if (dl?.gameId) activeDownloadsByGameId.set(dl.gameId, dl);
+          }
+        }
+      } catch {
+        // Download aggregation is optional for the base library render.
+      }
+
+      const gamesWithDownloadStatus = (data.data || []).map((game: Game) => {
+        const dlStatus = activeDownloadsByGameId.get(game.id);
+        if (!dlStatus) return game;
+        if (dlStatus.status === 'failed' || dlStatus.status === 'paused') {
+          return { ...game, installation: { ...game.installation, status: 'download_cancelled', downloadProgress: dlStatus.progress?.totalProgress ?? 0 } };
+        }
+        if (dlStatus.status === 'downloading' || dlStatus.status === 'queued') {
+          return { ...game, installation: { ...game.installation, status: 'downloading', downloadProgress: dlStatus.progress?.totalProgress ?? 0 } };
+        }
+        return game;
+      });
+
+      setGames(gamesWithDownloadStatus);
+      if (!silent) setError(null);
     } catch (err) {
-      if (!silent) {
-        setError(
-          'Failed to load games: ' +
-            (err instanceof Error ? err.message : 'Unknown error')
-        );
-      }
+      if (!silent) setError(`Failed to load games: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
-      if (!silent) {
-        setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  }
+
+  async function runBootstrap() {
+    setIsBootstrapping(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/bootstrap/run', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Bootstrap failed (${res.status})`);
       }
+      window.location.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Bootstrap failed');
+      setIsBootstrapping(false);
     }
   }
 
   async function deleteGame(gameId: string) {
-    // Find the game to get its title
-    const game = games.find(g => g.id === gameId);
+    const game = games.find((g) => g.id === gameId);
     if (!game) return;
-
     try {
-      // Check if there's an active download for this game
       const cacheResponse = await fetch(`/api/online-sources/gog/downloads/${gameId}/cache`);
       const cacheData = await cacheResponse.json();
-
       if (cacheData.success && (cacheData.hasActiveDownload || cacheData.cacheExists)) {
-        // Show modal to ask about download/cache
-        setDeleteConfirmModal({
-          gameId,
-          gameTitle: game.title,
-          hasDownload: cacheData.hasActiveDownload,
-          downloadProgress: cacheData.downloadProgress || 0,
-        });
+        setDeleteConfirmModal({ gameId, gameTitle: game.title, hasDownload: cacheData.hasActiveDownload, downloadProgress: cacheData.downloadProgress || 0 });
         return;
       }
-    } catch (err) {
-      // Continue with regular delete flow if check fails
+    } catch {
+      // Fall through to normal confirmation.
     }
-
-    // No download - use simple confirm
-    if (!confirm('Are you sure you want to delete this game from your library?')) {
-      return;
-    }
-
+    if (!confirm('Are you sure you want to delete this game from your library?')) return;
     await performDeleteGame(gameId, false);
   }
 
   async function performDeleteGame(gameId: string, deleteCache: boolean) {
     try {
-      // If requested, delete the cache first
-      if (deleteCache) {
-        await fetch(`/api/online-sources/gog/downloads/${gameId}/cache`, {
-          method: 'DELETE',
-        });
-      }
-
-      const response = await fetch(`/api/games/${gameId}`, {
-        method: 'DELETE',
-      });
-
+      if (deleteCache) await fetch(`/api/online-sources/gog/downloads/${gameId}/cache`, { method: 'DELETE' });
+      const response = await fetch(`/api/games/${gameId}`, { method: 'DELETE' });
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
-          // Remove from local state
           setGames((prev) => prev.filter((g) => g.id !== gameId));
-          // Also remove any active session
           setSessions((prev) => {
-            const newSessions = { ...prev };
-            delete newSessions[gameId];
-            return newSessions;
+            const next = { ...prev };
+            delete next[gameId];
+            return next;
           });
         }
       } else {
@@ -633,10 +360,7 @@ docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
         setError(errorData.error || 'Failed to delete game');
       }
     } catch (err) {
-      setError(
-        'Failed to delete game: ' +
-          (err instanceof Error ? err.message : 'Unknown error')
-      );
+      setError(`Failed to delete game: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }
 
@@ -646,90 +370,47 @@ docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
       setError('Cannot resume: GOG ID not found');
       return;
     }
-
     try {
-      // Check if there are existing cache files
       const cacheResponse = await fetch(`/api/online-sources/gog/downloads/${game.id}/cache`);
       const cacheData = await cacheResponse.json();
-
-      // If there's already an active download, just continue it
       if (cacheData.success && cacheData.hasActiveDownload) {
         await performResumeDownload(game);
         return;
       }
-
-      // If there are cache files but no active download, ask user what to do
       if (cacheData.success && cacheData.cacheExists && cacheData.fileCount > 0) {
-        setCacheConfirmModal({
-          game,
-          cacheSize: cacheData.cacheSize,
-          fileCount: cacheData.fileCount,
-        });
+        setCacheConfirmModal({ game, cacheSize: cacheData.cacheSize, fileCount: cacheData.fileCount });
         return;
       }
-
-      // No cache, start fresh
       await performResumeDownload(game);
-    } catch (err) {
-      console.error('Failed to check cache:', err);
-      // Continue with download anyway
+    } catch {
       await performResumeDownload(game);
     }
   }
 
-  async function performResumeDownload(game: Game, clearCache: boolean = false) {
+  async function performResumeDownload(game: Game, clearCache = false) {
     const gogId = getGogIdFromGame(game);
     if (!gogId) {
       setError('Cannot resume: GOG ID not found');
       return;
     }
-
     try {
-      // Clear cache if requested
       if (clearCache) {
-        await fetch(`/api/online-sources/gog/downloads/${game.id}/cache`, {
-          method: 'DELETE',
-        });
-        // Small delay for cleanup
+        await fetch(`/api/online-sources/gog/downloads/${game.id}/cache`, { method: 'DELETE' });
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
-
-      // Resume/start download by calling the download endpoint
-      const response = await fetch(
-        `/api/online-sources/gog/games/${gogId}/download`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            gameId: game.id,
-            title: game.title,
-          }),
-        }
-      );
-
+      const response = await fetch(`/api/online-sources/gog/games/${gogId}/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameId: game.id, title: game.title }),
+      });
       if (response.ok) {
-        // Update UI to show downloading
-        setGames((prevGames) =>
-          prevGames.map((g) =>
-            g.id === game.id
-              ? {
-                  ...g,
-                  installation: { ...g.installation, status: 'downloading' },
-                }
-              : g
-          )
-        );
+        setGames((prev) => prev.map((g) => (g.id === game.id ? { ...g, installation: { ...g.installation, status: 'downloading' } } : g)));
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Failed to resume download');
       }
     } catch (err) {
-      setError(
-        'Failed to resume download: ' +
-          (err instanceof Error ? err.message : 'Unknown error')
-      );
+      setError(`Failed to resume download: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }
 
@@ -739,64 +420,23 @@ docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
       setError('Cannot restart: GOG ID not found');
       return;
     }
-
-    if (
-      !confirm(
-        'This will delete any existing downloaded files and start fresh. Continue?'
-      )
-    ) {
-      return;
-    }
-
+    if (!confirm('This will delete any existing downloaded files and start fresh. Continue?')) return;
     try {
-      // First, delete existing downloaded files by calling cancel (which cleans up)
-      await fetch(`/api/games/${game.id}/download`, {
-        method: 'DELETE',
-      });
-
-      // Small delay to let cleanup finish
+      await fetch(`/api/games/${game.id}/download`, { method: 'DELETE' });
       await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Then start a fresh download
-      const response = await fetch(
-        `/api/online-sources/gog/games/${gogId}/download`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            gameId: game.id,
-            title: game.title,
-          }),
-        }
-      );
-
+      const response = await fetch(`/api/online-sources/gog/games/${gogId}/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameId: game.id, title: game.title }),
+      });
       if (response.ok) {
-        // Update UI to show downloading
-        setGames((prevGames) =>
-          prevGames.map((g) =>
-            g.id === game.id
-              ? {
-                  ...g,
-                  installation: {
-                    ...g.installation,
-                    status: 'downloading',
-                    downloadProgress: 0,
-                  },
-                }
-              : g
-          )
-        );
+        setGames((prev) => prev.map((g) => (g.id === game.id ? { ...g, installation: { ...g.installation, status: 'downloading', downloadProgress: 0 } } : g)));
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Failed to restart download');
       }
     } catch (err) {
-      setError(
-        'Failed to restart download: ' +
-          (err instanceof Error ? err.message : 'Unknown error')
-      );
+      setError(`Failed to restart download: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }
 
@@ -807,88 +447,48 @@ docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
     options?: { keepContainer?: boolean; keepAlive?: boolean },
     skipVersionCheck?: boolean
   ) {
-    // Check for Wine version mismatch before launching
-    const game = games.find(g => g.id === gameId);
+    const game = games.find((g) => g.id === gameId);
     if (game && !skipVersionCheck) {
       const platform = platformId || game.defaultPlatformId;
       const isWinePlatform = platform === 'windows-wine' || platform?.includes('wine');
-      
       if (isWinePlatform) {
-        const installVersion = (game.installation as any)?.wineVersionId || 'unknown';
-        const currentVersion = (game as any).settings?.wine?.version || 'system';
-        
-        // Show warning if versions differ (and we know the install version)
+        const installVersion = game.installation?.wineVersionId || 'unknown';
+        const currentVersion = game.settings?.wine?.version || 'system';
         if (installVersion !== 'unknown' && installVersion !== currentVersion) {
-          setWineVersionMismatchModal({
-            gameId,
-            gameTitle: game.title,
-            installVersion,
-            currentVersion,
-            launchMode: mode,
-            platformId,
-            launchOptions: options,
-          });
-          return; // Don't launch yet - wait for user confirmation
+          setWineVersionMismatchModal({ gameId, gameTitle: game.title, installVersion, currentVersion, launchMode: mode, platformId, launchOptions: options });
+          return;
         }
       }
     }
-
-    // Proceed with launch
     await performLaunchGame(gameId, mode, platformId, options);
   }
 
-  async function performLaunchGame(
-    gameId: string,
-    mode: 'local' | 'streaming' = 'local',
-    platformId?: string,
-    options?: { keepContainer?: boolean; keepAlive?: boolean }
-  ) {
+  async function performLaunchGame(gameId: string, mode: 'local' | 'streaming' = 'local', platformId?: string, options?: { keepContainer?: boolean; keepAlive?: boolean }) {
     setLaunching((prev) => ({ ...prev, [gameId]: true }));
     setError(null);
-
     try {
       const response = await fetch(`/api/launch/${gameId}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          mode,
-          platformId, // Optional platform ID for multi-platform games
-          keepContainer: options?.keepContainer === true,
-          keepAlive: options?.keepAlive === true,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, platformId, keepContainer: options?.keepContainer === true, keepAlive: options?.keepAlive === true }),
       });
-
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.session) {
-          setSessions((prev) => ({
-            ...prev,
-            [gameId]: data.session,
-          }));
-          if (options?.keepContainer === true || options?.keepAlive === true) {
-            router.push(`/debug/${gameId}/${data.session.id}`);
-          }
-          // Game launched successfully - no modal needed
+          setSessions((prev) => ({ ...prev, [gameId]: data.session }));
+          if (options?.keepContainer === true || options?.keepAlive === true) router.push(`/debug/${gameId}/${data.session.id}`);
         }
       } else {
         const errorData = await response.json();
         if (mode === 'streaming' && errorData.validation?.issues?.length) {
-          const issues = errorData.validation.issues
-            .map((issue: { message?: string }) => issue.message)
-            .filter(Boolean)
-            .join('; ');
+          const issues = errorData.validation.issues.map((issue: { message?: string }) => issue.message).filter(Boolean).join('; ');
           setError(`Streaming graph validation failed: ${issues}`);
         } else {
           setError(errorData.error || 'Failed to launch game');
         }
       }
     } catch (err) {
-      setError(
-        'Failed to launch game: ' +
-          (err instanceof Error ? err.message : 'Unknown error')
-      );
+      setError(`Failed to launch game: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLaunching((prev) => ({ ...prev, [gameId]: false }));
     }
@@ -897,30 +497,22 @@ docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
   async function stopGame(gameId: string) {
     const session = sessions[gameId];
     if (!session) return;
-
     setLaunching((prev) => ({ ...prev, [gameId]: true }));
     setError(null);
-
     try {
       const response = await fetch(`/api/launch/${gameId}/stop`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sessionId: session.id,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: session.id }),
       });
-
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
           setSessions((prev) => {
-            const newSessions = { ...prev };
-            delete newSessions[gameId];
-            return newSessions;
+            const next = { ...prev };
+            delete next[gameId];
+            return next;
           });
-          // Game stopped successfully - refresh to show updated stats
           await loadGames();
         }
       } else {
@@ -928,1302 +520,266 @@ docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
         setError(errorData.error || 'Failed to stop game');
       }
     } catch (err) {
-      setError(
-        'Failed to stop game: ' +
-          (err instanceof Error ? err.message : 'Unknown error')
-      );
+      setError(`Failed to stop game: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLaunching((prev) => ({ ...prev, [gameId]: false }));
     }
   }
 
-  // Important: do not early-return before all hooks have been declared.
-  // Returning here (near the end of the component) keeps hook order stable.
-  if (!bootstrapChecked) {
-    return bootstrapLoadingView;
+  if (!bootstrapChecked || loading) {
+    return (
+      <div className="workbench-window">
+        <div className="workbench-titlebar">BOOT_SEQUENCE</div>
+        <div className="workbench-body flex min-h-[360px] items-center justify-center">
+          <div className="terminal-log w-full max-w-2xl">Checking Dillinger storage at {bootstrapDillingerRoot}...</div>
+        </div>
+      </div>
+    );
   }
 
   if (!isInitialized) {
-    return onboardingView;
-  }
-
-  if (loading) {
+    const preview = bootstrapPreview || { directories: [], files: [] };
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="mx-auto max-w-3xl workbench-window">
+        <div className="workbench-titlebar">FIRST_RUN.BOOTSTRAP</div>
+        <div className="workbench-body space-y-5">
+          <h1 className="font-display text-3xl font-black uppercase text-primary">Initialize Core Volume</h1>
+          <p className="text-sm text-muted">The mounted core volume is empty. Dillinger can scaffold the base folders and config files under <span className="font-mono text-text">{bootstrapDillingerRoot}</span>.</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="terminal-log">
+              <div className="mb-2 text-warning">Directories</div>
+              {preview.directories.map((d) => <div key={d}>{d}</div>)}
+            </div>
+            <div className="terminal-log">
+              <div className="mb-2 text-warning">Files</div>
+              {preview.files.map((f) => <div key={f}>{f}</div>)}
+            </div>
+          </div>
+          {error && <div className="border-2 border-danger bg-danger-soft p-3 text-sm text-danger">{error}</div>}
+          <div className="flex justify-end gap-3">
+            <button onClick={() => router.refresh()} disabled={isBootstrapping} className="pixel-button">Re-check</button>
+            <button onClick={runBootstrap} disabled={isBootstrapping} className="pixel-button pixel-button-success">{isBootstrapping ? 'Scaffolding...' : 'OK'}</button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col relative">
-      {/* Background Backdrop with Smooth Transition */}
-      {displayedBackdrop && (
-        <div
-          className="fixed inset-0 z-0 bg-cover bg-center"
-          style={{
-            backgroundImage: `url(${displayedBackdrop})`,
-            filter: 'blur(2px)',
-            opacity: backdropOpacity,
-            transition: `opacity ${backdropFadeDuration}s ease-in-out`,
-          }}
-        />
-      )}
+    <div className="space-y-4">
+      <section className="workbench-window">
+        <div className="workbench-titlebar">
+          <span>FILTER_GADGETS.LIB</span>
+          <span>{filteredGames.length}/{games.length} MODULES</span>
+        </div>
+        <div className="workbench-body grid gap-3 xl:grid-cols-[1fr_180px_220px]">
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted">Search Index</span>
+            <input value={filterText} onChange={(e) => setFilterText(e.target.value)} placeholder="Search by title or developer" className="workbench-field w-full" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted">Sort Stack</span>
+            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="workbench-field w-full">
+              <option value="title">Title</option>
+              <option value="lastPlayed">Last Played</option>
+              <option value="rating">Rating</option>
+              <option value="created">Added</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted">VIEW_SCALE {gridColumns}</span>
+            <input
+              type="range"
+              min="2"
+              max="6"
+              step="1"
+              value={gridColumns}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10);
+                setGridColumns(value);
+                localStorage.setItem('gridColumns', String(value));
+              }}
+              className="w-full accent-primary"
+            />
+          </label>
+        </div>
+      </section>
 
-      {/* Content Container - flex column, fills available space */}
-      <div className="relative z-10 flex flex-col h-[80vh]">
-        
-        {/* Filter Bar - Fixed at top, never scrolls */}
-        <div className="flex-shrink-0  p-4 border-b border-border">
-          <div className="card">
-            <div className="card-body">
-              <div className="flex gap-4 items-end">
-                {/* Search Filter - 3/4 width */}
-                <div className="w-3/4">
-                  <label
-                    htmlFor="filter"
-                    className="block text-sm font-medium text-muted mb-2"
-                  >
-                    Filter Games
-                  </label>
-                  <input
-                    type="text"
-                    id="filter"
-                    value={filterText}
-                    onChange={(e) => setFilterText(e.target.value)}
-                    placeholder="Search by title..."
-                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  {filterText && (
-                    <p className="mt-1 text-sm text-muted">
-                      Showing {filteredGames.length} of {games.length} games
-                    </p>
-                  )}
-                </div>
-
-                {/* Grid Size Slider - 1/4 width */}
-                <div className="w-1/4">
-                  <label
-                    htmlFor="gridSize"
-                    className="block text-sm font-medium text-muted mb-2"
-                  >
-                    Zoom: {gridColumns} {gridColumns >= 4 ? '(compact)' : gridColumns === 1 ? 'col' : 'cols'}
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range"
-                      id="gridSize"
-                      min="1"
-                      max="6"
-                      step="1"
-                      value={gridColumns}
-                      onChange={(e) => {
-                        const newValue = parseInt(e.target.value, 10);
-                        setGridColumns(newValue);
-                        localStorage.setItem('gridColumns', newValue.toString());
-                      }}
-                      className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary"
-                    />
-                  </div>
-                  <div className="flex justify-between mt-1 text-xs text-muted">
-                    {[1, 2, 3, 4, 5, 6].map((num) => (
-                      <button
-                        key={num}
-                        onClick={() => {
-                          setGridColumns(num);
-                          localStorage.setItem('gridColumns', num.toString());
-                        }}
-                        className={`hover:text-primary transition-colors ${gridColumns === num ? 'text-primary font-semibold' : ''}`}
-                      >
-                        {num}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+      {error && (
+        <div className="workbench-window border-danger">
+          <div className="workbench-titlebar bg-danger-soft text-danger">ALERT.WINDOW</div>
+          <div className="workbench-body text-sm text-danger">
+            {error}
+            {error.startsWith('Streaming graph validation failed') && (
+              <button onClick={() => router.push('/settings#streaming')} className="ml-3 underline">Open streaming settings</button>
+            )}
           </div>
         </div>
+      )}
 
-        {/* Scrollable Game Tiles Area - Takes remaining space, scrolls independently */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {/* Error Alert */}
-          {error && (
-            <div className="alert-error">
-              <div className="flex items-start gap-3">
-                <svg
-                  className="h-5 w-5 text-danger"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <div>
-                  <h3 className="text-sm font-semibold text-danger-foreground">
-                    Error
-                  </h3>
-                  <p className="mt-2 text-sm text-muted">{error}</p>
-                  {error.startsWith('Streaming graph validation failed') && (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => router.push('/settings#streaming')}
-                        className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80"
-                      >
-                        Open streaming settings
-                        <span aria-hidden="true">→</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-        {filteredGames.length === 0 && games.length > 0 ? (
-          <div className="card">
-            <div className="card-body text-center py-12">
-              <svg
-                className="mx-auto h-12 w-12 text-muted"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <h3 className="mt-4 text-lg font-medium text-text">
-                No games match your filter
-              </h3>
-              <p className="mt-2 text-sm text-muted">
-                Try a different search term.
-              </p>
-              <div className="mt-6">
-                <button
-                  onClick={() => setFilterText('')}
-                  className="btn-primary"
-                >
-                  Clear Filter
-                </button>
-              </div>
-            </div>
+      <div className="grid gap-4 2xl:grid-cols-[1fr_320px]">
+        <section className="workbench-window">
+          <div className="workbench-titlebar">
+            <span>VOLUME: {selectedPlatform === 'all' ? 'ALL_PLATFORMS' : getPlatformName(selectedPlatform).toUpperCase()}_TITLES</span>
+            <Link href="/games/add" className="text-accent hover:text-success">ADD_MODULE</Link>
           </div>
-        ) : games.length === 0 ? (
-          <div className="card">
-            <div className="card-body text-center py-12">
-              <svg
-                className="mx-auto h-12 w-12 text-muted"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                aria-hidden="true"
+          <div className="workbench-body">
+            {filteredGames.length === 0 ? (
+              <div className="terminal-log min-h-[240px]">No matching game modules. Clear filters or add a new game.</div>
+            ) : (
+              <div
+                className="grid gap-3"
+                style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${gridColumns >= 5 ? 150 : gridColumns >= 4 ? 180 : 230}px, 1fr))` }}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
-                />
-              </svg>
-              <h3 className="mt-4 text-lg font-medium text-text">
-                No games found
-              </h3>
-              <p className="mt-2 text-sm text-muted">
-                Get started by adding your first game.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div
-            className={`grid gap-6 p-1 ${
-              gridColumns === 1
-                ? 'grid-cols-1'
-                : gridColumns === 2
-                  ? 'grid-cols-2'
-                  : gridColumns === 3
-                    ? 'grid-cols-3'
-                    : gridColumns === 4
-                      ? 'grid-cols-4'
-                      : gridColumns === 5
-                        ? 'grid-cols-5'
-                        : 'grid-cols-6'
-            }`}
-          >
-            {filteredGames.map((game) => {
-              const session = sessions[game.id];
-              const isLaunching = launching[game.id];
-              const isRunning = session && session.status === 'running';
+                {filteredGames.map((game) => {
+                  const configuredPlatforms = getConfiguredPlatforms(game);
+                  const isConfigured = configuredPlatforms.length > 0;
+                  const requiredRunner = configuredPlatforms[0] ? getRequiredRunner(configuredPlatforms[0].platformId) : null;
+                  const isRunnerAvailable = !requiredRunner || runners[requiredRunner] === true;
+                  const session = sessions[game.id];
+                  const isRunning = session?.status === 'running';
+                  const isLaunching = launching[game.id];
+                  const platformBadges = getGamePlatformIds(game).slice(0, 3);
+                  const installStatus = game.installation?.status;
+                  const image = game.metadata?.primaryImage || game.metadata?.coverArt;
 
-              // Get configured platforms
-              const platforms = game.platforms || [];
-
-              // Check which platforms are configured
-              const configuredPlatforms = platforms.filter((p) => {
-                const isEmulatorPlatform = [
-                  'c64',
-                  'c128',
-                  'vic20',
-                  'plus4',
-                  'pet',
-                  'amiga',
-                  'amiga500',
-                  'amiga500plus',
-                  'amiga600',
-                  'amiga1200',
-                  'amiga3000',
-                  'amiga4000',
-                  'cd32',
-                ].includes(p.platformId);
-                return (
-                  p.filePath ||
-                  p.settings?.launch?.command ||
-                  (isEmulatorPlatform && p.filePath)
-                );
-              });
-
-              const isConfigured = configuredPlatforms.length > 0;
-
-              // Determine required runner based on platform
-              const getRequiredRunner = (platformId: string): string | null => {
-                if (['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(platformId)) return 'vice';
-                if (['arcade', 'mame', 'nes', 'snes', 'genesis'].includes(platformId)) return 'retroarch';
-                if (['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(platformId)) return 'fs-uae';
-                if (platformId === 'windows-wine') return 'wine';
-                if (platformId === 'linux-native') return 'linux-native';
-                return null;
-              };
-
-              const requiredRunner = configuredPlatforms.length > 0 
-                ? getRequiredRunner(configuredPlatforms[0].platformId)
-                : null;
-              const isRunnerAvailable = !requiredRunner || runners[requiredRunner] === true;
-
-              const primaryImage = game.metadata?.primaryImage;
-
-              // Check if any game is currently running
-              const anyGameRunning = Object.keys(sessions).some(
-                (id) => sessions[id]?.status === 'running'
-              );
-              const isOtherGameRunning = anyGameRunning && !isRunning;
-
-              const isAnotherGameHovered =
-                hoveredGameId !== null && hoveredGameId !== game.id;
-              const isDebugMenuOpen =
-                debugDialogOpenForGameId === game.id ||
-                streamDebugDialogOpenForGameId === game.id;
-
-              return (
-                <div
-                  key={game.id}
-                  id={`game-${game.id}`}
-                  className={`card transition-all duration-200 hover:scale-[1.02] relative ${
-                    isOtherGameRunning
-                      ? 'opacity-30'
-                      : isAnotherGameHovered
-                        ? 'opacity-90'
-                        : 'opacity-100'
-                  } ${isDebugMenuOpen ? 'z-50' : 'z-0'}`}
-                  onMouseEnter={() => setHoveredGameId(game.id)}
-                  onMouseLeave={() => setHoveredGameId(null)}
-                >
-                  {/* Loading Spinner Overlay */}
-                  {isLaunching && (
-                    <div className="absolute inset-0 bg-white dark:bg-gray-900 bg-opacity-80 dark:bg-opacity-80 z-10 flex items-center justify-center rounded-lg">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className={`animate-spin rounded-full border-b-2 border-primary ${isCompactMode ? 'h-6 w-6' : 'h-12 w-12'}`}></div>
-                        {!isCompactMode && (
-                          <p className="text-sm font-medium text-text">
-                            {isRunning ? 'Stopping...' : 'Launching...'}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Primary Image */}
-                  {primaryImage && (
-                    <div className={`w-full bg-gray-200 dark:bg-gray-700 overflow-hidden rounded-t-3xl relative ${isCompactMode ? 'h-32' : 'h-48'}`}>
-                      <img
-                        src={primaryImage}
-                        alt={game.title}
-                        className="w-full h-full object-cover"
-                      />
-                      {/* Status Badges - only show in non-compact mode */}
-                      {!isCompactMode && (
-                        <div className="absolute top-3 right-3 flex gap-2">
-                          {!isConfigured && (
-                            <span className="flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900 px-3 py-1.5 text-xs font-medium text-yellow-800 dark:text-yellow-100 shadow-lg">
-                              Placeholder
-                            </span>
-                          )}
-                          {!isRunnerAvailable && isConfigured && (
-                            <span className="flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900 px-3 py-1.5 text-xs font-medium text-red-800 dark:text-red-100 shadow-lg">
-                              Runner not available
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {/* Compact mode status indicators */}
-                      {isCompactMode && (!isConfigured || (!isRunnerAvailable && isConfigured)) && (
-                        <div className="absolute top-1 right-1">
-                          {!isConfigured && (
-                            <span className="flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900 w-5 h-5 shadow-lg" title="Needs configuration">
-                              <svg className="h-3 w-3 text-yellow-800 dark:text-yellow-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                              </svg>
-                            </span>
-                          )}
-                          {!isRunnerAvailable && isConfigured && (
-                            <span className="flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900 w-5 h-5 shadow-lg" title="Runner not available">
-                              <svg className="h-3 w-3 text-red-800 dark:text-red-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {/* Running indicator for compact mode */}
-                      {isCompactMode && isRunning && (
-                        <div className="absolute bottom-1 left-1">
-                          <span className="inline-block h-3 w-3 rounded-full bg-green-500 animate-pulse shadow-lg" title="Running"></span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Compact Mode Card Body */}
-                  {isCompactMode ? (
-                    <div className="card-body p-2 space-y-2">
-                      <h3 className="text-sm font-semibold text-text line-clamp-1" title={game.title}>
-                        {game.title}
-                      </h3>
-                      <div className="flex gap-1 justify-center">
-                        {!isConfigured ? (
-                          <>
-                            <a
-                              href={`/games/${game.id}/edit`}
-                              className="p-1.5 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
-                              title="Configure Game"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              </svg>
-                            </a>
-                            <button
-                              onClick={() => setSelectedGameForModal(game)}
-                              className="p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
-                              title="View Details"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                              </svg>
-                            </button>
-                          </>
-                        ) : isRunning ? (
-                          <>
-                            <button
-                              onClick={() => stopGame(game.id)}
-                              disabled={isLaunching}
-                              className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded transition-colors disabled:opacity-60"
-                              title="Stop Game"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => setSelectedGameForModal(game)}
-                              className="p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
-                              title="View Details"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                              </svg>
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => launchGame(game.id, 'local')}
-                              disabled={isLaunching || !isRunnerAvailable}
-                              className="p-1.5 bg-green-700 hover:bg-green-800 text-white rounded transition-colors disabled:opacity-60"
-                              title={!isRunnerAvailable ? "Runner not available" : "Launch"}
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                            </button>
-                            <div className="relative inline-flex" data-debug-menu="true">
-                              <button
-                                onClick={() => launchGame(game.id, 'streaming')}
-                                disabled={isLaunching}
-                                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-l transition-colors disabled:opacity-60"
-                                title="Stream"
-                              >
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                </svg>
-                              </button>
-                              <button
-                                onClick={() =>
-                                  setStreamDebugDialogOpenForGameId((prev) =>
-                                    prev === game.id ? null : game.id
-                                  )
-                                }
-                                disabled={isLaunching}
-                                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-r transition-colors disabled:opacity-60 border-l border-blue-900/30"
-                                title="Debug stream options (keeps container alive)"
-                                aria-label="Open stream debug options"
-                              >
-                                <svg
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M19 9l-7 7-7-7"
-                                  />
-                                </svg>
-                              </button>
-
-                              {streamDebugDialogOpenForGameId === game.id && (
-                                <>
-                                  <div
-                                    className="fixed inset-0 z-[9998]"
-                                    data-debug-menu="true"
-                                    onClick={() => setStreamDebugDialogOpenForGameId(null)}
-                                  />
-                                  <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-[9999]" data-debug-menu="true">
-                                    <div className="p-3 border-b border-border">
-                                      <div className="text-sm font-semibold text-text">
-                                        Start Debugging (Stream)
-                                      </div>
-                                      <div className="text-xs text-muted mt-1">
-                                        Keeps the streaming container alive for logs/inspect.
-                                      </div>
-                                    </div>
-                                    <div className="p-3 flex gap-2">
-                                      <button
-                                        onClick={() => {
-                                          setStreamDebugDialogOpenForGameId(null);
-                                          void launchGame(game.id, 'streaming', undefined, {
-                                            keepContainer: true,
-                                            keepAlive: true,
-                                          });
-                                        }}
-                                        disabled={isLaunching}
-                                        className="flex-1 bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-2 transition-colors disabled:opacity-60"
-                                        title="Debug stream (keep container + keep alive)"
-                                      >
-                                        {isLaunching ? (
-                                          <span className="inline-flex items-center gap-2">
-                                            <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                                            Launching…
-                                          </span>
-                                        ) : (
-                                          'Start Debugging'
-                                        )}
-                                      </button>
-                                      <button
-                                        onClick={() => setStreamDebugDialogOpenForGameId(null)}
-                                        className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700 text-text hover:opacity-90"
-                                        title="Cancel"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => setSelectedGameForModal(game)}
-                              className="p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
-                              title="View Details"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                              </svg>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    /* Full Mode Card Body */
-                    <div className="card-body space-y-4">
-                      <div>
-                        <div className="flex items-start gap-4">
-                          <h3 className="text-xl font-semibold text-text w-3/4">
-                            {game.title}
-                          </h3>
-                          {/* Maximize button for full mode */}
-                          <button
-                            onClick={() => setSelectedGameForModal(game)}
-                            className="ml-auto p-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text rounded transition-colors"
-                            title="View Details"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                            </svg>
-                          </button>
-                        </div>
-                        {game.metadata?.developer && (
-                          <p className="text-sm text-muted">
-                            {game.metadata.developer}
-                          </p>
-                        )}
-                      </div>
-
-                    {game.metadata?.description && (
-                      <p className="text-sm text-muted line-clamp-3">
-                        {game.metadata.description}
-                      </p>
-                    )}
-
-                    {/* Download Progress */}
-                    {(game as any).installation?.status === 'downloading' && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-blue-600 dark:text-blue-400 font-medium">
-                            Downloading...
-                          </span>
-                          <span className="text-muted">
-                            {(game as any).installation?.downloadProgress || 0}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                          <div
-                            className="bg-blue-600 h-full transition-all duration-300 rounded-full"
-                            style={{
-                              width: `${(game as any).installation?.downloadProgress || 0}%`,
-                            }}
-                          ></div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Download Cancelled */}
-                    {(game as any).installation?.status ===
-                      'download_cancelled' && (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-400">
-                          <svg
-                            className="h-5 w-5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                            />
-                          </svg>
-                          <span className="font-medium">
-                            Download Cancelled -{' '}
-                            {(game as any).installation?.downloadProgress || 0}%
-                          </span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => resumeDownload(game)}
-                            className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                          >
-                            Resume
-                          </button>
-                          <button
-                            onClick={() => restartDownload(game)}
-                            className="flex-1 px-3 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                          >
-                            Restart
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Ready to Install Badge */}
-                    {(game as any).installation?.status ===
-                      'ready_to_install' && (
-                      <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                        <svg
-                          className="h-5 w-5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                        <span className="font-medium">Ready to Install</span>
-                      </div>
-                    )}
-
-                    {/* Play Statistics */}
-                    <div className="flex items-center gap-2">
-                      {!game.metadata?.playCount ||
-                      game.metadata.playCount === 0 ? (
-                        <div className="text-xs text-muted italic">
-                          Never played
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-                            {game.metadata?.lastPlayed && (
-                              <div className="flex items-center gap-1">
-                                <svg
-                                  className="h-3.5 w-3.5"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                                  />
-                                </svg>
-                                <span>
-                                  Last:{' '}
-                                  {formatLastPlayed(game.metadata.lastPlayed)}
-                                </span>
-                              </div>
-                            )}
-                            {game.metadata?.playCount !== undefined &&
-                              game.metadata.playCount > 0 && (
-                                <div className="flex items-center gap-1">
-                                  <svg
-                                    className="h-3.5 w-3.5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                                    />
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                    />
-                                  </svg>
-                                  <span>
-                                    {game.metadata.playCount}{' '}
-                                    {game.metadata.playCount === 1
-                                      ? 'play'
-                                      : 'plays'}
-                                  </span>
-                                </div>
-                              )}
-                            {game.metadata?.playTime !== undefined &&
-                              game.metadata.playTime > 0 && (
-                                <div className="flex items-center gap-1">
-                                  <svg
-                                    className="h-3.5 w-3.5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M13 10V3L4 14h7v7l9-11h-7z"
-                                    />
-                                  </svg>
-                                  <span>
-                                    {formatPlayTime(game.metadata.playTime)}{' '}
-                                    played
-                                  </span>
-                                </div>
-                              )}
-                          </div>
-                          <a
-                            href={`/games/${game.id}/sessions`}
-                            className="flex-shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
-                            title="View play history"
-                          >
-                            <svg
-                              className="w-3 h-3"
-                              fill="currentColor"
-                              viewBox="0 0 20 20"
-                            >
-                              <path
-                                fillRule="evenodd"
-                                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                                clipRule="evenodd"
-                              />
-                            </svg>
-                          </a>
-                        </>
-                      )}
-                    </div>
-
-                    {game.metadata?.genre && game.metadata.genre.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {game.metadata.genre.map((genre) => (
-                          <span
-                            key={genre}
-                            className="inline-flex items-center rounded-full bg-primary-soft px-3 py-1 text-xs font-medium text-secondary-foreground"
-                          >
-                            {genre}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {game.metadata?.similarGames &&
-                      game.metadata.similarGames.length > 0 && (
-                        <div className="pt-2">
-                          <a
-                            href={`/scrapers?similar=${encodeURIComponent(
-                              JSON.stringify(
-                                game.metadata.similarGames.map((sg) => sg.title)
-                              )
-                            )}`}
-                            className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary-hover font-medium"
-                          >
-                            <svg
-                              className="h-4 w-4"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
-                              />
-                            </svg>
-                            ({game.metadata.similarGames.length}) Similar Titles
-                          </a>
-                        </div>
-                      )}
-
-                    <div className="pt-2 border-t border-border">
-                      <dl className="text-xs space-y-1">
-                        {/* Show configured platforms */}
-                        {configuredPlatforms.length > 0 ? (
-                          <div>
-                            <dt className="text-muted mb-1">
-                              Configured Platforms:
-                            </dt>
-                            <dd className="flex flex-wrap gap-1">
-                              {configuredPlatforms.map((platform) => (
-                                <span
-                                  key={platform.platformId}
-                                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                                    platform.platformId ===
-                                    game.defaultPlatformId
-                                      ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-100 ring-1 ring-blue-600'
-                                      : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
-                                  }`}
-                                >
-                                  {getPlatformName(platform.platformId)}
-                                  {platform.platformId ===
-                                    game.defaultPlatformId && ' ★'}
-                                </span>
-                              ))}
-                            </dd>
-                          </div>
-                        ) : (
-                          <div className="flex justify-between">
-                            <dt className="text-muted">Platform:</dt>
-                            <dd className="font-medium text-text">Not set</dd>
-                          </div>
-                        )}
-
-                        {!isConfigured && (
-                          <div className="flex justify-between">
-                            <dt className="text-muted">Status:</dt>
-                            <dd className="font-medium text-yellow-600 dark:text-yellow-400">
-                              Needs configuration
-                            </dd>
-                          </div>
-                        )}
-                      </dl>
-                    </div>
-
-                    {isRunning && session && (
-                      <div className="alert-success">
-                        <div className="text-xs space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="inline-block h-2 w-2 rounded-full bg-success animate-pulse"></span>
-                            <span className="font-semibold text-success-foreground">
-                              Running
-                            </span>
-                          </div>
-                          <p className="text-muted">
-                            Container: {session.containerId?.substring(0, 12)}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex gap-2">
-                      {!isConfigured ? (
-                        // Show prominent configure button for unconfigured games
-                        <>
-                          <a
-                            href={`/games/${game.id}/edit`}
-                            className="bg-gray-600 hover:bg-gray-400 text-white rounded-md px-3 py-2 transition-colors flex-1 inline-flex items-center justify-center"
-                          >
-                            <svg
-                              className="inline-block h-4 w-4 mr-2"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                              />
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                              />
-                            </svg>
-                            Configure Game
-                          </a>
-                          <button
-                            onClick={() => deleteGame(game.id)}
-                            className="px-3 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition-colors text-sm"
-                            title="Delete game"
-                          >
-                            <svg
-                              className="h-5 w-5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1v3M4 7h16"
-                              />
-                            </svg>
-                          </button>
-                        </>
-                      ) : isRunning ? (
-                        <button
-                          onClick={() => stopGame(game.id)}
-                          disabled={isLaunching}
-                          className="btn-danger flex-1"
-                        >
-                          {isLaunching ? (
-                            <>
-                              <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                              Stopping...
-                            </>
+                  return (
+                    <article key={game.id} id={`game-${game.id}`} className="group relative border-2 border-neutral bg-background transition-colors hover:border-primary">
+                      <Link href={`/games/${game.id}`} className="block">
+                        <div className="relative aspect-[3/4] overflow-hidden border-b-2 border-neutral bg-black">
+                          {image ? (
+                            <Image src={image} alt={game.title} fill unoptimized sizes="(min-width: 1536px) 16vw, (min-width: 1024px) 22vw, 50vw" className="object-cover transition-transform duration-200 group-hover:scale-105" />
                           ) : (
-                            'Stop Game'
+                            <div className="flex h-full items-center justify-center p-4 text-center text-xs uppercase text-muted">No Media</div>
                           )}
-                        </button>
-                      ) : (
-                        <>
-                          <div className="relative inline-flex" data-debug-menu="true">
-                            <button
-                              onClick={() => launchGame(game.id, 'local')}
-                              disabled={isLaunching || !isRunnerAvailable}
-                              className="bg-green-700 hover:bg-green-800 text-white rounded-l-md px-3 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              title={!isRunnerAvailable ? "Runner image not available" : "Launch normally"}
-                            >
-                              Launch
-                            </button>
-                            <button
-                              onClick={() =>
-                                setDebugDialogOpenForGameId((prev) =>
-                                  prev === game.id ? null : game.id
-                                )
-                              }
-                              disabled={isLaunching || !isRunnerAvailable}
-                              className="bg-green-700 hover:bg-green-800 text-white rounded-r-md px-2 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed border-l border-green-900/30"
-                              title={!isRunnerAvailable ? "Runner image not available" : "Open debug options"}
-                              aria-label="Open debug options"
-                            >
-                              <svg
-                                className="h-4 w-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M19 9l-7 7-7-7"
-                                />
-                              </svg>
-                            </button>
-
-                            {debugDialogOpenForGameId === game.id && (
-                              <>
-                                <div
-                                  className="fixed inset-0 z-[9998]"
-                                  data-debug-menu="true"
-                                  onClick={() => setDebugDialogOpenForGameId(null)}
-                                />
-                                <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-[9999]" data-debug-menu="true">
-                                <div className="p-3 border-b border-border">
-                                  <div className="text-sm font-semibold text-text">
-                                    Start Debugging
-                                  </div>
-                                  <div className="text-xs text-muted mt-1">
-                                    Keeps the container alive for logs/inspect.
-                                  </div>
-                                </div>
-                                <div className="p-3 flex gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setDebugDialogOpenForGameId(null);
-                                      void launchGame(game.id, 'local', undefined, {
-                                        keepContainer: true,
-                                        keepAlive: true,
-                                      });
-                                    }}
-                                    disabled={isLaunching}
-                                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-2 transition-colors disabled:opacity-60"
-                                    title="Debug launch (keep container + keep alive)"
-                                  >
-                                    {isLaunching ? (
-                                      <span className="inline-flex items-center gap-2">
-                                        <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                                        Launching…
-                                      </span>
-                                    ) : (
-                                      'Start Debugging'
-                                    )}
-                                  </button>
-                                  <button
-                                    onClick={() => setDebugDialogOpenForGameId(null)}
-                                    className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700 text-text hover:opacity-90"
-                                    title="Cancel"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                                </div>
-                              </>
-                            )}
+                          <div className="absolute left-2 top-2 flex flex-wrap gap-1">
+                            {!isConfigured && <span className="status-pill border-warning text-warning">Config</span>}
+                            {!isRunnerAvailable && isConfigured && <span className="status-pill border-danger text-danger">Runner</span>}
+                            {isRunning && <span className="status-pill border-success text-success">Running</span>}
                           </div>
-                          <div className="relative inline-flex flex-1" data-debug-menu="true">
-                            <button
-                              onClick={() => launchGame(game.id, 'streaming')}
-                              disabled={isLaunching}
-                              className="bg-blue-600 hover:bg-blue-700 text-white rounded-l-md px-3 py-2 transition-colors flex-1 disabled:opacity-60 disabled:cursor-not-allowed"
-                              title="Launch game for streaming via Moonlight"
-                            >
-                              {isLaunching ? (
-                                <>
-                                  <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                                  Launching...
-                                </>
-                              ) : (
-                                <>
-                                  <svg
-                                    className="inline-block h-4 w-4 mr-2"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                    />
-                                  </svg>
-                                  Stream
-                                </>
-                              )}
-                            </button>
-                            <button
-                              onClick={() =>
-                                setStreamDebugDialogOpenForGameId((prev) =>
-                                  prev === game.id ? null : game.id
-                                )
-                              }
-                              disabled={isLaunching}
-                              className="bg-blue-600 hover:bg-blue-700 text-white rounded-r-md px-2 py-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed border-l border-blue-900/30"
-                              title="Open stream debug options"
-                              aria-label="Open stream debug options"
-                            >
-                              <svg
-                                className="h-4 w-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M19 9l-7 7-7-7"
-                                />
-                              </svg>
-                            </button>
-
-                            {streamDebugDialogOpenForGameId === game.id && (
-                              <>
-                                <div
-                                  className="fixed inset-0 z-[9998]"
-                                  data-debug-menu="true"
-                                  onClick={() => setStreamDebugDialogOpenForGameId(null)}
-                                />
-                                <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-[9999]" data-debug-menu="true">
-                                  <div className="p-3 border-b border-border">
-                                    <div className="text-sm font-semibold text-text">
-                                      Start Debugging (Stream)
-                                    </div>
-                                    <div className="text-xs text-muted mt-1">
-                                      Keeps the streaming container alive for logs/inspect.
-                                    </div>
-                                  </div>
-                                  <div className="p-3 flex gap-2">
-                                    <button
-                                      onClick={() => {
-                                        setStreamDebugDialogOpenForGameId(null);
-                                        void launchGame(game.id, 'streaming', undefined, {
-                                          keepContainer: true,
-                                          keepAlive: true,
-                                        });
-                                      }}
-                                      disabled={isLaunching}
-                                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-2 transition-colors disabled:opacity-60"
-                                      title="Debug stream (keep container + keep alive)"
-                                    >
-                                      {isLaunching ? (
-                                        <span className="inline-flex items-center gap-2">
-                                          <span className="animate-spin inline-block h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                                          Launching…
-                                        </span>
-                                      ) : (
-                                        'Start Debugging'
-                                      )}
-                                    </button>
-                                    <button
-                                      onClick={() => setStreamDebugDialogOpenForGameId(null)}
-                                      className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700 text-text hover:opacity-90"
-                                      title="Cancel"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              </>
-                            )}
+                          <div className="absolute inset-x-0 bottom-0 hidden border-t-2 border-primary bg-background/92 p-2 group-hover:block">
+                            <div className="grid grid-cols-5 gap-1">
+                              <ActionButton label="Launch" icon={<PlayIcon className="h-4 w-4" />} disabled={!isConfigured || !isRunnerAvailable || isLaunching} onClick={() => launchGame(game.id, 'local')} />
+                              <ActionButton label="Stream" icon={<SignalIcon className="h-4 w-4" />} disabled={!isConfigured || isLaunching} onClick={() => launchGame(game.id, 'streaming')} />
+                              <Link href={`/games/${game.id}/edit`} title="Configure" className="pixel-button min-h-8 px-1"><Cog6ToothIcon className="h-4 w-4" /></Link>
+                              <Link href={`/games/${game.id}`} title="Details" className="pixel-button min-h-8 px-1"><AdjustmentsHorizontalIcon className="h-4 w-4" /></Link>
+                              <button title="Delete" onClick={(e) => { e.preventDefault(); void deleteGame(game.id); }} className="pixel-button pixel-button-danger min-h-8 px-1"><TrashIcon className="h-4 w-4" /></button>
+                            </div>
                           </div>
-                          <a
-                            href={`/games/${game.id}/edit`}
-                            className="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm"
-                            title="Manage game"
-                          >
-                            <svg
-                              className="h-5 w-5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
-                              />
-                            </svg>
-                          </a>
-                          <button
-                            onClick={() => deleteGame(game.id)}
-                            className="px-3 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50 transition-colors text-sm"
-                            title="Delete game"
-                          >
-                            <svg
-                              className="h-5 w-5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1v3M4 7h16"
-                              />
-                            </svg>
-                          </button>
-                        </>
+                        </div>
+                      </Link>
+                      <div className="space-y-2 p-3">
+                        <Link href={`/games/${game.id}`} className="line-clamp-2 min-h-[2.5rem] font-display text-sm font-black uppercase text-text hover:text-primary">{game.title}</Link>
+                        <div className="flex flex-wrap gap-1">
+                          {platformBadges.map((id) => <span key={id} className="status-pill">{getPlatformName(id)}</span>)}
+                        </div>
+                        <div className="text-[11px] uppercase text-muted">
+                          {game.metadata?.developer || game.metadata?.publisher || 'Unknown Publisher'}
+                        </div>
+                        {game.metadata?.playCount ? (
+                          <div className="text-[11px] text-muted">Last: {game.metadata.lastPlayed ? formatLastPlayed(game.metadata.lastPlayed) : 'Unknown'} · {formatPlayTime(game.metadata.playTime || 0)}</div>
+                        ) : (
+                          <div className="text-[11px] text-muted">Never played</div>
+                        )}
+                        {installStatus === 'downloading' && (
+                          <div>
+                            <div className="mb-1 flex justify-between text-[10px] uppercase text-primary"><span>Downloading</span><span>{game.installation?.downloadProgress || 0}%</span></div>
+                            <div className="h-2 border border-primary bg-black"><div className="h-full bg-primary" style={{ width: `${game.installation?.downloadProgress || 0}%` }} /></div>
+                          </div>
+                        )}
+                        {installStatus === 'download_cancelled' && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <button onClick={() => resumeDownload(game)} className="pixel-button min-h-8"><ArrowDownTrayIcon className="h-4 w-4" />Resume</button>
+                            <button onClick={() => restartDownload(game)} className="pixel-button pixel-button-warning min-h-8">Restart</button>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          {isRunning ? (
+                            <button onClick={() => stopGame(game.id)} disabled={isLaunching} className="pixel-button pixel-button-danger col-span-2"><StopIcon className="h-4 w-4" />Stop</button>
+                          ) : (
+                            <>
+                              <button onClick={() => launchGame(game.id, 'local')} disabled={!isConfigured || !isRunnerAvailable || isLaunching} className="pixel-button pixel-button-success"><PlayIcon className="h-4 w-4" />Run</button>
+                              <button onClick={() => launchGame(game.id, 'streaming')} disabled={!isConfigured || isLaunching} className="pixel-button"><SignalIcon className="h-4 w-4" />Stream</button>
+                            </>
+                          )}
+                          <button onClick={() => setDebugDialogOpenForGameId(game.id)} disabled={!isConfigured || isLaunching} className="pixel-button"><BugAntIcon className="h-4 w-4" />Debug</button>
+                          <button onClick={() => setStreamDebugDialogOpenForGameId(game.id)} disabled={!isConfigured || isLaunching} className="pixel-button"><SignalIcon className="h-4 w-4" />Dbg Stream</button>
+                        </div>
+                      </div>
+
+                      {debugDialogOpenForGameId === game.id && (
+                        <DebugMenu
+                          title="Start Debugging"
+                          onClose={() => setDebugDialogOpenForGameId(null)}
+                          onStart={() => {
+                            setDebugDialogOpenForGameId(null);
+                            void launchGame(game.id, 'local', undefined, { keepContainer: true, keepAlive: true });
+                          }}
+                        />
                       )}
-                    </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                      {streamDebugDialogOpenForGameId === game.id && (
+                        <DebugMenu
+                          title="Start Stream Debugging"
+                          onClose={() => setStreamDebugDialogOpenForGameId(null)}
+                          onStart={() => {
+                            setStreamDebugDialogOpenForGameId(null);
+                            void launchGame(game.id, 'streaming', undefined, { keepContainer: true, keepAlive: true });
+                          }}
+                        />
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-        </div>
-        {/* End of Scrollable Game Tiles Area */}
+        </section>
 
+        <aside className="space-y-4">
+          <div className="workbench-window">
+            <div className="workbench-titlebar">DOWNLOAD_QUEUE</div>
+            <div className="workbench-body"><DownloadMonitor /></div>
+          </div>
+          <div className="workbench-window">
+            <div className="workbench-titlebar">CONTAINER_LOG</div>
+            <div className="workbench-body"><LogPanel /></div>
+          </div>
+        </aside>
       </div>
-      {/* End of Content Container */}
 
-      {/* Game Detail Modal */}
-      {selectedGameForModal && (
-        <GameDetailModal
-          game={selectedGameForModal}
-          session={sessions[selectedGameForModal.id]}
-          isLaunching={launching[selectedGameForModal.id] || false}
-          isRunnerAvailable={(() => {
-            const platforms = selectedGameForModal.platforms || [];
-            const configuredPlatforms = platforms.filter((p) => {
-              const isEmulatorPlatform = [
-                'c64', 'c128', 'vic20', 'plus4', 'pet',
-                'amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32',
-              ].includes(p.platformId);
-              return p.filePath || p.settings?.launch?.command || (isEmulatorPlatform && p.filePath);
-            });
-            if (configuredPlatforms.length === 0) return true;
-            const getRequiredRunner = (platformId: string): string | null => {
-              if (['c64', 'c128', 'vic20', 'plus4', 'pet'].includes(platformId)) return 'vice';
-              if (['arcade', 'mame', 'nes', 'snes', 'genesis'].includes(platformId)) return 'retroarch';
-              if (['amiga', 'amiga500', 'amiga500plus', 'amiga600', 'amiga1200', 'amiga3000', 'amiga4000', 'cd32'].includes(platformId)) return 'fs-uae';
-              if (platformId === 'windows-wine') return 'wine';
-              if (platformId === 'linux-native') return 'linux-native';
-              return null;
-            };
-            const requiredRunner = getRequiredRunner(configuredPlatforms[0].platformId);
-            return !requiredRunner || runners[requiredRunner] === true;
-          })()}
-          onClose={() => setSelectedGameForModal(null)}
-          onLaunch={(mode) => {
-            launchGame(selectedGameForModal.id, mode);
-          }}
-          onLaunchDebug={() => {
-            launchGame(selectedGameForModal.id, 'local', undefined, {
-              keepContainer: true,
-              keepAlive: true,
-            });
-          }}
-          onLaunchDebugStreaming={() => {
-            launchGame(selectedGameForModal.id, 'streaming', undefined, {
-              keepContainer: true,
-              keepAlive: true,
-            });
-          }}
-          onStop={() => stopGame(selectedGameForModal.id)}
-          onDelete={() => {
-            deleteGame(selectedGameForModal.id);
-            setSelectedGameForModal(null);
-          }}
-          getPlatformName={getPlatformName}
-          formatLastPlayed={formatLastPlayed}
-          formatPlayTime={formatPlayTime}
-        />
-      )}
-
-      {/* Delete Game with Download Confirmation Modal */}
       {deleteConfirmModal && (
         <ConfirmationModal
           title={deleteConfirmModal.hasDownload ? 'Download In Progress' : 'Delete Game'}
-          message={
-            deleteConfirmModal.hasDownload
-              ? `"${deleteConfirmModal.gameTitle}" has a download in progress (${deleteConfirmModal.downloadProgress}% complete).\n\nWhat would you like to do with the downloaded files?`
-              : `Are you sure you want to delete "${deleteConfirmModal.gameTitle}" from your library?\n\nNote: There are partially downloaded files for this game.`
-          }
+          message={deleteConfirmModal.hasDownload ? `"${deleteConfirmModal.gameTitle}" has a download in progress (${deleteConfirmModal.downloadProgress}% complete).\n\nWhat would you like to do with the downloaded files?` : `Are you sure you want to delete "${deleteConfirmModal.gameTitle}" from your library?\n\nNote: There are partially downloaded files for this game.`}
           confirmText="Keep Files"
           cancelText="Cancel"
           destructive={false}
-          extraButtons={[
-            {
-              text: 'Delete Files',
-              variant: 'destructive',
-              onClick: () => {
-                performDeleteGame(deleteConfirmModal.gameId, true);
-                setDeleteConfirmModal(null);
-              },
-            },
-          ]}
-          onConfirm={() => {
-            performDeleteGame(deleteConfirmModal.gameId, false);
-            setDeleteConfirmModal(null);
-          }}
+          extraButtons={[{ text: 'Delete Files', variant: 'destructive', onClick: () => { void performDeleteGame(deleteConfirmModal.gameId, true); setDeleteConfirmModal(null); } }]}
+          onConfirm={() => { void performDeleteGame(deleteConfirmModal.gameId, false); setDeleteConfirmModal(null); }}
           onCancel={() => setDeleteConfirmModal(null)}
         />
       )}
 
-      {/* Resume Download with Cache Confirmation Modal */}
       {cacheConfirmModal && (
         <ConfirmationModal
           title="Existing Download Files Found"
           message={`Found ${cacheConfirmModal.fileCount} file(s) (${formatBytes(cacheConfirmModal.cacheSize)}) from a previous download.\n\nWould you like to use them, or start fresh?`}
           confirmText="Use Existing"
           cancelText="Cancel"
-          extraButtons={[
-            {
-              text: 'Start Fresh',
-              variant: 'secondary',
-              onClick: () => {
-                performResumeDownload(cacheConfirmModal.game, true);
-                setCacheConfirmModal(null);
-              },
-            },
-          ]}
-          onConfirm={() => {
-            performResumeDownload(cacheConfirmModal.game, false);
-            setCacheConfirmModal(null);
-          }}
+          extraButtons={[{ text: 'Start Fresh', variant: 'secondary', onClick: () => { void performResumeDownload(cacheConfirmModal.game, true); setCacheConfirmModal(null); } }]}
+          onConfirm={() => { void performResumeDownload(cacheConfirmModal.game, false); setCacheConfirmModal(null); }}
           onCancel={() => setCacheConfirmModal(null)}
         />
       )}
 
-      {/* Wine Version Mismatch Warning Modal */}
       {wineVersionMismatchModal && (
         <ConfirmationModal
-          title="⚠️ Wine Version Mismatch"
-          message={`"${wineVersionMismatchModal.gameTitle}" was installed with Wine version "${wineVersionMismatchModal.installVersion}" but you're trying to run it with "${wineVersionMismatchModal.currentVersion}".\n\nRunning with a different Wine version than the one used during installation may cause issues (black screen, crashes, graphical glitches).\n\nFor best results, use the same Wine version for installation and running.`}
+          title="Wine Version Mismatch"
+          message={`"${wineVersionMismatchModal.gameTitle}" was installed with Wine version "${wineVersionMismatchModal.installVersion}" but you're trying to run it with "${wineVersionMismatchModal.currentVersion}".\n\nRunning with a different Wine version than the one used during installation may cause issues.`}
           confirmText="Run Anyway"
           cancelText="Cancel"
-          destructive={false}
           onConfirm={() => {
-            // Launch with skipped version check
-            performLaunchGame(
-              wineVersionMismatchModal.gameId,
-              wineVersionMismatchModal.launchMode,
-              wineVersionMismatchModal.platformId,
-              wineVersionMismatchModal.launchOptions
-            );
+            void performLaunchGame(wineVersionMismatchModal.gameId, wineVersionMismatchModal.launchMode, wineVersionMismatchModal.platformId, wineVersionMismatchModal.launchOptions);
             setWineVersionMismatchModal(null);
           }}
           onCancel={() => setWineVersionMismatchModal(null)}
@@ -2233,11 +789,37 @@ docker run -p 3010:3010 -v dillinger_core:/data dillinger-core:latest
   );
 }
 
-// Helper function to format bytes
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+function ActionButton({ label, icon, disabled, onClick }: { label: string; icon: React.ReactNode; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      disabled={disabled}
+      onClick={(e) => {
+        e.preventDefault();
+        onClick();
+      }}
+      className="pixel-button min-h-8 px-1"
+    >
+      {icon}
+    </button>
+  );
+}
+
+function DebugMenu({ title, onClose, onStart }: { title: string; onClose: () => void; onStart: () => void }) {
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div className="absolute right-2 top-2 z-50 w-72 workbench-window">
+        <div className="workbench-titlebar">{title}</div>
+        <div className="workbench-body space-y-3">
+          <p className="text-xs text-muted">Keeps the container alive for logs and inspection.</p>
+          <div className="flex gap-2">
+            <button onClick={onStart} className="pixel-button pixel-button-success flex-1">Start</button>
+            <button onClick={onClose} className="pixel-button flex-1">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
 }

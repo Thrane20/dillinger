@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DownloadManager } from '@/lib/services/download-manager';
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
 import path from 'path';
 import { JSONStorageService } from '@/lib/services/storage';
 import type { Game } from '@dillinger/shared';
@@ -36,7 +36,11 @@ async function findCacheDirectory(gogId: string): Promise<string | null> {
   const dillingerRoot = storage.getDillingerRoot();
   const cacheBasePath = path.join(dillingerRoot, 'storage', 'installer_cache');
   
-  if (!await fs.pathExists(cacheBasePath)) return null;
+  try {
+    await fs.access(cacheBasePath);
+  } catch {
+    return null;
+  }
   
   const dirs = await fs.readdir(cacheBasePath);
   
@@ -90,7 +94,7 @@ export async function GET(
       }
     }
     
-    if (cachePath && await fs.pathExists(cachePath)) {
+    if (cachePath && await pathExists(cachePath)) {
       const files = await fs.readdir(cachePath);
       fileCount = files.length;
       cacheExists = fileCount > 0;
@@ -162,8 +166,8 @@ export async function DELETE(
       );
     }
     
-    if (await fs.pathExists(cachePath)) {
-      await fs.remove(cachePath);
+    if (await pathExists(cachePath)) {
+      await fs.rm(cachePath, { recursive: true, force: true });
       console.log(`[Download Cache] Deleted cache at ${cachePath}`);
     }
     
@@ -177,5 +181,14 @@ export async function DELETE(
       { success: false, error: 'Failed to delete download cache' },
       { status: 500 }
     );
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }

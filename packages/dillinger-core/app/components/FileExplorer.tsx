@@ -17,6 +17,7 @@ interface VolumeItem {
   driver: string;
   createdAt?: string;
   hostPath?: string;  // For configured volumes
+  purpose?: string;
 }
 
 interface FileExplorerProps {
@@ -79,20 +80,44 @@ export default function FileExplorer({
 
   async function loadVolumes() {
     try {
-      const response = await fetch('/api/volumes/detected');
-      const data = await response.json();
-      if (data.success && data.data?.volumes) {
-        const configuredVolumes: VolumeItem[] = data.data.volumes
-          .filter((v: { dockerVolumeName?: string }) => v.dockerVolumeName?.startsWith('dillinger_'))
-          .map((v: { dockerVolumeName?: string; mountPath: string; fsType: string }) => ({
-            name: v.dockerVolumeName || v.mountPath,
-            dockerVolumeName: v.dockerVolumeName,
-            mountpoint: v.mountPath,
-            hostPath: v.mountPath,
-            driver: v.fsType || 'volume',
-          }));
-        setDockerVolumes(configuredVolumes);
-      }
+      const [managedResponse, detectedResponse] = await Promise.all([
+        fetch('/api/volumes'),
+        fetch('/api/volumes/detected'),
+      ]);
+      const managedData = await managedResponse.json();
+      const detectedData = await detectedResponse.json();
+
+      const managedVolumes: VolumeItem[] = managedData.success
+        ? (managedData.data || [])
+            .filter((v: { status?: string; hostPath?: string }) => v.status !== 'error' && !!v.hostPath)
+            .map((v: { name: string; dockerVolumeName?: string; hostPath: string; type?: string; purpose?: string }) => ({
+              name: v.name || v.dockerVolumeName || v.hostPath,
+              dockerVolumeName: v.dockerVolumeName,
+              mountpoint: v.hostPath,
+              hostPath: v.hostPath,
+              driver: v.type || 'managed',
+              purpose: v.purpose,
+            }))
+        : [];
+
+      const detectedVolumes: VolumeItem[] = detectedData.success && detectedData.data?.volumes
+        ? detectedData.data.volumes
+            .filter((v: { dockerVolumeName?: string; mountPath?: string }) => v.dockerVolumeName?.startsWith('dillinger_') && !!v.mountPath)
+            .map((v: { dockerVolumeName?: string; mountPath: string; fsType: string; purpose?: string }) => ({
+              name: v.dockerVolumeName || v.mountPath,
+              dockerVolumeName: v.dockerVolumeName,
+              mountpoint: v.mountPath,
+              hostPath: v.mountPath,
+              driver: v.fsType || 'volume',
+              purpose: v.purpose,
+            }))
+        : [];
+
+      const byPath = new Map<string, VolumeItem>();
+      [...detectedVolumes, ...managedVolumes].forEach((volume) => {
+        if (volume.mountpoint) byPath.set(volume.mountpoint, volume);
+      });
+      setDockerVolumes(Array.from(byPath.values()));
     } catch (err) {
       console.error('Failed to load volumes:', err);
     }
@@ -210,6 +235,11 @@ export default function FileExplorer({
                         <div className="text-text group-hover:text-primary transition-colors truncate font-medium">
                           {volume.name}
                         </div>
+                        {volume.purpose && (
+                          <div className="text-[10px] uppercase text-muted">
+                            {volume.purpose}
+                          </div>
+                        )}
                         {volume.mountpoint && (
                           <div className="text-xs text-muted truncate font-mono mt-0.5">
                             {volume.mountpoint}

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NEO_WORKBENCH v1.0 - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .scanline-effect {
+            background: linear-gradient(
+                to bottom,
+                rgba(18, 16, 16, 0) 50%,
+                rgba(0, 0, 0, 0.15) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+        }
+        .window-glow {
+            box-shadow: 0 0 10px rgba(147, 204, 255, 0.3);
+        }
+        .active-window-glow {
+            box-shadow: 0 0 10px rgba(147, 204, 255, 0.6);
+        }
+        .block-cursor::after {
+            content: "█";
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#131313",
+                        "secondary-container": "#ff8a0d",
+                        "on-surface-variant": "#bec7d3",
+                        "tertiary": "#00e55b",
+                        "background": "#121212",
+                        "on-primary-fixed": "#001d31",
+                        "on-secondary-fixed-variant": "#6f3800",
+                        "on-background": "#e5e2e1",
+                        "on-primary": "#003351",
+                        "error-container": "#93000a",
+                        "inverse-surface": "#e5e2e1",
+                        "on-primary-fixed-variant": "#004b73",
+                        "tertiary-container": "#00bb48",
+                        "on-error": "#690005",
+                        "outline-variant": "#3e4851",
+                        "secondary-fixed-dim": "#ffb781",
+                        "on-surface": "#e5e2e1",
+                        "primary": "#93ccff",
+                        "inverse-primary": "#006398",
+                        "on-tertiary-fixed-variant": "#00531b",
+                        "on-secondary": "#4e2600",
+                        "tertiary-fixed-dim": "#00e55b",
+                        "surface": "#131313",
+                        "on-error-container": "#ffdad6",
+                        "primary-fixed-dim": "#93ccff",
+                        "surface-bright": "#393939",
+                        "secondary-fixed": "#ffdcc4",
+                        "surface-tint": "#93ccff",
+                        "outline": "#88929d",
+                        "surface-container-highest": "#353534",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-fixed": "#cce5ff",
+                        "tertiary-fixed": "#6bff83",
+                        "on-tertiary-container": "#004214",
+                        "on-secondary-container": "#623000",
+                        "on-tertiary": "#003911",
+                        "surface-container-low": "#1c1b1b",
+                        "surface-container-high": "#2a2a2a",
+                        "surface-container": "#201f1f",
+                        "error": "#ffb4ab",
+                        "secondary": "#ffb781",
+                        "on-primary-container": "#003c5d",
+                        "on-secondary-fixed": "#2f1400",
+                        "primary-container": "#00aaff",
+                        "inverse-on-surface": "#313030",
+                        "on-tertiary-fixed": "#002107",
+                        "surface-variant": "#353534"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "window-header-height": "32px",
+                        "container-padding": "12px",
+                        "unit": "4px",
+                        "border-width": "2px",
+                        "margin": "24px"
+                    },
+                    "fontFamily": {
+                        "headline-xl": ["Anybody"],
+                        "body-md": ["JetBrains Mono"],
+                        "body-lg": ["JetBrains Mono"],
+                        "label-md": ["JetBrains Mono"],
+                        "headline-lg-mobile": ["Anybody"],
+                        "headline-lg": ["Anybody"],
+                        "headline-md": ["Anybody"]
+                    },
+                    "fontSize": {
+                        "headline-xl": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                        "body-md": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "label-md": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["28px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                        "headline-lg": ["32px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                        "headline-md": ["24px", {"lineHeight": "1.2", "fontWeight": "700"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-surface font-body-md overflow-hidden">
+<div class="scanline-effect"></div>
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full h-[48px] bg-surface-container-high dark:bg-surface-container-high border-b-2 border-outline-variant shadow-[0_0_10px_rgba(147,204,255,0.3)] z-50 flex justify-between items-center px-gutter h-window-header-height w-full">
+<div class="font-headline-md text-headline-md font-bold text-primary italic">NEO_WORKBENCH v1.0</div>
+<nav class="hidden md:flex items-center space-x-8 font-label-md text-label-md uppercase tracking-wider">
+<a class="text-primary border-b-2 border-primary pb-1 active:translate-y-0.5 active:shadow-none" href="#">Home</a>
+<a class="text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 px-2 py-1 active:translate-y-0.5 active:shadow-none" href="#">Library</a>
+<a class="text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 px-2 py-1 active:translate-y-0.5 active:shadow-none" href="#">Settings</a>
+<a class="text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 px-2 py-1 active:translate-y-0.5 active:shadow-none" href="#">About</a>
+</nav>
+<div class="flex items-center space-x-4">
+<div class="bg-surface-container-lowest border-b-2 border-tertiary px-3 py-1 flex items-center">
+<span class="text-tertiary mr-2 text-[10px]">SEARCH_</span>
+<span class="text-on-surface block-cursor"></span>
+</div>
+<div class="flex space-x-2 text-primary">
+<span class="material-symbols-outlined cursor-pointer hover:text-tertiary" data-icon="terminal">terminal</span>
+<span class="material-symbols-outlined cursor-pointer hover:text-error" data-icon="power_settings_new">power_settings_new</span>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-[48px] w-[200px] h-[calc(100vh-48px)] bg-surface-dim dark:bg-surface-dim border-r-2 border-outline-variant flex flex-col py-4 space-y-2 z-40">
+<div class="px-4 mb-6">
+<div class="flex items-center space-x-3 mb-4">
+<div class="w-10 h-10 border-2 border-secondary p-0.5">
+<img alt="Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBPIujSC0ps6gXUqmQPFAquAlLwOeNUcui30YTmSKhpA1TlhUuj-nwq6im6H2zZK6T48rWCoqy6EZIHnzHe6PMvqjoXJy4_LUBSLOiTGi6Q9usTGpHOl1PgBbJnyXkEsybAb_P4M_lRm2DEFVgawV5DVEBdeZarxBpR3c7pR25UADkwfuX8x5iefl8uT06Xn5PAdYAGhz5y9AoQPfy0clpCUZ8pEpyaaEjvHUDqSawixxMLKODVPzEHZbhNndZ3sMQkN189X7uFRpA"/>
+</div>
+<div class="overflow-hidden">
+<div class="font-label-md text-secondary truncate">PLATFORMS</div>
+<div class="text-[9px] text-on-surface-variant truncate">/dev/sda1</div>
+</div>
+</div>
+<button class="w-full border-2 border-primary text-primary py-2 font-label-md hover:bg-primary hover:text-on-primary transition-all active:translate-y-0.5">
+                LAUNCH DISK
+            </button>
+</div>
+<nav class="flex-grow space-y-1">
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="computer">computer</span>
+<span class="font-body-md">Amiga</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="keyboard">keyboard</span>
+<span class="font-body-md">Commodore 64</span>
+</a>
+<a class="bg-tertiary text-on-tertiary font-bold flex items-center px-4 py-2" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="terminal">terminal</span>
+<span class="font-body-md">DOS</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3" data-icon="videogame_asset">videogame_asset</span>
+<span class="font-body-md">NES</span>
+</a>
+</nav>
+<div class="border-t border-outline-variant pt-4 space-y-1">
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container" href="#">
+<span class="material-symbols-outlined mr-3 text-[18px]" data-icon="memory">memory</span>
+<span class="text-[12px]">SysInfo</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container" href="#">
+<span class="material-symbols-outlined mr-3 text-[18px]" data-icon="lan">lan</span>
+<span class="text-[12px]">Network</span>
+</a>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="ml-[200px] mt-[48px] p-6 h-[calc(100vh-48px)] overflow-y-auto bg-[#121212]">
+<!-- Dashboard Grid -->
+<div class="grid grid-cols-12 gap-gutter max-w-7xl mx-auto">
+<!-- SYSTEM STATUS GADGETS (Horizontal Window) -->
+<section class="col-span-12 border-2 border-outline-variant bg-surface-container-low active-window-glow mb-4">
+<header class="h-[32px] bg-primary flex items-center justify-between px-3">
+<span class="font-label-md text-on-primary">SYSTEM_STATUS.GADGET</span>
+<div class="flex space-x-2">
+<span class="material-symbols-outlined text-on-primary text-[16px]" data-icon="remove">remove</span>
+<span class="material-symbols-outlined text-on-primary text-[16px]" data-icon="close">close</span>
+</div>
+</header>
+<div class="p-container-padding grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- CPU -->
+<div class="flex flex-col space-y-2">
+<div class="flex justify-between font-label-md text-primary">
+<span>CPU_LOAD</span>
+<span>42%</span>
+</div>
+<div class="h-4 bg-surface-container-lowest border border-outline-variant relative">
+<div class="h-full bg-tertiary shadow-[0_0_8px_#00e55b]" style="width: 42%;"></div>
+</div>
+<div class="text-[10px] text-on-surface-variant font-mono">CLOCK: 14.318 MHz / STABLE</div>
+</div>
+<!-- MEMORY -->
+<div class="flex flex-col space-y-2">
+<div class="flex justify-between font-label-md text-primary">
+<span>MEM_ALLOC</span>
+<span>128MB / 512MB</span>
+</div>
+<div class="h-4 bg-surface-container-lowest border border-outline-variant relative">
+<div class="h-full bg-secondary shadow-[0_0_8px_#ffb781]" style="width: 25%;"></div>
+</div>
+<div class="text-[10px] text-on-surface-variant font-mono">FAST_MEM: ACTIVE / CHIP_MEM: OK</div>
+</div>
+<!-- DISK -->
+<div class="flex flex-col space-y-2">
+<div class="flex justify-between font-label-md text-primary">
+<span>DISK_IO</span>
+<span>READY</span>
+</div>
+<div class="flex items-center space-x-2">
+<div class="w-3 h-3 rounded-full bg-tertiary shadow-[0_0_5px_#00e55b]"></div>
+<div class="text-[10px] text-on-surface-variant font-mono uppercase">DF0: WRITE PROTECTED</div>
+</div>
+<div class="h-4 bg-surface-container-lowest border border-outline-variant overflow-hidden flex">
+<div class="h-full bg-primary/20 w-full animate-pulse border-r border-primary"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- RECENTLY PLAYED (Bento Section) -->
+<div class="col-span-12 lg:col-span-8 space-y-gutter">
+<div class="border-2 border-outline-variant bg-surface-container-low">
+<header class="h-[32px] bg-outline-variant flex items-center justify-between px-3">
+<span class="font-label-md text-on-surface">RECENTLY_PLAYED.LHA</span>
+<span class="material-symbols-outlined text-on-surface text-[16px]" data-icon="grid_view">grid_view</span>
+</header>
+<div class="p-container-padding grid grid-cols-2 sm:grid-cols-4 gap-4">
+<!-- Game Card 1 -->
+<div class="group relative aspect-[3/4] border-2 border-outline-variant overflow-hidden cursor-pointer hover:border-tertiary transition-colors">
+<img class="w-full h-full object-cover filter grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="Detailed retro box art for a science fiction space exploration game from the 1980s, featuring a pixelated spaceship orbiting a purple gas giant. The style is classic pixel art with limited color depth, sharp edges, and high contrast. Dark blue background with starfields and vibrant magenta accents create a nostalgic tech atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD0mBkK8rYEjpyzi540SgopiVM8gXCb2ytm154WRpkeB5l1ObPQBlIM2imiL4gTcjmLUR7ld2znYiGmHb7UFNigk3U4TVxXi3PHxfEE-TkEoYPYZRLDuKHFapbmColL3mdwrf1bkUYLz2g_sNCmldX7uQZH-qOwR_1XjoIMIbK_Cab63B_uNzNMD5Ka_CJLP7LVN3gMvW7NdxJJ8M_4CUpy3RLTJgWemSGmFqoBoUayVCoDycRSxcnw6lQjaRNtSBURCgzdw_IAGmM"/>
+<div class="absolute bottom-0 left-0 right-0 bg-surface-dim/90 p-2 border-t border-outline-variant">
+<div class="text-[10px] font-bold truncate">STARFLIGHT_III</div>
+<div class="text-[8px] text-tertiary">92% COMPLETE</div>
+</div>
+</div>
+<!-- Game Card 2 -->
+<div class="group relative aspect-[3/4] border-2 border-outline-variant overflow-hidden cursor-pointer hover:border-tertiary transition-colors">
+<img class="w-full h-full object-cover filter grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="Classic pixelated arcade platformer background with dark, atmospheric dungeon textures and glowing green slime pits. The visual style mimics 16-bit console graphics with heavy dithering and a nocturnal color palette of deep grays, neon greens, and shadow blacks. Sharp retro UI elements frame the image." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDq1ex-iEiMpe7OnfqeO4ZgYNi_MHVek-byEGXdhHSDz13E5L5RxUH7KLst1iti0gonKaqJEVS77kqYAhWeH-tXCPcS4eQOeri9y7vX6GXp5CMz7oVlLOznCmnWwpXLim-Is0a-lpCIdQPuJ-cVmDBEMeSXwGzZaPadUnQt1Mb2dDrTP4p6YfaCYQebndLz60J17DewJ23vkikGP7QjFOCaaZtJZpqQqx2PfOQ_ZghkS5HpQJcB86W1--hlQ3msQtfdhWoIdsnO_cw"/>
+<div class="absolute bottom-0 left-0 right-0 bg-surface-dim/90 p-2 border-t border-outline-variant">
+<div class="text-[10px] font-bold truncate">DUNGEON_CRAWL</div>
+<div class="text-[8px] text-tertiary">3H PLAYED</div>
+</div>
+</div>
+<!-- Game Card 3 -->
+<div class="group relative aspect-[3/4] border-2 border-outline-variant overflow-hidden cursor-pointer hover:border-tertiary transition-colors">
+<img class="w-full h-full object-cover filter grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="Cyberpunk 1980s style computer terminal screen showing scrolling lines of green code and digital schematics of a robotic head. High-contrast emerald green phosphor glow on a deep black background, evoking a hacker aesthetic from an early DOS environment. The mood is mysterious and highly technical." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCt69WkcApJoXrRzHz4n593ke0U6_KsybsI4QKNs2hHQgi4vdze5Em_Gy-98okDzq8Cz1nC_qHbsU6G4QH_PPCbh4cBnnl5IJOGt5m0wLyIjCX_PHsVQpIiDBiI0k-qQUCudto9D3lBLSSSTlxHhETj_ZeSqHuywXjjalI_nb2-ALkCKplOtafL8GCEljpM9gVN3SsxeRrdpBEQVkiwO0XhUeGopKKBoOfdW5rTl01hs7rn631oR_5dAh4d8_X48VDcasaw_pRqDF0"/>
+<div class="absolute bottom-0 left-0 right-0 bg-surface-dim/90 p-2 border-t border-outline-variant">
+<div class="text-[10px] font-bold truncate">NEUROMANCER_v1</div>
+<div class="text-[8px] text-tertiary">SYSTEM_OK</div>
+</div>
+</div>
+<!-- Game Card 4 -->
+<div class="group relative aspect-[3/4] border-2 border-outline-variant overflow-hidden cursor-pointer hover:border-tertiary transition-colors">
+<img class="w-full h-full object-cover filter grayscale group-hover:grayscale-0 transition-all duration-300" data-alt="Detailed close-up of a vintage joystick and buttons with a soft neon magenta and cyan glow reflecting off the plastic. The scene is set in a dark room with a CRT monitor glow in the background. The aesthetic is heavily inspired by late 80s arcade culture, using a vibrant vaporwave color palette and grainy texture." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZztKpBhtNWCUg-LeS7ZCVtJBZ14bZ5s7nuP2Zl9SkoNlnUrXl2hMEzd00-K9GP1lxenjO0U16eB-izsnoOCUq84W9jmUmonTYOZboNCds1AbP8YfYXz0xKRrWZQzQDNN2U57gYtjvhz3r23wodHJCcP8UhEAzIbRXq0HGBlJx8vQwK0Px18_xtV5JB1-3NDyp0hmAvlJHQCjrWkOwvLkAATk4LoUOxFaWlKfpKSRaB9oU46j7nEHszEGQZVwxMiFJle4H5jPic8U"/>
+<div class="absolute bottom-0 left-0 right-0 bg-surface-dim/90 p-2 border-t border-outline-variant">
+<div class="text-[10px] font-bold truncate">JOYSTICK_TEST</div>
+<div class="text-[8px] text-tertiary">INPUT_CALIBRATED</div>
+</div>
+</div>
+</div>
+</div>
+<!-- NEW DISCOVERIES -->
+<div class="border-2 border-outline-variant bg-surface-container-low">
+<header class="h-[32px] bg-secondary-container flex items-center justify-between px-3">
+<span class="font-label-md text-on-secondary-container">NEW_DISCOVERIES.TXT</span>
+<span class="material-symbols-outlined text-on-secondary-container text-[16px]" data-icon="star">star</span>
+</header>
+<div class="p-container-padding space-y-4">
+<div class="flex items-start space-x-4 border-b border-outline-variant pb-4">
+<div class="w-24 h-16 bg-surface-container-highest border border-outline-variant flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-3xl" data-icon="videogame_asset">videogame_asset</span>
+</div>
+<div>
+<h3 class="text-secondary font-bold text-headline-md leading-tight">SYNDICATE_REDUX</h3>
+<p class="text-[11px] text-on-surface-variant mt-1">A newly discovered prototype for the Amiga platform. Cyber-tactical action with enhanced CRT-shaders enabled.</p>
+<button class="mt-2 text-[10px] text-tertiary border border-tertiary px-3 py-1 hover:bg-tertiary hover:text-black transition-colors">LOAD_ROM</button>
+</div>
+</div>
+<div class="flex items-start space-x-4">
+<div class="w-24 h-16 bg-surface-container-highest border border-outline-variant flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="terminal">terminal</span>
+</div>
+<div>
+<h3 class="text-primary font-bold text-headline-md leading-tight">NET_RUNNER_BETA</h3>
+<p class="text-[11px] text-on-surface-variant mt-1">Advanced hacking simulation for the DOS environment. High-density information display and ASCII graphics.</p>
+<button class="mt-2 text-[10px] text-primary border border-primary px-3 py-1 hover:bg-primary hover:text-black transition-colors">LOAD_ROM</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ASYMMETRIC SIDE WINDOW (Terminal/Info) -->
+<aside class="col-span-12 lg:col-span-4 space-y-gutter">
+<div class="border-2 border-outline-variant bg-[#080808] h-full flex flex-col">
+<header class="h-[32px] bg-surface-container-highest flex items-center justify-between px-3">
+<span class="font-label-md text-on-surface-variant">CONSOLE_OUTPUT.LOG</span>
+<span class="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+</header>
+<div class="p-4 font-mono text-[11px] space-y-1 overflow-hidden flex-grow min-h-[300px]">
+<div class="text-tertiary">[OK] Booting Workbench v1.0.4...</div>
+<div class="text-on-surface-variant">[INFO] Detecting external hardware...</div>
+<div class="text-on-surface-variant">[INFO] Joystick (Port 1) Detected: COMPETITION_PRO</div>
+<div class="text-on-surface-variant">[INFO] Sound Buffer: 44100Hz Stereo</div>
+<div class="text-primary">[MOUNT] /dev/df0 successfully mounted</div>
+<div class="text-on-surface-variant">[INFO] Platform: Amiga 500+ (ECS)</div>
+<div class="text-on-surface-variant">[INFO] Resolution: 640x256 @ 50Hz</div>
+<div class="text-secondary">[WARN] Low voltage on RTC battery...</div>
+<div class="text-on-surface mt-4">C:\&gt; <span class="block-cursor"></span></div>
+</div>
+<div class="p-2 border-t border-outline-variant bg-surface-container">
+<div class="text-[9px] text-on-surface-variant uppercase tracking-widest text-center">KERNEL_VERSION: 4.9.0-RETRO</div>
+</div>
+</div>
+<!-- QUICK ACTIONS GADGET -->
+<div class="border-2 border-outline-variant bg-surface-container-low p-4">
+<h4 class="font-label-md text-primary mb-4 flex items-center">
+<span class="material-symbols-outlined text-[14px] mr-2" data-icon="settings_input_component">settings_input_component</span>
+                        GADGET_ACTIONS
+                    </h4>
+<div class="grid grid-cols-2 gap-2">
+<button class="border border-outline-variant p-2 flex flex-col items-center hover:border-tertiary group transition-all">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-tertiary" data-icon="memory">memory</span>
+<span class="text-[9px] mt-1 text-on-surface-variant uppercase">Flush_RAM</span>
+</button>
+<button class="border border-outline-variant p-2 flex flex-col items-center hover:border-tertiary group transition-all">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-tertiary" data-icon="screenshot_region">screenshot_region</span>
+<span class="text-[9px] mt-1 text-on-surface-variant uppercase">Dump_VRAM</span>
+</button>
+<button class="border border-outline-variant p-2 flex flex-col items-center hover:border-tertiary group transition-all">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-tertiary" data-icon="sync">sync</span>
+<span class="text-[9px] mt-1 text-on-surface-variant uppercase">Sync_Cloud</span>
+</button>
+<button class="border border-outline-variant p-2 flex flex-col items-center hover:border-tertiary group transition-all">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-tertiary" data-icon="database">database</span>
+<span class="text-[9px] mt-1 text-on-surface-variant uppercase">Reindex</span>
+</button>
+</div>
+</div>
+</aside>
+</div>
+</main>
+<!-- Bottom Mobile Nav -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full bg-surface-container-high border-t-2 border-outline-variant h-16 flex items-center justify-around z-50">
+<a class="text-primary flex flex-col items-center" href="#">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+<span class="text-[8px] uppercase">Home</span>
+</a>
+<a class="text-on-surface-variant flex flex-col items-center" href="#">
+<span class="material-symbols-outlined" data-icon="library_books">library_books</span>
+<span class="text-[8px] uppercase">Library</span>
+</a>
+<a class="text-on-surface-variant flex flex-col items-center" href="#">
+<span class="material-symbols-outlined" data-icon="videogame_asset">videogame_asset</span>
+<span class="text-[8px] uppercase">Play</span>
+</a>
+<a class="text-on-surface-variant flex flex-col items-center" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="text-[8px] uppercase">Setup</span>
+</a>
+</nav>
+</body></html>

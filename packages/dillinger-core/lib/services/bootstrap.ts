@@ -60,13 +60,14 @@ export async function ensureDillingerCoreScaffold(): Promise<void> {
   })();
 
   if (shouldSeedRetroarch) {
-    // In standalone mode, process.cwd() is already /app/packages/dillinger-core
-    const templatePath = path.resolve(
-      process.cwd(),
-      'assets',
-      'defaults',
-      'retroarch.cfg'
-    );
+    const templateCandidates = [
+      path.resolve(process.cwd(), 'assets', 'defaults', 'retroarch.cfg'),
+      path.resolve(process.cwd(), 'packages', 'dillinger-core', 'assets', 'defaults', 'retroarch.cfg'),
+      path.resolve(process.cwd(), 'app', 'packages', 'dillinger-core', 'assets', 'defaults', 'retroarch.cfg'),
+    ];
+    const templatePath =
+      (await Promise.all(templateCandidates.map(async (candidate) => ((await fs.pathExists(candidate)) ? candidate : null))))
+        .find((candidate): candidate is string => Boolean(candidate)) ?? templateCandidates[0];
 
     await fs.ensureDir(path.dirname(retroarchConfigPath));
 

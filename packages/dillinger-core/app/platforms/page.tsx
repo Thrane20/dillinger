@@ -89,7 +89,7 @@ interface WineInstallProgress {
 function SaveIndicator({ show, message }: { show: boolean; message: string }) {
   if (!show) return null;
   return (
-    <div className="flex items-center gap-2 bg-green-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-lg animate-pulse">
+    <div className="flex items-center gap-2 border-2 border-success bg-success-soft px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-success shadow-[0_0_14px_rgba(71,255,156,0.18)]">
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
       </svg>
@@ -177,6 +177,7 @@ const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
 export default function PlatformsPage() {
   // Section refs for scrolling
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
   
   // Active section for sidebar highlight
   const [activeSection, setActiveSection] = useState('runners');
@@ -347,7 +348,7 @@ export default function PlatformsPage() {
           }
         });
       },
-      { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
+      { threshold: 0.3, root: contentScrollRef.current, rootMargin: '-80px 0px -45% 0px' }
     );
 
     Object.values(sectionRefs.current).forEach((ref) => {
@@ -865,11 +866,11 @@ export default function PlatformsPage() {
   };
 
   const renderRunnersSection = () => (
-    <div 
-      id="runners"
-      ref={(el) => { sectionRefs.current['runners'] = el; }}
-      className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
-    >
+      <div 
+        id="runners"
+        ref={(el) => { sectionRefs.current['runners'] = el; }}
+        className="platforms-panel space-y-6"
+      >
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Runner Images</h2>
@@ -1072,7 +1073,7 @@ export default function PlatformsPage() {
       <div 
         id="wine"
         ref={(el) => { sectionRefs.current['wine'] = el; }}
-        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+        className="platforms-panel space-y-6"
       >
         <div>
           <h2 className="text-2xl font-semibold">Wine (Windows Games)</h2>
@@ -1369,7 +1370,7 @@ export default function PlatformsPage() {
       <div 
         id="c64"
         ref={(el) => { sectionRefs.current['c64'] = el; }}
-        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+        className="platforms-panel space-y-6"
       >
         <div>
           <h2 className="text-2xl font-semibold">Commodore Emulation</h2>
@@ -1433,7 +1434,7 @@ export default function PlatformsPage() {
       <div 
         id="arcade"
         ref={(el) => { sectionRefs.current['arcade'] = el; }}
-        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+        className="platforms-panel space-y-6"
       >
         <div>
           <h2 className="text-2xl font-semibold">Arcade / MAME</h2>
@@ -1555,7 +1556,7 @@ export default function PlatformsPage() {
       <div 
         id="amiga"
         ref={(el) => { sectionRefs.current['amiga'] = el; }}
-        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+        className="platforms-panel space-y-6"
       >
         <div>
           <h2 className="text-2xl font-semibold">Amiga Emulation</h2>
@@ -1635,7 +1636,7 @@ export default function PlatformsPage() {
       <div 
         id="nes"
         ref={(el) => { sectionRefs.current['nes'] = el; }}
-        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+        className="platforms-panel space-y-6"
       >
         <div>
           <h2 className="text-2xl font-semibold">Nintendo Entertainment System (NES)</h2>
@@ -1716,7 +1717,7 @@ export default function PlatformsPage() {
       <div 
         id="snes"
         ref={(el) => { sectionRefs.current['snes'] = el; }}
-        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+        className="platforms-panel space-y-6"
       >
         <div>
           <h2 className="text-2xl font-semibold">Super Nintendo (SNES)</h2>
@@ -1809,7 +1810,7 @@ export default function PlatformsPage() {
       <div 
         id="psx"
         ref={(el) => { sectionRefs.current['psx'] = el; }}
-        className="space-y-6 border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
+        className="platforms-panel space-y-6"
       >
         <div>
           <h2 className="text-2xl font-semibold">PlayStation 1 (PSX)</h2>
@@ -1999,42 +2000,64 @@ export default function PlatformsPage() {
   };
 
   return (
-    <div className="flex h-full">
+    <div className="platforms-workbench grid gap-4 lg:h-[calc(100vh-var(--workbench-topbar)-2rem)] lg:grid-cols-[240px_minmax(0,1fr)]">
       {/* Sidebar Navigation */}
-      <nav className="w-56 flex-shrink-0 pr-4 h-full overflow-y-auto">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Platforms</h2>
-          <ul className="space-y-1">
+      <nav className="lg:sticky lg:top-4 lg:self-start">
+        <div className="workbench-window overflow-hidden">
+          <div className="workbench-titlebar">
+            <span>PLATFORMS.CONFIG</span>
+            <span className="text-secondary">8 MODULES</span>
+          </div>
+          <div className="border-b-2 border-border bg-background/70 px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-muted">
+              Submenu stays docked while platform configuration panes scroll.
+            </p>
+          </div>
+          <div className="max-h-[calc(100vh-var(--workbench-topbar)-10rem)] overflow-y-auto p-2 scrollbar-visible">
+            <ul className="space-y-1">
             {PLATFORM_SECTIONS.map((section) => (
               <li key={section.id}>
                 <button
                   onClick={() => scrollToSection(section.id)}
-                  className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                  className={`platforms-nav-button ${
                     activeSection === section.id
-                      ? 'bg-blue-600 text-white'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
+                      ? 'platforms-nav-button-active'
+                      : 'platforms-nav-button-idle'
                   }`}
                 >
-                  <span>{section.icon}</span>
-                  <span>{section.label}</span>
+                  <span className="text-base">{section.icon}</span>
+                  <span className="flex-1">{section.label}</span>
+                  <span className="text-[10px] text-outline">::</span>
                 </button>
               </li>
             ))}
-          </ul>
+            </ul>
+          </div>
         </div>
       </nav>
 
       {/* Main Content Area */}
-      <div className="flex-1 h-full overflow-y-auto pl-6">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-          <h1 className="text-4xl font-bold mb-8">Platform Settings</h1>
+      <section className="workbench-window flex min-h-0 flex-col overflow-hidden">
+        <div className="workbench-titlebar">
+          <span>PLATFORM CONTROL DECK</span>
+          <span className="text-secondary">RETRO WORKBENCH</span>
+        </div>
+        <div className="border-b-2 border-border bg-background/70 px-4 py-3">
+          <p className="text-xs uppercase tracking-[0.14em] text-muted">
+            Configure runners, BIOS media, and emulator defaults in a single scrolling stack.
+          </p>
+        </div>
+        <div ref={contentScrollRef} className="platforms-content flex-1 overflow-y-auto p-4 scrollbar-visible">
+          <h1 className="mb-8 font-display text-3xl font-black uppercase tracking-[0.08em] text-primary [text-shadow:2px_0_0_rgba(35,201,255,0.15)]">
+            Platform Settings
+          </h1>
 
           {message && (
             <div
-              className={`mb-6 p-4 rounded-lg ${
+              className={`platforms-status-banner ${
                 message.type === 'success'
-                  ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100'
-                  : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100'
+                  ? 'platforms-status-banner-success'
+                  : 'platforms-status-banner-error'
               }`}
             >
               {message.text}
@@ -2062,7 +2085,7 @@ export default function PlatformsPage() {
             )}
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

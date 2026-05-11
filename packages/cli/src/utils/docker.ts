@@ -9,6 +9,14 @@ export type ContainerStatus = {
   uptime?: string;
 };
 
+export type DockerVolumeStatus = {
+  name: string;
+  driver: string;
+  mountpoint: string;
+  hostPath: string | null;
+  isBind: boolean;
+};
+
 export async function isDockerInstalled(): Promise<boolean> {
   try {
     await execa('docker', ['--version']);
@@ -110,4 +118,38 @@ export async function checkNetworkReachable(host: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function listDockerVolumesDetailed(): Promise<DockerVolumeStatus[]> {
+  const { stdout: namesStdout } = await execa('docker', ['volume', 'ls', '--format', '{{.Name}}']);
+  const names = namesStdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+
+  if (names.length === 0) {
+    return [];
+  }
+
+  const { stdout: inspectStdout } = await execa('docker', ['volume', 'inspect', ...names]);
+  const parsed = JSON.parse(inspectStdout) as Array<{
+    Name?: string;
+    Driver?: string;
+    Mountpoint?: string;
+    Options?: Record<string, string>;
+  }>;
+
+  return parsed.map((volume) => {
+    const options = volume.Options ?? {};
+    const hostPath = options.type === 'none' && options.o?.split(',').includes('bind') ? options.device ?? null : null;
+
+    return {
+      name: volume.Name ?? 'unknown',
+      driver: volume.Driver ?? 'unknown',
+      mountpoint: volume.Mountpoint ?? '',
+      hostPath,
+      isBind: Boolean(hostPath),
+    };
+  });
 }

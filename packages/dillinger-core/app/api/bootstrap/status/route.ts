@@ -13,6 +13,8 @@ export async function GET() {
   return NextResponse.json({
     initialized,
     dillingerCorePath,
+    runtime: process.env.DILLINGER_RUNTIME === 'native' ? 'native' : 'container',
+    hostDataPath: process.env.DILLINGER_RUNTIME === 'native' ? dillingerCorePath : null,
     volume: {
       name: 'dillinger_core',
       containerMount: '/data',

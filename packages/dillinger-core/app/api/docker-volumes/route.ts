@@ -10,6 +10,8 @@ interface DockerVolume {
   mountpoint: string;
   createdAt?: string;
   size?: string;
+  hostPath?: string | null;
+  isBind: boolean;
 }
 
 /**
@@ -44,11 +46,18 @@ export async function GET() {
         
         if (inspectData && inspectData.length > 0) {
           const volumeInfo = inspectData[0];
+          const options = volumeInfo.Options || {};
+          const hostPath =
+            options.type === 'none' && typeof options.o === 'string' && options.o.split(',').includes('bind')
+              ? options.device || null
+              : null;
           volumes.push({
             name: parsed.Name || volumeInfo.Name,
             driver: parsed.Driver || volumeInfo.Driver,
             mountpoint: volumeInfo.Mountpoint,
             createdAt: volumeInfo.CreatedAt,
+            hostPath,
+            isBind: Boolean(hostPath),
           });
         }
       } catch (parseError) {

@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NEO_WORKBENCH v1.0 - Game Detail</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface-dim": "#131313",
+            "secondary-container": "#ff8a0d",
+            "on-surface-variant": "#bec7d3",
+            "tertiary": "#00e55b",
+            "background": "#131313",
+            "on-primary-fixed": "#001d31",
+            "on-secondary-fixed-variant": "#6f3800",
+            "on-background": "#e5e2e1",
+            "on-primary": "#003351",
+            "error-container": "#93000a",
+            "inverse-surface": "#e5e2e1",
+            "on-primary-fixed-variant": "#004b73",
+            "tertiary-container": "#00bb48",
+            "on-error": "#690005",
+            "outline-variant": "#3e4851",
+            "secondary-fixed-dim": "#ffb781",
+            "on-surface": "#e5e2e1",
+            "primary": "#93ccff",
+            "inverse-primary": "#006398",
+            "on-tertiary-fixed-variant": "#00531b",
+            "on-secondary": "#4e2600",
+            "tertiary-fixed-dim": "#00e55b",
+            "surface": "#131313",
+            "on-error-container": "#ffdad6",
+            "primary-fixed-dim": "#93ccff",
+            "surface-bright": "#393939",
+            "secondary-fixed": "#ffdcc4",
+            "surface-tint": "#93ccff",
+            "outline": "#88929d",
+            "surface-container-highest": "#353534",
+            "surface-container-lowest": "#0e0e0e",
+            "primary-fixed": "#cce5ff",
+            "tertiary-fixed": "#6bff83",
+            "on-tertiary-container": "#004214",
+            "on-secondary-container": "#623000",
+            "on-tertiary": "#003911",
+            "surface-container-low": "#1c1b1b",
+            "surface-container-high": "#2a2a2a",
+            "surface-container": "#201f1f",
+            "error": "#ffb4ab",
+            "secondary": "#ffb781",
+            "on-primary-container": "#003c5d",
+            "on-secondary-fixed": "#2f1400",
+            "primary-container": "#00aaff",
+            "inverse-on-surface": "#313030",
+            "on-tertiary-fixed": "#002107",
+            "surface-variant": "#353534"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "gutter": "16px",
+            "window-header-height": "32px",
+            "container-padding": "12px",
+            "unit": "4px",
+            "border-width": "2px",
+            "margin": "24px"
+          },
+          "fontFamily": {
+            "headline-xl": ["Anybody"],
+            "body-md": ["JetBrains Mono"],
+            "body-lg": ["JetBrains Mono"],
+            "label-md": ["JetBrains Mono"],
+            "headline-lg-mobile": ["Anybody"],
+            "headline-lg": ["Anybody"],
+            "headline-md": ["Anybody"]
+          },
+          "fontSize": {
+            "headline-xl": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+            "body-md": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+            "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+            "label-md": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600"}],
+            "headline-lg-mobile": ["28px", {"lineHeight": "1.2", "fontWeight": "700"}],
+            "headline-lg": ["32px", {"lineHeight": "1.2", "fontWeight": "700"}],
+            "headline-md": ["24px", {"lineHeight": "1.2", "fontWeight": "700"}]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .scanline-effect {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(
+        to bottom,
+        rgba(18, 16, 16, 0) 50%,
+        rgba(0, 0, 0, 0.1) 50%
+      );
+      background-size: 100% 4px;
+      pointer-events: none;
+      z-index: 9999;
+    }
+    .crt-glow {
+      box-shadow: 0 0 15px rgba(147, 204, 255, 0.2);
+    }
+    .active-window {
+      border: 2px solid #93ccff;
+      box-shadow: 0 0 10px rgba(147, 204, 255, 0.3);
+    }
+    .inactive-window {
+      border: 2px solid #3e4851;
+    }
+    .retro-recessed {
+      background: #080808;
+      border-bottom: 2px solid #00e55b;
+    }
+    .block-cursor::after {
+      content: '█';
+      animation: pulse 1s infinite;
+      margin-left: 4px;
+      color: #00e55b;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background font-body-md selection:bg-tertiary selection:text-on-tertiary">
+<div class="scanline-effect"></div>
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full h-[48px] bg-surface-container-high dark:bg-surface-container-high flex justify-between items-center px-gutter border-b-2 border-outline-variant shadow-[0_0_10px_rgba(147,204,255,0.3)] z-50">
+<div class="flex items-center gap-6">
+<div class="font-headline-md text-headline-md font-bold text-primary italic">NEO_WORKBENCH v1.0</div>
+<nav class="hidden md:flex gap-4">
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 active:translate-y-0.5 px-2 py-1" href="#">Home</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-primary border-b-2 border-primary pb-1 active:translate-y-0.5" href="#">Library</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 active:translate-y-0.5 px-2 py-1" href="#">Settings</a>
+<a class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant hover:bg-primary hover:text-on-primary transition-colors duration-150 active:translate-y-0.5 px-2 py-1" href="#">About</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-primary hover:bg-primary hover:text-on-primary p-1 transition-colors">terminal</button>
+<button class="material-symbols-outlined text-primary hover:bg-primary hover:text-on-primary p-1 transition-colors">power_settings_new</button>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-[48px] w-[200px] h-[calc(100vh-48px)] bg-surface-dim dark:bg-surface-dim border-r-2 border-outline-variant hidden md:flex flex-col py-4 space-y-2 z-40">
+<div class="px-4 mb-4">
+<div class="flex items-center gap-2 mb-2">
+<div class="w-8 h-8 bg-outline-variant flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-variation-settings: 'FILL' 1;">person</span>
+</div>
+<div>
+<div class="text-[10px] font-bold text-secondary uppercase">PLATFORMS</div>
+<div class="text-[10px] text-on-surface-variant">/dev/sda1</div>
+</div>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3">computer</span>
+<span class="font-body-md">Amiga</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3">keyboard</span>
+<span class="font-body-md">Commodore 64</span>
+</a>
+<a class="bg-tertiary text-on-tertiary font-bold flex items-center px-4 py-2 shadow-[0_0_8px_rgba(0,229,91,0.5)]" href="#">
+<span class="material-symbols-outlined mr-3">terminal</span>
+<span class="font-body-md">DOS</span>
+</a>
+<a class="text-on-surface-variant flex items-center px-4 py-2 hover:bg-tertiary-container hover:text-on-tertiary-container hover:shadow-[0_0_8px_rgba(0,229,91,0.5)] transition-all" href="#">
+<span class="material-symbols-outlined mr-3">videogame_asset</span>
+<span class="font-body-md">NES</span>
+</a>
+</nav>
+<div class="px-4 py-4 space-y-4">
+<button class="w-full border-2 border-tertiary text-tertiary py-2 font-bold hover:bg-tertiary hover:text-background transition-all uppercase tracking-widest text-[10px]">
+        LAUNCH DISK
+      </button>
+<div class="pt-4 border-t border-outline-variant">
+<a class="flex items-center text-on-surface-variant text-[12px] py-1 hover:text-tertiary" href="#">
+<span class="material-symbols-outlined text-[16px] mr-2">memory</span> SysInfo
+        </a>
+<a class="flex items-center text-on-surface-variant text-[12px] py-1 hover:text-tertiary" href="#">
+<span class="material-symbols-outlined text-[16px] mr-2">lan</span> Network
+        </a>
+</div>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="md:ml-[200px] pt-[48px] p-6 min-h-screen bg-background">
+<div class="max-w-7xl mx-auto space-y-6">
+<!-- Breadcrumb / Task Bar -->
+<div class="flex items-center gap-2 text-on-surface-variant text-label-md mb-4 font-body-md">
+<span>ROOT</span>
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+<span>GAMES</span>
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+<span class="text-tertiary">MONKEY_ISLAND.EXE</span>
+</div>
+<!-- Main Game Window -->
+<div class="active-window bg-surface flex flex-col overflow-hidden">
+<!-- Window Header -->
+<div class="h-[32px] bg-primary flex items-center justify-between px-3">
+<div class="font-label-md text-on-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+            EXECUTING: THE SECRET OF MONKEY ISLAND (1990)
+          </div>
+<div class="flex items-center gap-1">
+<button class="w-4 h-4 bg-on-primary opacity-30 hover:opacity-100 transition-opacity flex items-center justify-center">
+<span class="w-2 h-0.5 bg-primary"></span>
+</button>
+<button class="w-4 h-4 bg-on-primary opacity-30 hover:opacity-100 transition-opacity flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[12px]">close</span>
+</button>
+</div>
+</div>
+<!-- Window Body -->
+<div class="p-container-padding grid grid-cols-12 gap-gutter">
+<!-- Large Retro Screenshot -->
+<div class="col-span-12 lg:col-span-8 space-y-4">
+<div class="relative aspect-video border-2 border-outline-variant bg-black group overflow-hidden">
+<img class="w-full h-full object-cover opacity-80 filter brightness-90 saturate-50 contrast-125 sepia-[0.2]" data-alt="A cinematic retro-style screenshot from a 90s point-and-click adventure game, showing a stylized Caribbean harbor at night. The art features vibrant pixelated purples and deep blues with a visible scanline texture and glowing phosphor highlights. In the foreground, a protagonist in 18th-century attire stands on a wooden pier under a bright, pixelated moon. The atmosphere is nostalgic, atmospheric, and distinctly low-bit yet high-fidelity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAEGB2n8B2K7NP-uUccF58uw4V_jYj63Gis1MFGMAoz9xlcZvFW9EXMOSE7whlRXL9AAIpm-1Fp70ETu6VpXNV6GLYpW72eTBMLJfmEDU1p-Do8DNjWkh3lthAFITnLwvXl1MTOiXTVRTcz3ORARUQJcw9KH2Nl9wyaBVBzfC7Mn1vqL0ct2TcSpGHPz9vYBp2sODXK8AmGIRbpK3K13ihF4rWQSLO0kk8PUuPflFLSjXfIgP8UuVbwXcEYHgeHlzch7CbixyLIVPE"/>
+<div class="absolute inset-0 pointer-events-none border-[12px] border-black opacity-40"></div>
+<div class="absolute bottom-4 left-4 bg-surface-container-highest/90 border border-primary px-3 py-2 text-primary font-body-md text-[12px] shadow-lg">
+<span class="block-cursor uppercase">AWAITING SYSTEM BOOT...</span>
+</div>
+</div>
+<!-- Description -->
+<div class="p-4 bg-surface-container-low border border-outline-variant">
+<h2 class="text-headline-md font-headline-md text-primary mb-4 uppercase">Operational Overview</h2>
+<p class="text-body-md text-on-surface-variant leading-relaxed mb-4">
+                Guybrush Threepwood, a young man who wants to be a pirate, travels to the island of Mêlée to start his quest. After meeting the pirate leaders, he is tasked with three trials. His journey will lead him through the mysterious SCUMM system, challenging his wit and his ability to hold his breath for ten minutes.
+              </p>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-[12px] border-t border-outline-variant pt-4">
+<div>
+<span class="text-secondary block font-bold">DEVELOPER</span>
+<span class="text-on-surface">Lucasfilm Games</span>
+</div>
+<div>
+<span class="text-secondary block font-bold">RELEASE DATE</span>
+<span class="text-on-surface">OCT 1990</span>
+</div>
+<div>
+<span class="text-secondary block font-bold">GENRE</span>
+<span class="text-on-surface">Adventure</span>
+</div>
+<div>
+<span class="text-secondary block font-bold">STATUS</span>
+<span class="text-tertiary">READY TO MOUNT</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Stats & Actions -->
+<div class="col-span-12 lg:col-span-4 space-y-6">
+<!-- Action Button -->
+<div class="p-6 bg-surface-container border-2 border-primary crt-glow text-center space-y-4">
+<span class="material-symbols-outlined text-primary text-[48px]" style="font-variation-settings: 'FILL' 1;">save</span>
+<h3 class="font-headline-md text-primary uppercase">Insert Disk 1</h3>
+<p class="text-[12px] text-on-surface-variant px-4">Ensure physical media is write-protected before initialization.</p>
+<button class="w-full bg-primary text-on-primary py-4 font-headline-md hover:bg-surface hover:text-primary border-2 border-primary transition-all active:translate-y-1 shadow-[0_0_20px_rgba(147,204,255,0.4)]">
+                POWER ON
+              </button>
+</div>
+<!-- Control Mapping -->
+<div class="inactive-window bg-surface-container-low">
+<div class="h-8 bg-outline-variant flex items-center px-3 text-[10px] font-bold uppercase tracking-widest">
+                Control_Layout.map
+              </div>
+<div class="p-4 space-y-2 font-body-md text-[12px]">
+<div class="flex justify-between border-b border-outline-variant/30 py-1">
+<span class="text-secondary">MOUSE_01</span>
+<span class="text-on-surface">Move / Select</span>
+</div>
+<div class="flex justify-between border-b border-outline-variant/30 py-1">
+<span class="text-secondary">MOUSE_02</span>
+<span class="text-on-surface">Look At</span>
+</div>
+<div class="flex justify-between border-b border-outline-variant/30 py-1">
+<span class="text-secondary">ESC</span>
+<span class="text-on-surface">Menu / Quit</span>
+</div>
+<div class="flex justify-between border-b border-outline-variant/30 py-1">
+<span class="text-secondary">SPACE</span>
+<span class="text-on-surface">Pause Game</span>
+</div>
+</div>
+</div>
+<!-- System Requirements -->
+<div class="inactive-window bg-surface-container-low">
+<div class="h-8 bg-outline-variant flex items-center px-3 text-[10px] font-bold uppercase tracking-widest">
+                System_Requirements.txt
+              </div>
+<div class="p-4 text-[12px] space-y-1 text-on-surface-variant italic">
+<p>&gt; Minimum: 8088/8086 CPU</p>
+<p>&gt; RAM: 640 KB Free</p>
+<p>&gt; Graphics: VGA 256-Color</p>
+<p>&gt; Audio: AdLib / Sound Blaster</p>
+</div>
+</div>
+<!-- Community Ratings -->
+<div class="p-4 bg-surface-container border border-outline-variant">
+<div class="flex items-center justify-between mb-4">
+<span class="text-label-md font-bold text-secondary uppercase">User Evaluation</span>
+<span class="text-tertiary text-headline-md font-bold">9.8/10</span>
+</div>
+<div class="flex gap-1 mb-4">
+<span class="material-symbols-outlined text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-tertiary" style="font-variation-settings: 'FILL' 1;">star_half</span>
+</div>
+<div class="space-y-3">
+<div class="text-[11px] border-l-2 border-tertiary pl-2 italic text-on-surface-variant">
+                  "Best adventure game ever coded. The SCUMM engine is legendary." - Operator_01
+                </div>
+<div class="text-[11px] border-l-2 border-outline-variant pl-2 italic text-on-surface-variant">
+                  "Peak pixel art aesthetic. 10/10 dialogue." - RetroLover88
+                </div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Related Titles Section -->
+<section class="space-y-4">
+<h3 class="font-headline-md text-secondary uppercase flex items-center gap-2">
+<span class="material-symbols-outlined">dataset</span>
+          Linked Modules in Library
+        </h3>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+<div class="inactive-window bg-surface-container-low hover:border-primary transition-colors cursor-pointer group">
+<div class="aspect-[4/3] bg-black overflow-hidden border-b border-outline-variant">
+<img class="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity filter saturate-0 group-hover:saturate-100" data-alt="A pixel-art style teaser image for a classic adventure game showing a spooky mansion on a hill under a jagged lightning strike. The color palette is restricted to purples, blacks, and electric greens, with heavy dithering and scanline effects characteristic of late 80s computer graphics. The mood is eerie, gothic, and humorous." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD1Gwl47EIopKT6XI2PlILvWGrRM7qXvf5KQpeZEFIE0zGwPjKaP66OJgeUMwpu2xHxcNOtR2aIzi6kWS9W0CpJOMf9I7EYM6t2gXQGn51O8R-FHe8Q5VTZVlzwKbmXrRWhwbKgii11RQNKd50yim8GTACuq4m-s3pYZ0RsLOSvJe9NFKOHS0kcni2xxiY4iRgwq5uqLaDITARTI6G-emhnlYLxZff1IW641q9axSmik1KftsSnC2QzBm5I-SCJ_9VFuJ52mzXnRLE"/>
+</div>
+<div class="p-3">
+<div class="text-[10px] text-secondary font-bold uppercase mb-1">Lucasfilm Games</div>
+<div class="text-body-md font-bold text-on-surface truncate">Maniac Mansion</div>
+</div>
+</div>
+<div class="inactive-window bg-surface-container-low hover:border-primary transition-colors cursor-pointer group">
+<div class="aspect-[4/3] bg-black overflow-hidden border-b border-outline-variant">
+<img class="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity filter saturate-0 group-hover:saturate-100" data-alt="A futuristic synthwave style pixel art piece representing a cyberpunk city skyline at night. Neon pink and cyan lights reflect off wet pavement, and massive digital billboards glow in the distance. The style is inspired by early 90s CD-ROM adventure games with high contrast and a dense, gritty urban atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuASf7qKJifK8GCvbXMea8BEHT4AHegfNILQe9nRZxxCmu_vp_6FSKKMNUC3mLRKnXpMrgMFpMtKdJ5z1ePvBlUra9R_y4zXD5n81npXDtb1kcS1ermPv0vVYuSHntFDPyzjsGWTgYQHPNP2Ja4ZyUfIPWz2_15UGrDGZOJQXLp4k0YkmX9byowDeJ9tKURUrlp__O9s6MI_9MTzYaegRxNhvFs5sLHN71-c4MsdDGMYvu9-4mIXOU59hPQhO-8ZOz6Lx8S01jvDD-U"/>
+</div>
+<div class="p-3">
+<div class="text-[10px] text-secondary font-bold uppercase mb-1">Sierra On-Line</div>
+<div class="text-body-md font-bold text-on-surface truncate">Space Quest IV</div>
+</div>
+</div>
+<div class="inactive-window bg-surface-container-low hover:border-primary transition-colors cursor-pointer group">
+<div class="aspect-[4/3] bg-black overflow-hidden border-b border-outline-variant">
+<img class="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity filter saturate-0 group-hover:saturate-100" data-alt="A lush, detailed pixel art jungle landscape from a 16-bit era computer game. Sunbeams filter through a thick canopy of tropical leaves onto a hidden ancient temple entrance. The visual style uses a rich palette of greens and earthy browns with delicate shadow work and a distinct CRT texture overlaying the entire scene." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnUim7HjKYFyvSBkkvF2BxjjVZtIGxf9YJy4J3ocBfK22s1Ji7tQ1lLY1ECSolhcuYwbWwbuw8HATdDv-f0WsX4V7G86nIbVCzBVc-1uKOyTSByJb2MdGNYDdZX15cjPZ-AXEcG94ml-XMDHoFZxi7YCA4ur9OZKPKEjf2dBw2ZvAz0IwtPdYpWlNUpJ3g5aKTtAb198sRocIOCValFMhrez_P8vnIxu10O4ttSfK-I2stmDB7pLaaRjgRy6e_CGdVk2pEkrTcFos"/>
+</div>
+<div class="p-3">
+<div class="text-[10px] text-secondary font-bold uppercase mb-1">Lucasfilm Games</div>
+<div class="text-body-md font-bold text-on-surface truncate">Indiana Jones: Fate of Atlantis</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+</main>
+<!-- Mobile Bottom Nav -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full bg-surface-container-high border-t border-outline-variant flex justify-around items-center py-2 z-50">
+<button class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">home</span>
+<span class="text-[10px] font-bold">Home</span>
+</button>
+<button class="flex flex-col items-center gap-1 text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">library_books</span>
+<span class="text-[10px] font-bold">Library</span>
+</button>
+<button class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-[10px] font-bold">Settings</span>
+</button>
+</nav>
+<!-- Global Footer Info -->
+<footer class="md:ml-[200px] p-6 border-t border-outline-variant mt-12 bg-surface-container-lowest">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+<div class="space-y-1">
+<div class="text-[12px] font-bold text-secondary uppercase">Terminal Status: Connected</div>
+<div class="text-[10px] text-on-surface-variant font-body-md">NEO_WORKBENCH Kernel v1.0.42-STABLE / SYSTEM_TIME: 23:59:01</div>
+</div>
+<div class="flex gap-4">
+<div class="w-32 h-2 bg-outline-variant rounded-full overflow-hidden">
+<div class="w-[65%] h-full bg-tertiary"></div>
+</div>
+<span class="text-[10px] font-bold text-tertiary uppercase">RAM USAGE: 640KB</span>
+</div>
+</div>
+</footer>
+</body></html>

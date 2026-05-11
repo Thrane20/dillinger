@@ -1,5 +1,8 @@
 import type { VersionedData } from './schema-version.js';
 
+export type VolumeStorageType = 'ssd' | 'platter' | 'archive';
+export type VolumePurpose = 'core' | 'roms' | 'cache' | 'installed' | 'downloads' | 'installers';
+
 /**
  * Volume configuration for Docker volumes and bind mounts
  */
@@ -12,7 +15,7 @@ export interface Volume extends VersionedData {
   type: 'docker' | 'bind';
   status: 'active' | 'error';
   lastVerified?: string;
-  purpose?: string; // Deprecated, kept for backward compatibility
+  purpose?: VolumePurpose;
 }
 
 export type FirstClassVolumeCategory = 'core' | 'roms' | 'cache' | 'installed';
