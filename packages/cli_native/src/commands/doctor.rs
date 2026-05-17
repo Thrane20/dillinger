@@ -3,7 +3,9 @@ use std::path::Path;
 
 use crate::utils::{
     config::get_config,
-    docker::{check_network_reachable, has_docker_permissions, is_docker_installed, is_docker_running},
+    docker::{
+        check_network_reachable, has_docker_permissions, is_docker_installed, is_docker_running,
+    },
     ui::LOG,
     volume::verify_volume,
 };
@@ -23,15 +25,27 @@ pub async fn doctor_command() -> Result<()> {
     let config = get_config();
 
     let docker_installed = is_docker_installed().await;
-    let docker_running = if docker_installed { is_docker_running().await } else { false };
-    let docker_perms = if docker_running { has_docker_permissions().await } else { false };
+    let docker_running = if docker_installed {
+        is_docker_running().await
+    } else {
+        false
+    };
+    let docker_perms = if docker_running {
+        has_docker_permissions().await
+    } else {
+        false
+    };
 
     print_check(
         "Docker installed",
         docker_installed,
         Some("Install Docker from docs.docker.com/get-docker"),
     );
-    print_check("Docker daemon running", docker_running, Some("Start Docker service"));
+    print_check(
+        "Docker daemon running",
+        docker_running,
+        Some("Start Docker service"),
+    );
     print_check(
         "Docker permissions",
         docker_perms,
@@ -44,7 +58,11 @@ pub async fn doctor_command() -> Result<()> {
         .unwrap_or(false);
     let display_set = std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok();
 
-    print_check("GPU device available", gpu, Some("GPU passthrough disabled if missing"));
+    print_check(
+        "GPU device available",
+        gpu,
+        Some("GPU passthrough disabled if missing"),
+    );
     print_check(
         "Audio socket available",
         pulse_socket,

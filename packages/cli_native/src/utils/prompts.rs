@@ -25,10 +25,7 @@ pub fn confirm(message: &str, default: bool) -> anyhow::Result<bool> {
 
 /// Presents a selection list to the user.
 #[allow(dead_code)]
-pub fn select<T: Clone>(
-    message: &str,
-    choices: &[(String, T)],
-) -> anyhow::Result<T> {
+pub fn select<T: Clone>(message: &str, choices: &[(String, T)]) -> anyhow::Result<T> {
     let labels: Vec<&str> = choices.iter().map(|(l, _)| l.as_str()).collect();
     let idx = dialoguer::Select::new()
         .with_prompt(message)

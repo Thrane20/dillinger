@@ -21,6 +21,19 @@ export type StreamingQuality = 'low' | 'medium' | 'high' | 'ultra';
 export type TestPattern = 'smpte' | 'bar' | 'checkerboard' | 'ball' | 'snow';
 
 /**
+ * Display profile for the virtual compositor (resolution + refresh rate configuration)
+ */
+export interface SwayProfile {
+  id: string;
+  name: string;
+  description?: string;
+  width: number;
+  height: number;
+  refreshRate: number;
+  customConfig?: string;
+}
+
+/**
  * Sidecar operating mode
  */
 export type SidecarMode = 'game' | 'test-stream' | 'test-x11';

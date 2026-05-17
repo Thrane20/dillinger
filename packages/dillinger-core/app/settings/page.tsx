@@ -74,6 +74,25 @@ type GraphNodeData = {
   outputs?: GraphPortDefinition[];
 };
 
+type CoreDockerMount = {
+  type: string;
+  name?: string;
+  source: string;
+  destination: string;
+  mode?: string;
+  rw: boolean;
+  driver?: string;
+  resolvedHostPath?: string | null;
+  managedVolume?: {
+    id: string;
+    name: string;
+    dockerVolumeName: string;
+    hostPath: string;
+    purpose?: string;
+    status: string;
+  } | null;
+};
+
 const NODE_TYPE_LABELS: Record<string, string> = {
   SunshineSink: 'MoonlightSink',
 };
@@ -176,6 +195,8 @@ export default function SettingsPage() {
   
   // Docker settings
   const [autoRemoveContainers, setAutoRemoveContainers] = useState(false);
+  const [coreDockerMounts, setCoreDockerMounts] = useState<CoreDockerMount[]>([]);
+  const [dockerMountsError, setDockerMountsError] = useState<string | null>(null);
 
   // GPU settings
   const [gpuVendor, setGpuVendor] = useState<'auto' | 'amd' | 'nvidia'>('auto');
@@ -414,14 +435,30 @@ export default function SettingsPage() {
 
   const loadDockerSettings = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/settings/docker`);
-      if (!response.ok) {
+      const [settingsResponse, mountsResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/settings/docker`),
+        fetch(`${API_BASE_URL}/api/settings/docker/mounts`),
+      ]);
+      if (!settingsResponse.ok) {
         throw new Error('Failed to load Docker settings');
       }
-      const data = await response.json();
+      const data = await settingsResponse.json();
       setAutoRemoveContainers(data.settings?.autoRemoveContainers || false);
+
+      if (mountsResponse.ok) {
+        const mountsPayload = await mountsResponse.json();
+        if (mountsPayload.success) {
+          setCoreDockerMounts(mountsPayload.data?.mounts || []);
+          setDockerMountsError(null);
+        } else {
+          setDockerMountsError(mountsPayload.error || 'Failed to inspect Core mounts');
+        }
+      } else {
+        setDockerMountsError('Failed to inspect Core mounts');
+      }
     } catch (error) {
       console.error('Failed to load Docker settings:', error);
+      setDockerMountsError(error instanceof Error ? error.message : 'Failed to load Docker mount details');
     }
   };
 
@@ -2210,6 +2247,95 @@ export default function SettingsPage() {
                     Automatically remove game containers when they stop. Disable this to keep containers for debugging.
                   </p>
                 </div>
+              </div>
+
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 px-3 py-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      Core Container Mounts
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Docker mounts currently passed into Dillinger Core and how managed volumes resolve inside the app.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadDockerSettings}
+                    className="shrink-0 border border-gray-300 dark:border-gray-600 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {dockerMountsError ? (
+                  <div className="px-3 py-3 text-sm text-red-600 dark:text-red-400">
+                    {dockerMountsError}
+                  </div>
+                ) : coreDockerMounts.length === 0 ? (
+                  <div className="px-3 py-3 text-sm text-gray-500 dark:text-gray-400">
+                    No Core container mounts detected.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-left text-xs">
+                      <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-500 dark:text-gray-400">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold uppercase">Core Path</th>
+                          <th className="px-3 py-2 font-semibold uppercase">Docker Source</th>
+                          <th className="px-3 py-2 font-semibold uppercase">Managed Volume</th>
+                          <th className="px-3 py-2 font-semibold uppercase">Resolved Host Path</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        {coreDockerMounts.map((mount) => (
+                          <tr key={`${mount.destination}:${mount.source}`} className="align-top">
+                            <td className="px-3 py-2">
+                              <div className="font-mono text-gray-900 dark:text-gray-100 break-all">{mount.destination}</div>
+                              <div className="mt-1 text-[10px] uppercase text-gray-500 dark:text-gray-400">
+                                {mount.type}{mount.rw ? ' rw' : ' ro'}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="font-mono text-gray-700 dark:text-gray-300 break-all">
+                                {mount.name || mount.source || '(none)'}
+                              </div>
+                              {mount.name && mount.source && (
+                                <div className="mt-1 font-mono text-[11px] text-gray-500 dark:text-gray-400 break-all">
+                                  {mount.source}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              {mount.managedVolume ? (
+                                <div>
+                                  <div className="font-medium text-gray-900 dark:text-gray-100">
+                                    {mount.managedVolume.name}
+                                  </div>
+                                  <div className="mt-1 font-mono text-[11px] text-gray-500 dark:text-gray-400 break-all">
+                                    {mount.managedVolume.dockerVolumeName}
+                                  </div>
+                                  {mount.managedVolume.purpose && (
+                                    <div className="mt-1 inline-block border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-[10px] uppercase text-gray-500 dark:text-gray-400">
+                                      {mount.managedVolume.purpose}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">unmanaged</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="font-mono text-gray-700 dark:text-gray-300 break-all">
+                                {mount.resolvedHostPath || mount.source || '(unknown)'}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               <button

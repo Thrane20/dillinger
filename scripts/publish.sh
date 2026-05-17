@@ -34,10 +34,29 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+print_debug() {
+    if [[ "${DEBUG_PUBLISH:-0}" == "1" ]]; then
+        echo -e "${BLUE}DEBUG:${NC} $1"
+    fi
+}
+
+TEMP_DOCKER_CONFIG=""
+
+cleanup() {
+    if [[ -n "$TEMP_DOCKER_CONFIG" ]] && [[ -d "$TEMP_DOCKER_CONFIG" ]]; then
+        rm -rf "$TEMP_DOCKER_CONFIG"
+    fi
+}
+
+trap cleanup EXIT
+
 # Load .env file if it exists
 if [[ -f "$ROOT_DIR/.env" ]]; then
     print_info "Loading environment from .env file..."
-    export $(grep -v '^#' "$ROOT_DIR/.env" | xargs)
+    set -a
+    # shellcheck disable=SC1090
+    source "$ROOT_DIR/.env"
+    set +a
 fi
 
 # Load versions
@@ -45,14 +64,39 @@ source "$ROOT_DIR/versioning.env"
 
 # Registry config
 REGISTRY="ghcr.io/thrane20"
+GITHUB_USERNAME="${GITHUB_USERNAME:-thrane20}"
+
+# Normalize secrets copied from Windows editors/clipboards
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    GITHUB_TOKEN="${GITHUB_TOKEN//$'\r'/}"
+    export GITHUB_TOKEN
+fi
+
+setup_docker_auth() {
+    TEMP_DOCKER_CONFIG="$(mktemp -d)"
+    export DOCKER_CONFIG="$TEMP_DOCKER_CONFIG"
+    printf '{}\n' > "$DOCKER_CONFIG/config.json"
+    print_debug "Using temporary DOCKER_CONFIG: $DOCKER_CONFIG"
+}
 
 # Docker authentication
 if [[ -n "$GITHUB_TOKEN" ]]; then
     print_info "Authenticating with GitHub Container Registry..."
-    echo "$GITHUB_TOKEN" | docker login ghcr.io -u thrane20 --password-stdin >/dev/null 2>&1 || {
+    setup_docker_auth
+    print_debug "Using GitHub username: $GITHUB_USERNAME"
+    print_debug "Token length: ${#GITHUB_TOKEN}"
+    print_debug "Token has whitespace: $( [[ "$GITHUB_TOKEN" =~ [[:space:]] ]] && echo yes || echo no )"
+    print_debug "Token fingerprint: $(printf '%s' "$GITHUB_TOKEN" | sha256sum | cut -c1-12)"
+
+    login_output=""
+    if ! login_output=$(printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_USERNAME" --password-stdin 2>&1); then
         print_error "Failed to authenticate with ghcr.io. Check your GITHUB_TOKEN."
+        if [[ "${DEBUG_PUBLISH:-0}" == "1" ]]; then
+            print_debug "docker login stderr/stdout: $login_output"
+            print_debug "If this is a classic PAT for GHCR push, verify it includes at least: write:packages"
+        fi
         exit 1
-    }
+    fi
     print_success "Authenticated with ghcr.io"
 else
     print_error "GITHUB_TOKEN not found in environment or .env file"

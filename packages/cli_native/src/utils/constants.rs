@@ -10,6 +10,12 @@ pub const DEFAULT_AUTO_UPDATE: bool = true;
 /// Default Docker volume name for core data.
 pub const DEFAULT_VOLUME_NAME: &str = "dillinger_core";
 
+/// Default Docker volume name for ROM library data.
+pub const DEFAULT_ROMS_VOLUME_NAME: &str = "dillinger_roms";
+
+/// Default Docker volume name for downloaded installer/cache data.
+pub const DEFAULT_DOWNLOAD_CACHE_VOLUME_NAME: &str = "dillinger_cache";
+
 /// Default Docker container name.
 pub const DEFAULT_CONTAINER_NAME: &str = "dillinger";
 
@@ -37,12 +43,6 @@ SUBSYSTEMS==\"input\", ATTRS{name}==\"Wolf Nintendo (virtual) pad\", MODE=\"0660
 
 /// Volume name prefix for Wine install roots.
 pub const INSTALLED_VOLUME_PREFIX: &str = "dillinger_installed_";
-
-/// Standard volumes that are always mounted.
-pub const STANDARD_VOLUMES: &[(&str, &str)] = &[
-    ("dillinger_roms", "/roms"),
-    ("dillinger_cache", "/cache"),
-];
 
 /// Root path inside runner containers where extra managed volumes are mounted.
 pub const EXTRA_RUNNER_VOLUME_ROOT: &str = "/mnt/dillinger-volumes";

@@ -1,10 +1,6 @@
 use anyhow::Result;
 
-use crate::utils::{
-    config::get_config,
-    docker::get_container_status,
-    ui::LOG,
-};
+use crate::utils::{config::get_config, docker::get_container_status, ui::LOG};
 
 pub async fn status_command() -> Result<()> {
     let config = get_config();
@@ -17,7 +13,10 @@ pub async fn status_command() -> Result<()> {
     }
 
     LOG.plain(&format!("Container: {}", container_name));
-    LOG.plain(&format!("State: {}", if status.running { "running" } else { "stopped" }));
+    LOG.plain(&format!(
+        "State: {}",
+        if status.running { "running" } else { "stopped" }
+    ));
     if let Some(ref s) = status.status {
         LOG.plain(&format!("Status: {}", s));
     }

@@ -115,6 +115,7 @@ const performanceFormData: PerformanceFormData = {
 const noopSetRendering: React.Dispatch<React.SetStateAction<RenderingFormData>> = () => undefined;
 const noopSetMakeItRun: React.Dispatch<React.SetStateAction<MakeItRunFormData>> = () => undefined;
 const noopSetPerformance: React.Dispatch<React.SetStateAction<PerformanceFormData>> = () => undefined;
+const noopAsync = async () => undefined;
 
 test('Wine section components render lock placeholders for pre-install phases', async () => {
   const renderingLocked = renderToStaticMarkup(
@@ -145,6 +146,8 @@ test('Wine section components render lock placeholders for pre-install phases', 
       onAutoDetect: () => undefined,
       onExportToml: () => undefined,
       onImportFileSelected: () => undefined,
+      onRunRegistrySetup: noopAsync,
+      onApplyRegistrySettings: noopAsync,
       phase: 'needs_install',
       sectionRef: noopSectionRef,
     })
@@ -195,6 +198,8 @@ test('Wine section components hide lock placeholders for unlocked phases', async
       onAutoDetect: () => undefined,
       onExportToml: () => undefined,
       onImportFileSelected: () => undefined,
+      onRunRegistrySetup: noopAsync,
+      onApplyRegistrySettings: noopAsync,
       phase: 'ready',
       sectionRef: noopSectionRef,
     })

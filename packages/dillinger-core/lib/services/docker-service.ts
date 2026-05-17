@@ -54,6 +54,8 @@ export class DockerService {
   
   // Volume name for the current game session
   private readonly SESSION_VOLUME = 'dillinger_current_session';
+  private readonly STREAMING_RUNTIME_VOLUME = 'dillinger_streaming_runtime';
+  private readonly EXTRA_RUNNER_VOLUME_ROOT = '/mnt/dillinger-volumes';
   
   // Host path mapping for devcontainer
   // When running in a devcontainer, /workspaces/dillinger maps to a host path
@@ -109,19 +111,179 @@ export class DockerService {
    */
   private async findVolumeForPath(hostPath: string): Promise<{ volume: { name: string; dockerVolumeName: string; hostPath: string }; relativePath: string } | null> {
     const volumes = await this.getConfiguredVolumes();
+    const mountByVolumeName = new Map<string, any>();
+    for (const mount of this.mounts || []) {
+      if (mount?.Name) {
+        mountByVolumeName.set(mount.Name, mount);
+      }
+    }
     
     // Sort by hostPath length descending to match the most specific volume first
     const sortedVolumes = [...volumes].sort((a, b) => b.hostPath.length - a.hostPath.length);
     
     for (const volume of sortedVolumes) {
-      // Check if the path is under this volume's host path
-      if (hostPath === volume.hostPath || hostPath.startsWith(volume.hostPath + '/')) {
-        const relativePath = hostPath === volume.hostPath ? '' : hostPath.substring(volume.hostPath.length);
-        return { volume, relativePath };
+      const candidates = [volume.hostPath];
+      const mountedVolume = mountByVolumeName.get(volume.dockerVolumeName);
+      if (mountedVolume?.Destination) {
+        candidates.push(mountedVolume.Destination);
+      }
+
+      for (const root of candidates) {
+        if (!root) continue;
+        // Check if the path is under this configured host path or its mount
+        // path inside the Dillinger Core container.
+        if (hostPath === root || hostPath.startsWith(root + '/')) {
+          const relativePath = hostPath === root ? '' : hostPath.substring(root.length);
+          return { volume, relativePath };
+        }
       }
     }
     
     return null;
+  }
+
+  private async inspectCurrentContainer(hostname: string): Promise<any> {
+    try {
+      return await docker.getContainer(hostname).inspect();
+    } catch (error: any) {
+      if (error?.statusCode && error.statusCode !== 404) {
+        throw error;
+      }
+    }
+
+    const containers = await docker.listContainers({ all: true });
+    for (const containerInfo of containers) {
+      const inspect = await docker.getContainer(containerInfo.Id).inspect();
+      if (inspect.Config?.Hostname === hostname) {
+        return inspect;
+      }
+    }
+
+    for (const containerInfo of containers) {
+      const inspect = await docker.getContainer(containerInfo.Id).inspect();
+      const hasCoreVolume = inspect.Mounts?.some(
+        (mount: any) => mount.Name === 'dillinger_core' && mount.Destination === '/data',
+      );
+      if (hasCoreVolume) {
+        return inspect;
+      }
+    }
+
+    throw new Error(`Could not find current Dillinger Core container for hostname "${hostname}"`);
+  }
+
+  private isReservedRunnerVolume(volumeName: string): boolean {
+    return (
+      volumeName === 'dillinger_core' ||
+      volumeName === 'dillinger_cache' ||
+      volumeName === 'dillinger_roms' ||
+      volumeName === this.SESSION_VOLUME ||
+      volumeName === this.STREAMING_RUNTIME_VOLUME ||
+      volumeName.startsWith('dillinger_installed_')
+    );
+  }
+
+  private getExtraRunnerVolumeMountPath(volumeName: string): string {
+    const safeSegment = volumeName
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'volume';
+
+    return path.posix.join(this.EXTRA_RUNNER_VOLUME_ROOT, safeSegment);
+  }
+
+  private async appendConfiguredRunnerVolumes(
+    binds: string[],
+    env?: string[],
+  ): Promise<void> {
+    const configuredVolumes = await this.getConfiguredVolumes();
+    if (configuredVolumes.length === 0) {
+      return;
+    }
+
+    const mountedSources = new Set<string>();
+    const mountedTargets = new Set<string>();
+    for (const bind of binds) {
+      const [source, target] = bind.split(':');
+      if (source) mountedSources.add(source);
+      if (target) mountedTargets.add(target);
+    }
+
+    const mountedExtras: Array<{
+      name: string;
+      dockerVolumeName: string;
+      hostPath: string;
+      mountPath: string;
+    }> = [];
+
+    for (const volume of configuredVolumes) {
+      if (!volume.dockerVolumeName || this.isReservedRunnerVolume(volume.dockerVolumeName)) {
+        continue;
+      }
+
+      const source = (volume as any).type === 'bind' ? volume.hostPath : volume.dockerVolumeName;
+      if (mountedSources.has(source)) {
+        continue;
+      }
+
+      const mountPath = this.getExtraRunnerVolumeMountPath(volume.dockerVolumeName);
+      if (mountedTargets.has(mountPath)) {
+        continue;
+      }
+
+      binds.push(`${source}:${mountPath}:rw`);
+      mountedSources.add(source);
+      mountedTargets.add(mountPath);
+      mountedExtras.push({
+        name: volume.name,
+        dockerVolumeName: volume.dockerVolumeName,
+        hostPath: volume.hostPath,
+        mountPath,
+      });
+    }
+
+    if (env && mountedExtras.length > 0) {
+      env.push(`DILLINGER_EXTRA_VOLUMES=${JSON.stringify(mountedExtras)}`);
+      env.push(`DILLINGER_EXTRA_VOLUME_ROOT=${this.EXTRA_RUNNER_VOLUME_ROOT}`);
+    }
+  }
+
+  private normalizeWineRegistrySettings(settings: Array<{
+    path: string;
+    name: string;
+    type?: string;
+    value: string;
+  }>): Array<{ path: string; name: string; type: string; value: string }> {
+    return (settings || []).map((entry) => {
+      const type = (entry.type || 'REG_SZ').toUpperCase();
+      let value = String(entry.value ?? '').trim();
+
+      if (type === 'REG_BINARY') {
+        if (/^0x[0-9a-f]+$/i.test(value)) {
+          const hex = value.slice(2);
+          const bigintValue = BigInt(`0x${hex || '0'}`);
+          const bytesNeeded = Math.max(4, Math.ceil(Math.max(hex.length, 1) / 2));
+          const paddedHex = bigintValue.toString(16).padStart(bytesNeeded * 2, '0');
+          const bytes = paddedHex.match(/../g) || ['00'];
+          value = bytes.reverse().join('');
+        } else {
+          value = value.replace(/[^0-9a-f]/gi, '');
+          if (value.length % 2 === 1) {
+            value = `0${value}`;
+          }
+          if (!value) {
+            value = '00';
+          }
+        }
+      }
+
+      return {
+        path: entry.path,
+        name: entry.name,
+        type,
+        value,
+      };
+    });
   }
 
   private buildEnvObject(env: string[]): Record<string, string> {
@@ -466,7 +628,7 @@ export class DockerService {
    * This is called lazily on first volume operation
    */
   private async detectHostPath(): Promise<void> {
-    if (this.workspaceHostPath !== null) {
+    if (this.workspaceHostPath !== null && (this.workspaceHostPath !== '' || this.mounts.length > 0)) {
       return; // Already detected
     }
     
@@ -484,9 +646,10 @@ export class DockerService {
       
       logger.info(`Detecting host path for container: ${hostname}`);
       
-      // Inspect the current container to find the workspace mount
-      const container = docker.getContainer(hostname);
-      const info = await container.inspect();
+      // Inspect the current container to find the workspace and managed volume mounts.
+      // In devcontainers, the in-container hostname may not be the Docker container
+      // name, so resolve through Docker metadata when direct inspect misses.
+      const info = await this.inspectCurrentContainer(hostname);
       
       this.mounts = info.Mounts || []; // Store mounts for general translation
       logger.info(`Found ${info.Mounts?.length || 0} mounts in container`);
@@ -1792,6 +1955,16 @@ export class DockerService {
           AutoRemove: autoRemove,
           Binds: binds,
           Devices: displayConfig.devices,
+          GroupAdd: this.getSupplementalGroupIds([
+            '/dev/dri/card0',
+            '/dev/dri/card1',
+            '/dev/dri/renderD128',
+            '/dev/dri/renderD129',
+            '/dev/input',
+            '/dev/snd',
+            '/dev/uinput',
+          ]),
+          CapAdd: ['SYS_NICE'],
           IpcMode: displayConfig.ipcMode,
           SecurityOpt: displayConfig.securityOpt,
           NetworkMode: displayConfig.networkMode,
@@ -2240,6 +2413,201 @@ export class DockerService {
     
     logger.info(`Generated .reg file with ${regContent.split('\n').length} lines`);
     return regContent;
+  }
+
+  /**
+   * Apply Wine registry settings to a game's Wine prefix using `wine reg add`
+   */
+  async applyWineRegistrySettings(options: {
+    game: Game;
+    platform: Platform;
+    registrySettings: Array<{
+      path: string;
+      name: string;
+      type?: string;
+      value: string;
+    }>;
+  }): Promise<{ success: boolean; message: string; appliedCount?: number }> {
+    const { game, platform } = options;
+
+    if (platform.type !== 'wine') {
+      return { success: false, message: 'Registry settings are only supported for Wine games' };
+    }
+
+    const configuredInstallPath = game.installation?.installPath;
+    if (!configuredInstallPath) {
+      return { success: false, message: 'No install path configured for this game' };
+    }
+
+    const normalizedSettings = this.normalizeWineRegistrySettings((options.registrySettings || [])
+      .filter((entry) => entry && typeof entry.path === 'string' && typeof entry.name === 'string')
+      .map((entry) => ({
+        path: entry.path.trim(),
+        name: entry.name.trim(),
+        type: entry.type || 'REG_SZ',
+        value: String(entry.value ?? ''),
+      }))
+      .filter((entry) => entry.path.length > 0 && entry.name.length > 0));
+
+    if (normalizedSettings.length === 0) {
+      return { success: false, message: 'No registry settings configured to apply' };
+    }
+
+    await this.detectHostPath();
+
+    let bindSource: string;
+    let containerPrefixPath: string;
+
+    const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
+    if ((volumeMatch?.volume as any)?.type === 'docker') {
+      bindSource = (volumeMatch!.volume as any).dockerVolumeName;
+      containerPrefixPath = `/mnt/game_volume${volumeMatch!.relativePath}`;
+    } else {
+      bindSource = this.getHostPath(configuredInstallPath);
+      containerPrefixPath = configuredInstallPath;
+    }
+
+    const displayConfig = await this.getDisplayConfiguration();
+    const wineDebug = this.buildWineDebug(game);
+    const wineVersionId = game.settings?.wine?.version || game.installation?.wineVersionId || 'system';
+
+    const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
+    const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
+
+    const binds = (volumeMatch?.volume as any)?.type === 'docker'
+      ? [`${bindSource}:/mnt/game_volume:rw`, ...displayConfig.volumes]
+      : [`${bindSource}:${containerPrefixPath}:rw`, ...displayConfig.volumes];
+    const env = [
+      `WINEPREFIX=${containerPrefixPath}`,
+      `WINEDEBUG=${wineDebug}`,
+      `WINE_VERSION_ID=${wineVersionId}`,
+      `DILLINGER_REGISTRY_SETTINGS=${JSON.stringify(normalizedSettings)}`,
+      ...displayConfig.env,
+    ];
+    await this.appendConfiguredRunnerVolumes(binds, env);
+
+    const pythonRegistryApplyScript = [
+      'import json, os, subprocess, sys',
+      'def normalize_path(value):',
+      '    text = (value or "").strip()',
+      '    upper = text.upper()',
+      '    if upper.startswith("HKEY_CURRENT_USER\\\\"):',
+      '        return "HKCU\\\\" + text[len("HKEY_CURRENT_USER\\\\"):]',
+      '    if upper.startswith("HKEY_LOCAL_MACHINE\\\\"):',
+      '        return "HKLM\\\\" + text[len("HKEY_LOCAL_MACHINE\\\\"):]',
+      '    if upper.startswith("HKEY_CLASSES_ROOT\\\\"):',
+      '        return "HKCR\\\\" + text[len("HKEY_CLASSES_ROOT\\\\"):]',
+      '    if upper.startswith("HKEY_USERS\\\\"):',
+      '        return "HKU\\\\" + text[len("HKEY_USERS\\\\"):]',
+      '    if upper.startswith("HKEY_CURRENT_CONFIG\\\\"):',
+      '        return "HKCC\\\\" + text[len("HKEY_CURRENT_CONFIG\\\\"):]',
+      '    return text',
+      'settings = json.loads(os.environ.get("DILLINGER_REGISTRY_SETTINGS", "[]"))',
+      'user = os.environ.get("UNAME", "gameuser")',
+      'as_root = (os.geteuid() == 0)',
+      'def wine_cmd(*args):',
+      '    if as_root:',
+      '        return ["gosu", user, "wine", *args]',
+      '    return ["wine", *args]',
+      'errors = []',
+      'for index, setting in enumerate(settings):',
+      '    path = normalize_path(str(setting.get("path", "")).strip())',
+      '    name = str(setting.get("name", "")).strip()',
+      '    reg_type = str(setting.get("type", "REG_SZ") or "REG_SZ").upper()',
+      '    value = str(setting.get("value", "")).strip()',
+      '    if not path or not name:',
+      '        errors.append(f"[{index}] missing path/name")',
+      '        continue',
+      '    if reg_type == "REG_DWORD" and value.lower().startswith("0x"):',
+      '        try:',
+      '            value = str(int(value, 16))',
+      '        except ValueError:',
+      '            errors.append(f"[{index}] invalid DWORD hex value: {value}")',
+      '            continue',
+      '    if reg_type == "REG_BINARY":',
+      '        value = "".join(ch for ch in value if ch.lower() in "0123456789abcdef")',
+      '        if len(value) % 2 == 1:',
+      '            value = "0" + value',
+      '        if not value:',
+      '            value = "00"',
+      '    add_cmd = wine_cmd("reg", "add", path, "/v", name, "/t", reg_type, "/d", value, "/f")',
+      '    add_result = subprocess.run(add_cmd, capture_output=True, text=True)',
+      '    if add_result.returncode != 0:',
+      '        stderr = (add_result.stderr or "").strip()',
+      '        stdout = (add_result.stdout or "").strip()',
+      '        errors.append(f"[{index}] reg add failed for {path}\\\\{name}: {stderr or stdout or \'unknown error\'}")',
+      '        continue',
+      '    query_cmd = wine_cmd("reg", "query", path, "/v", name)',
+      '    query_result = subprocess.run(query_cmd, capture_output=True, text=True)',
+      '    if query_result.returncode != 0:',
+      '        stderr = (query_result.stderr or "").strip()',
+      '        stdout = (query_result.stdout or "").strip()',
+      '        errors.append(f"[{index}] reg query failed for {path}\\\\{name}: {stderr or stdout or \'unknown error\'}")',
+      'if errors:',
+      '    print("Registry apply errors:")',
+      '    for error in errors:',
+      '        print(error)',
+      '    sys.exit(1)',
+      'print(f"Registry settings applied: {len(settings)}")',
+    ].join('\n');
+
+    const containerConfig: any = {
+      Image: resolvedImage,
+      Cmd: ['python3', '-c', pythonRegistryApplyScript],
+      Env: env,
+      WorkingDir: containerPrefixPath,
+      HostConfig: {
+        AutoRemove: false,
+        Binds: binds,
+        Devices: displayConfig.devices,
+        DeviceCgroupRules: (displayConfig as any).deviceCgroupRules || [],
+        GroupAdd: this.getSupplementalGroupIds(['/dev/input', '/dev/uinput', '/dev/snd']),
+        IpcMode: displayConfig.ipcMode,
+        SecurityOpt: displayConfig.securityOpt,
+        NetworkMode: displayConfig.networkMode,
+      },
+    };
+
+    logger.info(`Applying ${normalizedSettings.length} registry setting(s) for ${game.title}`);
+    logger.info(`  WINEPREFIX=${containerPrefixPath}`);
+
+    try {
+      const container = await docker.createContainer(containerConfig);
+      await container.start();
+      const result = await container.wait();
+      let logs = '';
+
+      try {
+        const logsBuffer = await container.logs({ stdout: true, stderr: true, follow: false });
+        logs = (logsBuffer as Buffer).toString('utf8').replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
+      } catch (logError) {
+        logger.warn('Could not read registry apply container logs:', logError);
+      }
+
+      try {
+        await container.remove({ force: true });
+      } catch (removeError) {
+        logger.warn('Could not remove registry apply container:', removeError);
+      }
+
+      if (result.StatusCode === 0) {
+        return {
+          success: true,
+          message: `Applied ${normalizedSettings.length} registry setting(s).`,
+          appliedCount: normalizedSettings.length,
+        };
+      }
+
+      return {
+        success: false,
+        message: logs
+          ? `Registry apply exited with code ${result.StatusCode}: ${logs.split('\n').slice(-4).join(' | ')}`
+          : `Registry apply exited with code ${result.StatusCode}`,
+      };
+    } catch (error: any) {
+      logger.error('Error applying Wine registry settings:', error);
+      return { success: false, message: `Failed to apply registry settings: ${error.message}` };
+    }
   }
 
   /**
@@ -3242,6 +3610,44 @@ export class DockerService {
     return containerPath;
   }
 
+  private findReadableFile(paths: Array<string | undefined | null>): string | null {
+    for (const candidate of paths) {
+      if (!candidate) continue;
+      try {
+        const stat = statSync(candidate);
+        if (stat.isFile() && stat.size > 0) {
+          return candidate;
+        }
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get supplemental group IDs from device paths so non-root gameuser
+   * can access mounted device nodes.
+   */
+  private getSupplementalGroupIds(devicePaths: string[]): string[] {
+    const groupIds = new Set<string>();
+
+    for (const devicePath of devicePaths) {
+      try {
+        if (!existsSync(devicePath)) continue;
+        const stats = statSync(devicePath);
+        if (Number.isInteger(stats.gid) && stats.gid >= 0) {
+          groupIds.add(String(stats.gid));
+        }
+      } catch {
+        // Ignore unreadable/missing device paths
+      }
+    }
+
+    return Array.from(groupIds.values());
+  }
+
   /**
    * Get display forwarding configuration based on host environment
    * Supports X11 and Wayland display protocols
@@ -3259,37 +3665,31 @@ export class DockerService {
     const display = process.env.DISPLAY;
     const waylandDisplay = process.env.WAYLAND_DISPLAY;
     const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() || 1000}`;
+    const displayBackend = (process.env.DILLINGER_DISPLAY_BACKEND || '').toLowerCase();
+    const waylandSocket = waylandDisplay && xdgRuntimeDir ? `${xdgRuntimeDir}/${waylandDisplay}` : '';
+    const xauthorityCandidates = [
+      process.env.XAUTHORITY,
+      `${process.env.HOME}/.Xauthority`,
+      '/home/ians/.Xauthority',
+      '/home/node/.Xauthority',
+    ];
+    const xauthorityContainerPath = this.findReadableFile(xauthorityCandidates);
+    const shouldUseWayland =
+      Boolean(waylandDisplay && waylandSocket && existsSync(waylandSocket)) &&
+      displayBackend !== 'x11' &&
+      (displayBackend === 'wayland' || !display || !xauthorityContainerPath);
     
     // Prefer X11 first (more compatible with legacy games and tools like xterm)
-    if (display) {
-      // Try multiple paths for Xauthority - devcontainer env may not match host
-      // We check paths we can see inside this container, then resolve to host paths
-      const xauthorityCandidates = [
-        process.env.XAUTHORITY,
-        `${process.env.HOME}/.Xauthority`,
-        '/home/ians/.Xauthority',  // Common host user path
-        '/home/node/.Xauthority',
-      ].filter(Boolean) as string[];
-      
+    if (display && !shouldUseWayland) {
       logger.info(`Using X11 display: ${display}`);
       
       // Check if Xauthority file exists AND is actually a file (not a directory)
       // Docker creates directories when mounting non-existent files, so we must verify
       let xauthorityPath: string | null = null;
-      let xauthorityContainerPath: string | null = null; // The path we found inside this container
-      for (const candidate of xauthorityCandidates) {
-        try {
-          const stat = statSync(candidate);
-          if (stat.isFile() && stat.size > 0) {
-            xauthorityContainerPath = candidate;
-            // Resolve to host path - this is critical when running inside a container
-            // because Docker daemon needs the HOST path, not our container path
-            xauthorityPath = this.resolveHostPath(candidate);
-            break;
-          }
-        } catch {
-          // File doesn't exist, try next
-        }
+      if (xauthorityContainerPath) {
+        // Resolve to host path - this is critical when running inside a container
+        // because Docker daemon needs the HOST path, not our container path
+        xauthorityPath = this.resolveHostPath(xauthorityContainerPath);
       }
       
       const volumes = ['/tmp/.X11-unix:/tmp/.X11-unix:rw'];
@@ -3428,8 +3828,7 @@ export class DockerService {
     }
     
     // Fall back to Wayland if X11 is not available
-    if (waylandDisplay && xdgRuntimeDir) {
-      const waylandSocket = `${xdgRuntimeDir}/${waylandDisplay}`;
+    if (waylandDisplay && xdgRuntimeDir && waylandSocket) {
       logger.info(`Using Wayland display: ${waylandDisplay}`);
       
       // Check if GPU device exists
@@ -3447,7 +3846,7 @@ export class DockerService {
         logger.info(`  ✓ Sound device available`);
       }
       
-      const volumes = [`${waylandSocket}:/run/user/1000/${waylandDisplay}:rw`];
+      const volumes = [`${this.resolveHostPath(waylandSocket)}:/run/user/1000/${waylandDisplay}:rw`];
 
       // Add input devices for keyboard, mouse, and joystick support
       if (existsSync('/dev/input')) {
@@ -3482,16 +3881,60 @@ export class DockerService {
         devices.push({ PathOnHost: '/dev/uinput', PathInContainer: '/dev/uinput', CgroupPermissions: 'rwm' });
         logger.info(`  ✓ uinput device available`);
       }
+
+      // Add PulseAudio socket/cookie for audio support under Wayland too.
+      const userHome = process.env.HOME;
+      const possiblePulsePaths = [
+        `${xdgRuntimeDir}/pulse`,
+        '/run/user/1000/pulse',
+        '/tmp/pulse-socket',
+      ];
+
+      let pulseSocketPath: string | null = null;
+      for (const pulsePath of possiblePulsePaths) {
+        if (existsSync(pulsePath)) {
+          pulseSocketPath = pulsePath;
+          break;
+        }
+      }
+
+      if (pulseSocketPath) {
+        volumes.push(`${this.resolveHostPath(pulseSocketPath)}:/run/user/1000/pulse:rw`);
+        logger.info(`  ✓ PulseAudio socket available`);
+
+        const pulseCookie = this.findReadableFile([
+          `${userHome}/.config/pulse/cookie`,
+          '/home/dillinger/.config/pulse/cookie',
+        ]);
+        if (pulseCookie) {
+          volumes.push(`${this.resolveHostPath(pulseCookie)}:/home/gameuser/.config/pulse/cookie:ro`);
+          logger.info(`  ✓ PulseAudio cookie available`);
+        }
+      } else {
+        logger.warn(`  ⚠ No PulseAudio socket found (checked: ${possiblePulsePaths.join(', ')})`);
+      }
+
+      const settingsService = SettingsService.getInstance();
+      const audioSettings = await settingsService.getAudioSettings();
+      const pulseSink = audioSettings.defaultSink || process.env.PULSE_SINK || '';
+
+      const envVars = [
+        `WAYLAND_DISPLAY=${waylandDisplay}`,
+        'XDG_RUNTIME_DIR=/run/user/1000',
+        'QT_QPA_PLATFORM=wayland',
+        'GDK_BACKEND=wayland',
+        'SDL_VIDEODRIVER=wayland',
+        'PULSE_SERVER=unix:/run/user/1000/pulse/native',
+        'PULSE_COOKIE=/home/gameuser/.config/pulse/cookie',
+      ];
+
+      if (pulseSink) {
+        envVars.push(`PULSE_SINK=${pulseSink}`);
+      }
       
       return {
         mode: 'wayland',
-        env: [
-          `WAYLAND_DISPLAY=${waylandDisplay}`,
-          `XDG_RUNTIME_DIR=/run/user/1000`,
-          'QT_QPA_PLATFORM=wayland',
-          'GDK_BACKEND=wayland',
-          'SDL_VIDEODRIVER=wayland'
-        ],
+        env: envVars,
         volumes,
         devices,
         securityOpt: []

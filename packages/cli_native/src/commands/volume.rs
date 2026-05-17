@@ -16,7 +16,10 @@ pub async fn volume_create_command(bind: Option<&str>) -> Result<()> {
 
     if let Some(host_path) = bind {
         create_bind_volume(volume_name, host_path).await?;
-        LOG.success(&format!("Created bind volume {} -> {}", volume_name, host_path));
+        LOG.success(&format!(
+            "Created bind volume {} -> {}",
+            volume_name, host_path
+        ));
         return Ok(());
     }
 

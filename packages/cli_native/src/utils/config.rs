@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::utils::constants::{
-    CLI_CONFIG_NAME, DEFAULT_AUTO_UPDATE, DEFAULT_CONTAINER_NAME, DEFAULT_IMAGE_NAME,
-    DEFAULT_PORT, DEFAULT_VOLUME_NAME,
+    CLI_CONFIG_NAME, DEFAULT_AUTO_UPDATE, DEFAULT_CONTAINER_NAME, DEFAULT_IMAGE_NAME, DEFAULT_PORT,
+    DEFAULT_VOLUME_NAME,
 };
 
 /// CLI configuration — mirrors the TypeScript CliConfig type and Conf key names.
@@ -64,8 +64,7 @@ fn write_config(config: &CliConfig) -> Result<()> {
             .with_context(|| format!("Creating config dir {:?}", parent))?;
     }
     let json = serde_json::to_string_pretty(config)?;
-    std::fs::write(&path, json)
-        .with_context(|| format!("Writing config to {:?}", path))?;
+    std::fs::write(&path, json).with_context(|| format!("Writing config to {:?}", path))?;
     Ok(())
 }
 
@@ -73,7 +72,9 @@ pub fn set_config_value(key: &str, value: &str) -> Result<()> {
     let mut config = get_config();
     match key {
         "port" => {
-            let port: u16 = value.parse().context("port must be a valid TCP port number")?;
+            let port: u16 = value
+                .parse()
+                .context("port must be a valid TCP port number")?;
             if port == 0 {
                 anyhow::bail!("port must be between 1 and 65535");
             }
@@ -96,5 +97,11 @@ pub fn reset_config() -> Result<()> {
 
 /// Returns the set of valid config key names (for validation).
 pub fn config_keys() -> &'static [&'static str] {
-    &["port", "imageName", "autoUpdate", "volumeName", "containerName"]
+    &[
+        "port",
+        "imageName",
+        "autoUpdate",
+        "volumeName",
+        "containerName",
+    ]
 }

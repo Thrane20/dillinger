@@ -20,13 +20,23 @@ fn includes_gpu_audio_display_input_and_detach() {
     assert!(joined.contains("/dev/snd:/dev/snd"));
     assert!(joined.contains("/tmp/.X11-unix:/tmp/.X11-unix:rw"));
     assert!(joined.contains("/dev/input:/dev/input"));
+    assert!(joined.contains("/dev/uinput:/dev/uinput"));
+    assert!(joined.contains("/dev/bus/usb:/dev/bus/usb"));
+    assert!(joined.contains("--network=host"));
+    assert!(joined.contains("--ipc=host"));
+    assert!(joined.contains("PORT=3010"));
     assert!(args.contains(&"-d".to_string()));
 }
 
 #[test]
 fn omits_passthroughs_when_disabled() {
     let opts = StartOptions {
-        gpu: false, audio: false, display: false, input: false, detach: false, ..opts()
+        gpu: false,
+        audio: false,
+        display: false,
+        input: false,
+        detach: false,
+        ..opts()
     };
     let args = build_start_docker_args("dillinger", "core_vol", "img:1", 3010, &opts, &[]);
     let joined = args.join(" ");
@@ -34,6 +44,8 @@ fn omits_passthroughs_when_disabled() {
     assert!(!joined.contains("/dev/snd"));
     assert!(!joined.contains("/tmp/.X11-unix"));
     assert!(!joined.contains("/dev/input"));
+    assert!(!joined.contains("/dev/uinput"));
+    assert!(!joined.contains("/dev/bus/usb"));
     assert!(!args.contains(&"-d".to_string()));
 }
 
@@ -49,7 +61,8 @@ fn extra_volumes_appear_in_args() {
 fn port_binding_uses_provided_port() {
     let args = build_start_docker_args("dillinger", "core_vol", "img:1", 9999, &opts(), &[]);
     let joined = args.join(" ");
-    assert!(joined.contains("9999:3010"));
+    assert!(joined.contains("PORT=9999"));
+    assert!(!joined.contains("9999:3010"));
 }
 
 #[test]

@@ -52,7 +52,10 @@ fn parse_versioning_env(content: &str) -> Option<RemoteVersions> {
         return None;
     }
 
-    Some(RemoteVersions { core_version, script_version })
+    Some(RemoteVersions {
+        core_version,
+        script_version,
+    })
 }
 
 /// Compares two version strings. Returns negative, zero, or positive like a comparator.
@@ -81,12 +84,7 @@ fn semver_coerce(s: &str) -> String {
 /// Returns the highest locally available semver tag for the given image name.
 pub async fn get_local_image_version(image_name: &str) -> Result<Option<String>> {
     let output = Command::new("docker")
-        .args([
-            "images",
-            "--format",
-            "{{.Repository}}:{{.Tag}}",
-            image_name,
-        ])
+        .args(["images", "--format", "{{.Repository}}:{{.Tag}}", image_name])
         .stdout(Stdio::piped())
         .output()
         .await
@@ -130,8 +128,7 @@ mod tests {
 
     #[test]
     fn parse_versioning_env_extracts_both_keys() {
-        let content =
-            "DILLINGER_CORE_VERSION=0.3.1\nDILLINGER_START_SCRIPT_VERSION=0.3.0\n";
+        let content = "DILLINGER_CORE_VERSION=0.3.1\nDILLINGER_START_SCRIPT_VERSION=0.3.0\n";
         let result = parse_versioning_env(content).unwrap();
         assert_eq!(result.core_version, "0.3.1");
         assert_eq!(result.script_version, "0.3.0");
@@ -139,8 +136,7 @@ mod tests {
 
     #[test]
     fn parse_versioning_env_strips_v_prefix() {
-        let content =
-            "DILLINGER_CORE_VERSION=v0.3.1\nDILLINGER_START_SCRIPT_VERSION=v0.3.0\n";
+        let content = "DILLINGER_CORE_VERSION=v0.3.1\nDILLINGER_START_SCRIPT_VERSION=v0.3.0\n";
         let result = parse_versioning_env(content).unwrap();
         assert_eq!(result.core_version, "0.3.1");
     }

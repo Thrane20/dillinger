@@ -16,8 +16,8 @@ use commands::{
     udev::udev_command,
     update::{update_apply_command, update_check_command},
     volume::{
-        volume_backup_command, volume_create_command, volume_destroy_command,
-        volume_list_command, volume_restore_command, volume_verify_command,
+        volume_backup_command, volume_create_command, volume_destroy_command, volume_list_command,
+        volume_restore_command, volume_verify_command,
     },
 };
 use utils::prompts::set_auto_yes;
@@ -152,10 +152,7 @@ enum ConfigCommands {
     /// Show current config values
     Show,
     /// Set a config key to a value
-    Set {
-        key: String,
-        value: String,
-    },
+    Set { key: String, value: String },
     /// Reset config to defaults
     Reset,
 }

@@ -11,7 +11,10 @@ use crate::utils::{
 pub async fn update_check_command() -> Result<()> {
     let config = get_config();
     let remote = fetch_remote_versions().await;
-    let local_image = get_local_image_version(&config.image_name).await.ok().flatten();
+    let local_image = get_local_image_version(&config.image_name)
+        .await
+        .ok()
+        .flatten();
 
     let remote = match remote {
         Some(r) => r,

@@ -109,9 +109,15 @@ pub async fn get_core_bootstrap_status() -> Result<CoreBootstrapStatus> {
         .await
         .context("GET /api/bootstrap/status failed")?;
     if !resp.status().is_success() {
-        anyhow::bail!("{} {}", resp.status().as_u16(), resp.status().canonical_reason().unwrap_or("error"));
+        anyhow::bail!(
+            "{} {}",
+            resp.status().as_u16(),
+            resp.status().canonical_reason().unwrap_or("error")
+        );
     }
-    resp.json::<CoreBootstrapStatus>().await.context("deserializing bootstrap status")
+    resp.json::<CoreBootstrapStatus>()
+        .await
+        .context("deserializing bootstrap status")
 }
 
 pub async fn get_core_health_status() -> Result<CoreHealthStatus> {
@@ -124,7 +130,9 @@ pub async fn get_core_health_status() -> Result<CoreHealthStatus> {
     if !resp.status().is_success() {
         anyhow::bail!("{}", resp.status());
     }
-    resp.json::<CoreHealthStatus>().await.context("deserializing health status")
+    resp.json::<CoreHealthStatus>()
+        .await
+        .context("deserializing health status")
 }
 
 pub async fn list_core_games() -> Result<Vec<CoreGame>> {

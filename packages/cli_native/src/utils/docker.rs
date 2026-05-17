@@ -68,7 +68,11 @@ pub async fn container_exists(container_name: &str) -> bool {
 
 pub async fn get_container_status(container_name: &str) -> Result<ContainerStatus> {
     if !container_exists(container_name).await {
-        return Ok(ContainerStatus { exists: false, running: false, ..Default::default() });
+        return Ok(ContainerStatus {
+            exists: false,
+            running: false,
+            ..Default::default()
+        });
     }
 
     let format = [
@@ -94,7 +98,11 @@ pub async fn get_container_status(container_name: &str) -> Result<ContainerStatu
     // by the separator up to 5 parts works).
     let parts: Vec<&str> = raw.splitn(5, '|').collect();
     if parts.len() < 5 {
-        return Ok(ContainerStatus { exists: true, running: false, ..Default::default() });
+        return Ok(ContainerStatus {
+            exists: true,
+            running: false,
+            ..Default::default()
+        });
     }
 
     let running = parts[0] == "true";
@@ -122,11 +130,10 @@ fn parse_port_bindings(json: &str) -> Vec<String> {
         host_port: String,
     }
 
-    let map: serde_json::Map<String, serde_json::Value> =
-        match serde_json::from_str(json) {
-            Ok(v) => v,
-            Err(_) => return vec![],
-        };
+    let map: serde_json::Map<String, serde_json::Value> = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
 
     map.iter()
         .filter_map(|(container_port, bindings)| {

@@ -18,8 +18,9 @@ COPY packages/dillinger-core/package.json ./packages/dillinger-core/
 # Install dependencies (workspace-aware)
 RUN pnpm install --frozen-lockfile
 
-# Copy full source for the build
-COPY packages ./packages
+# Copy only the packages required for the Next.js build
+COPY packages/shared ./packages/shared
+COPY packages/dillinger-core ./packages/dillinger-core
 
 # Build shared libraries consumed by Dillinger Core
 RUN pnpm --filter=@dillinger/shared run build

@@ -9,7 +9,10 @@ use uuid::Uuid;
 
 use crate::utils::{
     config::get_config,
-    constants::EXTRA_RUNNER_VOLUME_ROOT,
+    constants::{
+        DEFAULT_DOWNLOAD_CACHE_VOLUME_NAME, DEFAULT_ROMS_VOLUME_NAME, DEFAULT_VOLUME_NAME,
+        EXTRA_RUNNER_VOLUME_ROOT, INSTALLED_VOLUME_PREFIX,
+    },
     core_api::is_core_reachable,
     volume::{create_bind_volume, volume_exists},
 };
@@ -62,6 +65,27 @@ impl ManagedVolumePurpose {
     }
 }
 
+pub fn purpose_docker_volume_name(purpose: &ManagedVolumePurpose, name: &str) -> Result<String> {
+    match purpose {
+        ManagedVolumePurpose::Core => Ok(DEFAULT_VOLUME_NAME.to_string()),
+        ManagedVolumePurpose::Roms => Ok(DEFAULT_ROMS_VOLUME_NAME.to_string()),
+        ManagedVolumePurpose::Cache | ManagedVolumePurpose::Downloads => {
+            Ok(DEFAULT_DOWNLOAD_CACHE_VOLUME_NAME.to_string())
+        }
+        ManagedVolumePurpose::Installed => {
+            let slug = sanitize_volume_slug(name);
+            if slug.is_empty() {
+                anyhow::bail!(
+                    "Installed volume name must contain at least one alphanumeric character."
+                );
+            }
+            let suffix = slug.strip_prefix("installed_").unwrap_or(&slug);
+            Ok(format!("{}{}", INSTALLED_VOLUME_PREFIX, suffix))
+        }
+        ManagedVolumePurpose::Installers => build_managed_docker_volume_name(name),
+    }
+}
+
 impl fmt::Display for ManagedVolumePurpose {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -87,11 +111,12 @@ pub fn parse_purpose(s: &str) -> Result<Option<ManagedVolumePurpose>> {
         "core" => Ok(Some(ManagedVolumePurpose::Core)),
         "roms" => Ok(Some(ManagedVolumePurpose::Roms)),
         "cache" => Ok(Some(ManagedVolumePurpose::Cache)),
+        "download_cache" | "download-cache" => Ok(Some(ManagedVolumePurpose::Cache)),
         "installed" => Ok(Some(ManagedVolumePurpose::Installed)),
         "downloads" => Ok(Some(ManagedVolumePurpose::Downloads)),
         "installers" => Ok(Some(ManagedVolumePurpose::Installers)),
         other => anyhow::bail!(
-            "Special role must be one of: core, roms, cache, installed, downloads, installers. Got: {}",
+            "Special role must be one of: core, roms, cache, download_cache, installed, downloads, installers. Got: {}",
             other
         ),
     }
@@ -166,7 +191,11 @@ pub fn build_managed_docker_volume_name(name: &str) -> Result<String> {
 
 pub fn build_extra_runner_mount_path(docker_volume_name: &str) -> String {
     let segment = sanitize_volume_slug(docker_volume_name);
-    let segment = if segment.is_empty() { "volume".to_string() } else { segment };
+    let segment = if segment.is_empty() {
+        "volume".to_string()
+    } else {
+        segment
+    };
     format!("{}/{}", EXTRA_RUNNER_VOLUME_ROOT, segment)
 }
 
@@ -184,13 +213,17 @@ fn cli_state_dir() -> PathBuf {
 
 async fn local_storage_root() -> Result<PathBuf> {
     let dir = cli_state_dir().join("volumes");
-    fs::create_dir_all(&dir).await.context("creating managed volumes dir")?;
+    fs::create_dir_all(&dir)
+        .await
+        .context("creating managed volumes dir")?;
     Ok(dir)
 }
 
 async fn local_volume_metadata_path() -> Result<PathBuf> {
     let dir = cli_state_dir();
-    fs::create_dir_all(&dir).await.context("creating state dir")?;
+    fs::create_dir_all(&dir)
+        .await
+        .context("creating state dir")?;
     Ok(dir.join("volume-metadata.json"))
 }
 
@@ -224,7 +257,9 @@ async fn read_metadata_store() -> MetadataStore {
 async fn write_metadata_store(store: &MetadataStore) -> Result<()> {
     let path = local_volume_metadata_path().await?;
     let json = serde_json::to_string_pretty(store)?;
-    fs::write(&path, json).await.context("writing metadata store")
+    fs::write(&path, json)
+        .await
+        .context("writing metadata store")
 }
 
 // ── Local file-based storage ─────────────────────────────────────────────────
@@ -260,6 +295,9 @@ async fn list_local_managed_volumes() -> Result<Vec<ManagedVolumeRecord>> {
             if let Some(st) = &meta.storage_type {
                 parsed.storage_type = Some(st.clone());
             }
+            if let Some(purpose) = &meta.purpose {
+                parsed.purpose = Some(purpose.clone());
+            }
         }
         volumes.push(parsed);
     }
@@ -271,7 +309,9 @@ async fn write_local_managed_volume(volume: &ManagedVolumeRecord) -> Result<()> 
     let storage_root = local_storage_root().await?;
     let path = storage_root.join(format!("{}.json", volume.id));
     let json = serde_json::to_string_pretty(volume)?;
-    fs::write(&path, json).await.context("writing managed volume record")
+    fs::write(&path, json)
+        .await
+        .context("writing managed volume record")
 }
 
 async fn upsert_local_managed_volume(
@@ -284,7 +324,9 @@ async fn upsert_local_managed_volume(
     let host_path_str = host_path.to_string_lossy().to_string();
 
     let volume = ManagedVolumeRecord {
-        id: existing.map(|e| e.id.clone()).unwrap_or_else(|| Uuid::new_v4().to_string()),
+        id: existing
+            .map(|e| e.id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string()),
         name: input.name.trim().to_string(),
         docker_volume_name: input.docker_volume_name.clone(),
         host_path: host_path_str.clone(),
@@ -297,7 +339,10 @@ async fn upsert_local_managed_volume(
             .or_else(|| existing.map(|e| e.volume_type.clone()))
             .unwrap_or_else(|| "docker".to_string()),
         status: "active".to_string(),
-        purpose: input.purpose.clone().or_else(|| existing.and_then(|e| e.purpose.clone())),
+        purpose: input
+            .purpose
+            .clone()
+            .or_else(|| existing.and_then(|e| e.purpose.clone())),
         friendly_name: input
             .friendly_name
             .clone()
@@ -350,10 +395,12 @@ async fn list_managed_volumes_via_api() -> Result<Vec<ManagedVolumeRecord>> {
         .build()?;
 
     let (vol_resp, meta_resp) = tokio::join!(
-        client.get(format!("{}/api/volumes", base))
+        client
+            .get(format!("{}/api/volumes", base))
             .header("content-type", "application/json")
             .send(),
-        client.get(format!("{}/api/volumes/metadata", base))
+        client
+            .get(format!("{}/api/volumes/metadata", base))
             .header("content-type", "application/json")
             .send(),
     );
@@ -375,20 +422,23 @@ async fn list_managed_volumes_via_api() -> Result<Vec<ManagedVolumeRecord>> {
     }
     let env: Envelope = vol_resp.json().await?;
     if env.success == Some(false) {
-        anyhow::bail!("{}", env.error.unwrap_or_else(|| "Failed to load managed volumes".to_string()));
+        anyhow::bail!(
+            "{}",
+            env.error
+                .unwrap_or_else(|| "Failed to load managed volumes".to_string())
+        );
     }
 
-    let metadata_map: std::collections::HashMap<String, MetadataEntry> =
-        if let Ok(mr) = meta_resp {
-            if mr.status().is_success() {
-                let me: MetaEnvelope = mr.json().await.unwrap_or_default();
-                me.data.unwrap_or_default().volumes
-            } else {
-                Default::default()
-            }
+    let metadata_map: std::collections::HashMap<String, MetadataEntry> = if let Ok(mr) = meta_resp {
+        if mr.status().is_success() {
+            let me: MetaEnvelope = mr.json().await.unwrap_or_default();
+            me.data.unwrap_or_default().volumes
         } else {
             Default::default()
-        };
+        }
+    } else {
+        Default::default()
+    };
 
     let mut records = env.data.unwrap_or_default();
     for record in &mut records {
@@ -398,6 +448,9 @@ async fn list_managed_volumes_via_api() -> Result<Vec<ManagedVolumeRecord>> {
             }
             if let Some(st) = &meta.storage_type {
                 record.storage_type = Some(st.clone());
+            }
+            if let Some(purpose) = &meta.purpose {
+                record.purpose = Some(purpose.clone());
             }
         }
     }
@@ -425,18 +478,27 @@ pub async fn upsert_managed_volume(input: UpsertManagedVolumeInput) -> Result<Up
 
     let current_volumes = list_managed_volumes().await.unwrap_or_default();
     let existing = current_volumes.iter().find(|v| {
-        v.docker_volume_name == normalized_input.docker_volume_name
-            || v.host_path == normalized_str
+        v.docker_volume_name == normalized_input.docker_volume_name || v.host_path == normalized_str
     });
     let adopted = existing.is_none();
 
     if is_core_reachable().await {
-        let volume = persist_managed_volume_via_api(&normalized_input, existing.map(|e| e.id.as_str())).await?;
-        return Ok(UpsertResult { volume, persisted_via: "api".to_string(), adopted });
+        let volume =
+            persist_managed_volume_via_api(&normalized_input, existing.map(|e| e.id.as_str()))
+                .await?;
+        return Ok(UpsertResult {
+            volume,
+            persisted_via: "api".to_string(),
+            adopted,
+        });
     }
 
     let volume = upsert_local_managed_volume(&normalized_input, existing).await?;
-    Ok(UpsertResult { volume, persisted_via: "local".to_string(), adopted })
+    Ok(UpsertResult {
+        volume,
+        persisted_via: "local".to_string(),
+        adopted,
+    })
 }
 
 async fn persist_managed_volume_via_api(
@@ -467,7 +529,10 @@ async fn persist_managed_volume_via_api(
 
     let method = if existing_id.is_some() { "PUT" } else { "POST" };
     let resp = client
-        .request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), &url)
+        .request(
+            reqwest::Method::from_bytes(method.as_bytes()).unwrap(),
+            &url,
+        )
         .header("content-type", "application/json")
         .body(body.to_string())
         .send()
@@ -487,7 +552,11 @@ async fn persist_managed_volume_via_api(
     }
     let env: Envelope = resp.json().await?;
     if env.success == Some(false) || env.data.is_none() {
-        anyhow::bail!("{}", env.error.unwrap_or_else(|| "Failed to persist managed volume".to_string()));
+        anyhow::bail!(
+            "{}",
+            env.error
+                .unwrap_or_else(|| "Failed to persist managed volume".to_string())
+        );
     }
 
     // Also persist metadata
@@ -527,30 +596,29 @@ async fn persist_volume_metadata_via_api(input: &UpsertManagedVolumeInput) -> Re
     Ok(())
 }
 
-pub async fn create_managed_bind_volume(name: &str, host_path: &str) -> Result<CreateManagedVolumeResult> {
-    let docker_volume_name = build_managed_docker_volume_name(name)?;
+pub async fn create_managed_bind_volume(
+    name: &str,
+    host_path: &str,
+    purpose: Option<ManagedVolumePurpose>,
+) -> Result<CreateManagedVolumeResult> {
+    let docker_volume_name = if let Some(purpose) = &purpose {
+        purpose_docker_volume_name(purpose, name)?
+    } else {
+        build_managed_docker_volume_name(name)?
+    };
     let normalized_path = Path::new(host_path)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(host_path));
     let normalized_str = normalized_path.to_string_lossy().to_string();
 
     let current = list_managed_volumes().await.unwrap_or_default();
-    let existing_managed = current.iter().find(|v| {
-        v.docker_volume_name == docker_volume_name || v.host_path == normalized_str
-    });
+    let existing_managed = current
+        .iter()
+        .find(|v| v.docker_volume_name == docker_volume_name || v.host_path == normalized_str);
     let already_exists = volume_exists(&docker_volume_name).await;
 
     if !already_exists {
         create_bind_volume(&docker_volume_name, &normalized_str).await?;
-    }
-
-    if let Some(existing) = existing_managed {
-        let persisted_via = if is_core_reachable().await { "api" } else { "local" }.to_string();
-        return Ok(CreateManagedVolumeResult {
-            volume: existing.clone(),
-            docker_volume_created: !already_exists,
-            persisted_via,
-        });
     }
 
     let input = UpsertManagedVolumeInput {
@@ -559,9 +627,27 @@ pub async fn create_managed_bind_volume(name: &str, host_path: &str) -> Result<C
         name: name.trim().to_string(),
         friendly_name: None,
         storage_type: None,
-        purpose: None,
+        purpose,
         volume_type: Some("docker".to_string()),
     };
+
+    if let Some(existing) = existing_managed {
+        if is_core_reachable().await {
+            let volume = persist_managed_volume_via_api(&input, Some(existing.id.as_str())).await?;
+            return Ok(CreateManagedVolumeResult {
+                volume,
+                docker_volume_created: !already_exists,
+                persisted_via: "api".to_string(),
+            });
+        }
+
+        let volume = upsert_local_managed_volume(&input, Some(existing)).await?;
+        return Ok(CreateManagedVolumeResult {
+            volume,
+            docker_volume_created: !already_exists,
+            persisted_via: "local".to_string(),
+        });
+    }
 
     if is_core_reachable().await {
         let volume = persist_managed_volume_via_api(&input, None).await?;
@@ -606,8 +692,6 @@ fn urlencoded(s: &str) -> String {
         })
         .collect()
 }
-
-
 
 #[cfg(test)]
 mod tests {
