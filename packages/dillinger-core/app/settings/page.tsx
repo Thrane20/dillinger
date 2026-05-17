@@ -20,13 +20,12 @@ import 'reactflow/dist/style.css';
 import {
   DEFAULT_STREAMING_GRAPH_STORE,
 } from '@dillinger/shared';
-import VolumesSettings from '@/app/components/VolumesSettings';
 import type {
   GetScraperSettingsResponse,
   UpdateScraperSettingsRequest,
   ScraperType,
-  StreamingProfile,
-  TestApp,
+  SwayProfile,
+  TestPattern,
   TestStreamStatus,
   StreamingGraphPreset,
   StreamingGraphStore,
@@ -40,14 +39,14 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 // Settings sections for navigation
 const SETTINGS_SECTIONS = [
-  { id: 'docker', label: 'Docker', icon: '🐳' },
-  { id: 'volumes', label: 'Paths', icon: '💾' },
-  { id: 'platforms', label: 'Platforms', icon: '🎯' },
-  { id: 'scrapers', label: 'Scrapers', icon: '🔍' },
-  { id: 'gpu', label: 'GPU', icon: '💻' },
-  { id: 'audio', label: 'Audio', icon: '🔊' },
-  { id: 'streaming', label: 'Streaming', icon: '📺' },
+  { id: 'igdb', label: 'IGDB', icon: '🎮' },
+  { id: 'scrapers', label: 'Other Scrapers', icon: '🔍' },
   { id: 'ai', label: 'AI Assistant', icon: '🤖' },
+  { id: 'audio', label: 'Audio', icon: '🔊' },
+  { id: 'platforms', label: 'Platforms', icon: '🎯' },
+  { id: 'docker', label: 'Docker', icon: '🐳' },
+  { id: 'gpu', label: 'GPU', icon: '💻' },
+  { id: 'streaming', label: 'Streaming', icon: '📺' },
   { id: 'downloads', label: 'Downloads', icon: '📥' },
   { id: 'maintenance', label: 'Maintenance', icon: '🔧' },
   { id: 'ui', label: 'UI Settings', icon: '🎨' },
@@ -58,7 +57,7 @@ const SETTINGS_SECTIONS = [
 function SaveIndicator({ show, message }: { show: boolean; message: string }) {
   if (!show) return null;
   return (
-    <div className="absolute right-3 top-3 z-10 flex items-center gap-2 border-2 border-success bg-success-soft px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-success shadow-[0_0_14px_rgba(71,255,156,0.18)]">
+    <div className="absolute top-2 right-2 flex items-center gap-2 bg-green-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-lg animate-pulse">
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
       </svg>
@@ -76,7 +75,7 @@ type GraphNodeData = {
 };
 
 const NODE_TYPE_LABELS: Record<string, string> = {
-  MoonlightSink: 'MoonlightSink',
+  SunshineSink: 'MoonlightSink',
 };
 
 const getNodeTypeLabel = (type: string) => NODE_TYPE_LABELS[type] ?? type;
@@ -164,10 +163,9 @@ export default function SettingsPage() {
 
   // Section refs for scrolling
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Active section for sidebar highlight
-  const [activeSection, setActiveSection] = useState('docker');
+  const [activeSection, setActiveSection] = useState('igdb');
 
   const [igdbClientId, setIgdbClientId] = useState('');
   const [igdbClientSecret, setIgdbClientSecret] = useState('');
@@ -177,16 +175,15 @@ export default function SettingsPage() {
   const [selectedAudioSink, setSelectedAudioSink] = useState('');
   
   // Docker settings
-  const [autoRemoveContainers, setAutoRemoveContainers] = useState(true);
+  const [autoRemoveContainers, setAutoRemoveContainers] = useState(false);
 
   // GPU settings
   const [gpuVendor, setGpuVendor] = useState<'auto' | 'amd' | 'nvidia'>('auto');
-
+  
   // Download settings
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
-  const [installerCacheMode, setInstallerCacheMode] = useState<'with_game' | 'custom_volume'>('custom_volume');
+  const [installerCacheMode, setInstallerCacheMode] = useState<'with_game' | 'custom_volume'>('with_game');
   const [installerCacheVolumeId, setInstallerCacheVolumeId] = useState<string>('');
-  const [autoCheckCompatibilityDatabases, setAutoCheckCompatibilityDatabases] = useState(true);
   const [availableVolumes, setAvailableVolumes] = useState<Array<{ id: string; name: string; hostPath: string }>>([]);
   
   // Joystick settings
@@ -223,7 +220,7 @@ export default function SettingsPage() {
   const [streamingIdleTimeout, setStreamingIdleTimeout] = useState(15);
   const [streamingDefaultProfileId, setStreamingDefaultProfileId] = useState('1080p60');
   const [streamingMode, setStreamingMode] = useState<'profiles' | 'graph'>('profiles');
-  const [streamingProfiles, setStreamingProfiles] = useState<StreamingProfile[]>([]);
+  const [swayProfiles, setSwayProfiles] = useState<SwayProfile[]>([]);
   const [graphStore, setGraphStore] = useState<StreamingGraphStore | null>(null);
   const [graphPresets, setGraphPresets] = useState<StreamingGraphPreset[]>([]);
   const [graphDefaultPresetId, setGraphDefaultPresetId] = useState('');
@@ -257,17 +254,16 @@ export default function SettingsPage() {
 
   const hasActiveGraphPreset = graphEditorMode === 'create' || !!graphEditorPreset;
   const [testStreamStatus, setTestStreamStatus] = useState<TestStreamStatus>({ running: false });
-  const [testApp, setTestApp] = useState<TestApp>('gst-video-test');
+  const [testPattern, setTestPattern] = useState<TestPattern>('smpte');
+  const [testProfileId, setTestProfileId] = useState('1080p60');
   const [testLoading, setTestLoading] = useState(false);
   const [pairingPin, setPairingPin] = useState('');
   const [pairingLoading, setPairingLoading] = useState(false);
   const [pairingMessage, setPairingMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [pairingStatus, setPairingStatus] = useState<{ ready: boolean; message?: string } | null>(null);
   const [pairingStatusLoading, setPairingStatusLoading] = useState(false);
-  const [pairingSecret, setPairingSecret] = useState<string | null>(null);
-  const [pairingClientIp, setPairingClientIp] = useState<string | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<StreamingProfile | null>(null);
+  const [editingProfile, setEditingProfile] = useState<SwayProfile | null>(null);
   const streamingSettingsLoadedRef = useRef(false);
   const streamingSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [streamingAutoSaveStatus, setStreamingAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -312,7 +308,7 @@ export default function SettingsPage() {
           }
         });
       },
-      { threshold: 0.3, root: contentScrollRef.current, rootMargin: '-80px 0px -45% 0px' }
+      { threshold: 0.3, rootMargin: '-100px 0px -50% 0px' }
     );
 
     Object.values(sectionRefs.current).forEach((ref) => {
@@ -423,7 +419,7 @@ export default function SettingsPage() {
         throw new Error('Failed to load Docker settings');
       }
       const data = await response.json();
-      setAutoRemoveContainers(data.settings?.autoRemoveContainers ?? true);
+      setAutoRemoveContainers(data.settings?.autoRemoveContainers || false);
     } catch (error) {
       console.error('Failed to load Docker settings:', error);
     }
@@ -456,9 +452,8 @@ export default function SettingsPage() {
       }
       const data = await response.json();
       setMaxConcurrentDownloads(data.settings?.maxConcurrent || 2);
-      setInstallerCacheMode(data.settings?.installerCacheMode || 'custom_volume');
+      setInstallerCacheMode(data.settings?.installerCacheMode || 'with_game');
       setInstallerCacheVolumeId(data.settings?.installerCacheVolumeId || '');
-      setAutoCheckCompatibilityDatabases(data.settings?.autoCheckCompatibilityDatabases ?? true);
       
       // Load available volumes for the dropdown
       const volumesResponse = await fetch(`${API_BASE_URL}/api/volumes`);
@@ -568,7 +563,7 @@ export default function SettingsPage() {
       VirtualCompositor: {
         inputs: [{ id: 'video', label: 'Video In', contract: { mediaType: 'video/raw' } }],
         outputs: [{ id: 'video', label: 'Video Out', contract: { mediaType: 'video/raw' } }],
-        attributes: { compositor: 'wolf' },
+        attributes: { compositor: 'sway' },
       },
       VirtualMonitor: {
         inputs: [{ id: 'video', label: 'Video In', contract: { mediaType: 'video/raw' } }],
@@ -614,7 +609,7 @@ export default function SettingsPage() {
         ],
         attributes: {},
       },
-      MoonlightSink: {
+      SunshineSink: {
         inputs: [
           { id: 'video', label: 'Video In', contract: { mediaType: 'video/encoded' }, required: true },
           { id: 'audio', label: 'Audio In', contract: { mediaType: 'audio/encoded' }, required: true },
@@ -668,7 +663,7 @@ export default function SettingsPage() {
         'AudioEncoder',
         'VideoTee',
         'AudioTee',
-        'MoonlightSink',
+        'SunshineSink',
         'InputSource',
         'InputMapper',
         'InputInjector',
@@ -689,7 +684,7 @@ export default function SettingsPage() {
       AudioEncoder: 'Encodes audio samples for streaming.',
       VideoTee: 'Splits video frames to multiple sinks/outputs.',
       AudioTee: 'Splits audio samples to multiple sinks/outputs.',
-      MoonlightSink: 'Publishes encoded streams to the Wolf/Moonlight endpoint.',
+      SunshineSink: 'Publishes encoded streams to the Wolf/Moonlight endpoint.',
       InputSource: 'Receives input events from streaming clients.',
       InputMapper: 'Maps/normalizes input events for the target runner.',
       InputInjector: 'Injects input events into the runner/container.',
@@ -807,10 +802,13 @@ export default function SettingsPage() {
       }
 
       // Load display profiles
-      const profilesResponse = await fetch(`${API_BASE_URL}/api/settings/streaming-profiles`);
+      const profilesResponse = await fetch(`${API_BASE_URL}/api/settings/sway-configs`);
       if (profilesResponse.ok) {
         const data = await profilesResponse.json();
-        setStreamingProfiles(data.profiles || []);
+        setSwayProfiles(data.profiles || []);
+        if (data.profiles?.length > 0 && !testProfileId) {
+          setTestProfileId(data.profiles[0].id);
+        }
       }
 
       // Load test stream status
@@ -1385,30 +1383,24 @@ export default function SettingsPage() {
     setNodeDocsOpen(false);
   }, [graphEditorSelectedNodeId]);
 
-  const startTestStream = async () => {
+  const startTestStream = async (mode: 'stream' | 'x11') => {
     try {
       setTestLoading(true);
       const response = await fetch(`${API_BASE_URL}/api/streaming/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          app: testApp,
+          mode,
+          profileId: testProfileId,
+          pattern: testPattern,
         }),
       });
 
       const data = await response.json();
-      if (!response.ok && response.status !== 202) {
-        if (data?.pairingRequired) {
-          setTestStreamStatus(data.status || { running: false, waiting: true, pairingRequired: true, app: testApp });
-          setPairingMessage({
-            type: 'error',
-            text: 'Pairing required. Enter the Moonlight PIN below to continue.',
-          });
-          return;
-        }
+      if (!response.ok) {
         throw new Error(data.message || data.error || 'Failed to start test stream');
       }
-      setTestStreamStatus(data.status || { running: true, app: testApp, mode: 'stream' });
+      setTestStreamStatus(data.status || { running: true });
     } catch (error) {
       console.error('Failed to start test stream:', error);
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to start test stream' });
@@ -1440,14 +1432,6 @@ export default function SettingsPage() {
       return;
     }
 
-    if (!pairingSecret) {
-      setPairingMessage({
-        type: 'error',
-        text: 'No pending pairing request found. Open Moonlight and click Add Host, then use Check Requests.',
-      });
-      return;
-    }
-
     try {
       setPairingLoading(true);
       setPairingMessage(null);
@@ -1455,7 +1439,7 @@ export default function SettingsPage() {
       const response = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pair', pin: normalizedPin, pair_secret: pairingSecret }),
+        body: JSON.stringify({ action: 'pair', pin: normalizedPin }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -1465,8 +1449,6 @@ export default function SettingsPage() {
 
       setPairingMessage({ type: 'success', text: 'Pairing successful! You can connect in Moonlight now.' });
       setPairingPin('');
-      setPairingSecret(null);
-      setPairingClientIp(null);
       setPairingStatus({ ready: true, message: 'Moonlight client paired and ready to connect.' });
     } catch (error) {
       setPairingMessage({
@@ -1481,29 +1463,6 @@ export default function SettingsPage() {
   const refreshPairingStatus = async () => {
     try {
       setPairingStatusLoading(true);
-      const pairResponse = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
-        method: 'GET',
-      });
-
-      const pairData = await pairResponse.json().catch(() => ({}));
-      const pending = Array.isArray(pairData.pending) ? pairData.pending : [];
-
-      if (pairResponse.ok && pending.length > 0) {
-        const request = pending[0] || {};
-        setPairingSecret(request.pair_secret || null);
-        setPairingClientIp(request.client_ip || null);
-        setPairingStatus({
-          ready: true,
-          message: request.client_ip
-            ? `Pairing request received from ${request.client_ip}. Enter the PIN shown in Moonlight.`
-            : 'Pairing request received. Enter the PIN shown in Moonlight.',
-        });
-        return;
-      }
-
-      setPairingSecret(null);
-      setPairingClientIp(null);
-
       const response = await fetch(`${API_BASE_URL}/api/streaming/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1526,10 +1485,10 @@ export default function SettingsPage() {
     }
   };
 
-  const createStreamingProfile = async () => {
+  const createSwayProfile = async () => {
     try {
       setSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/settings/streaming-profiles`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/sway-configs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileFormData),
@@ -1552,11 +1511,11 @@ export default function SettingsPage() {
     }
   };
 
-  const updateStreamingProfile = async () => {
+  const updateSwayProfile = async () => {
     if (!editingProfile) return;
     try {
       setSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/settings/streaming-profiles/${editingProfile.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/sway-configs/${editingProfile.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1583,7 +1542,7 @@ export default function SettingsPage() {
     }
   };
 
-  const openProfileModal = (profile?: StreamingProfile) => {
+  const openProfileModal = (profile?: SwayProfile) => {
     if (profile) {
       setEditingProfile(profile);
       setProfileFormData({
@@ -1668,7 +1627,6 @@ export default function SettingsPage() {
           maxConcurrent: maxConcurrentDownloads,
           installerCacheMode,
           installerCacheVolumeId: installerCacheMode === 'custom_volume' ? installerCacheVolumeId : undefined,
-          autoCheckCompatibilityDatabases,
         }),
       });
 
@@ -1852,67 +1810,47 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="workbench-window flex min-h-[320px] items-center justify-center">
-        <div className="workbench-titlebar w-full max-w-md justify-center border-b-0">LOADING.SYSTEM_PREFERENCES</div>
+      <div className="flex items-center justify-center h-full">
+        <div className="text-xl">Loading settings...</div>
       </div>
     );
   }
 
   return (
-    <div className="settings-workbench grid gap-4 lg:h-[calc(100vh-var(--workbench-topbar)-2rem)] lg:grid-cols-[240px_minmax(0,1fr)]">
+    <div className="flex h-full">
       {/* Sidebar Navigation */}
-      <nav className="lg:sticky lg:top-4 lg:self-start">
-        <div className="workbench-window overflow-hidden">
-          <div className="workbench-titlebar">
-            <span>SYSTEM.PREFERENCES</span>
-            <span className="text-secondary">12 MODULES</span>
-          </div>
-          <div className="border-b-2 border-border bg-background/70 px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-muted">
-              Configure runtime, storage, streaming, and UI behavior.
-            </p>
-          </div>
-          <div className="max-h-[calc(100vh-var(--workbench-topbar)-10rem)] overflow-y-auto p-2 scrollbar-visible">
-            <ul className="space-y-1">
+      <nav className="w-56 flex-shrink-0 pr-4 h-full overflow-y-auto">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
+          <h2 className="text-lg font-semibold mb-4 text-text">Settings</h2>
+          <ul className="space-y-1">
             {SETTINGS_SECTIONS.map((section) => (
               <li key={section.id}>
                 <button
                   onClick={() => scrollToSection(section.id)}
-                  className={`settings-nav-button ${
+                  className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
                     activeSection === section.id
-                      ? 'settings-nav-button-active'
-                      : 'settings-nav-button-idle'
+                      ? 'bg-primary text-white'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-text'
                   }`}
                 >
-                  <span className="text-base">{section.icon}</span>
-                  <span className="flex-1">{section.label}</span>
-                  <span className="text-[10px] text-outline">::</span>
+                  <span>{section.icon}</span>
+                  <span>{section.label}</span>
                 </button>
               </li>
             ))}
-            </ul>
-          </div>
+          </ul>
         </div>
       </nav>
 
       {/* Main Content Area */}
-      <section className="workbench-window flex min-h-0 flex-col overflow-hidden">
-        <div className="workbench-titlebar">
-          <span>CONTROL PANEL :: SETTINGS</span>
-          <span className="text-secondary">RETRO WORKBENCH</span>
-        </div>
-        <div className="border-b-2 border-border bg-background/70 px-4 py-3">
-          <p className="text-xs uppercase tracking-[0.14em] text-muted">
-            The submenu stays docked. Only the configuration panels below should scroll.
-          </p>
-        </div>
-        <div ref={contentScrollRef} className="settings-content flex-1 overflow-y-auto p-4 scrollbar-visible">
+      <div className="flex-1 h-full overflow-y-auto pl-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
           {message && (
             <div
-              className={`settings-status-banner ${
+              className={`mb-6 p-4 rounded-lg ${
                 message.type === 'success'
-                  ? 'settings-status-banner-success'
-                  : 'settings-status-banner-error'
+                  ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100'
+                  : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100'
               }`}
             >
               {message.text}
@@ -1920,16 +1858,16 @@ export default function SettingsPage() {
           )}
 
           {/* Single column layout for settings sections */}
-          <div className="flex flex-col gap-6">
+          <div className="space-y-6">
             {/* IGDB Settings */}
             <div 
-              id="scrapers" 
-              ref={(el) => { sectionRefs.current['scrapers'] = el; }}
-              className="settings-panel relative order-[4]"
+              id="igdb" 
+              ref={(el) => { sectionRefs.current['igdb'] = el; }}
+              className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
             >
             <SaveIndicator show={!!savedSections['igdb']} message={savedSections['igdb'] || ''} />
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">🔍 Scrapers</h2>
+              <h2 className="text-xl font-semibold">🎮 IGDB</h2>
               <span
                 className={`px-3 py-1 rounded-full text-sm ${
                   (settings?.settings as any)?.igdb?.configured
@@ -1998,29 +1936,26 @@ export default function SettingsPage() {
               {saving ? 'Saving...' : 'Save IGDB Settings'}
             </button>
           </form>
-
-          <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-medium mb-2">Other scrapers</h3>
-            <p className="text-gray-600 dark:text-gray-400">
-              Additional scraper integrations (SteamGridDB, Giant Bomb, etc.) will be available in future updates.
-            </p>
-          </div>
           </div>
 
-          <div
-            id="volumes"
-            ref={(el) => { sectionRefs.current['volumes'] = el; }}
-            className="settings-panel relative order-[2]"
+          {/* Future scrapers can be added here */}
+          <div 
+            id="scrapers" 
+            ref={(el) => { sectionRefs.current['scrapers'] = el; }}
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
-            <h2 className="text-xl font-semibold mb-4">💾 Paths</h2>
-            <VolumesSettings />
+            <h2 className="text-xl font-semibold mb-4">🔍 Other Scrapers</h2>
+            <p className="text-gray-600 dark:text-gray-400">
+              Additional scraper integrations (SteamGridDB, Giant Bomb, etc.) will be available in
+              future updates.
+            </p>
           </div>
 
           {/* AI Assistant Settings */}
           <div 
             id="ai" 
             ref={(el) => { sectionRefs.current['ai'] = el; }}
-            className="settings-panel relative order-[8]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['ai']} message={savedSections['ai'] || ''} />
             <div className="flex items-center justify-between mb-4">
@@ -2097,7 +2032,7 @@ export default function SettingsPage() {
           <div 
             id="audio" 
             ref={(el) => { sectionRefs.current['audio'] = el; }}
-            className="settings-panel relative order-[6]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['audio']} message={savedSections['audio'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🔊 Audio Settings</h2>
@@ -2172,7 +2107,7 @@ export default function SettingsPage() {
           <div 
             id="platforms" 
             ref={(el) => { sectionRefs.current['platforms'] = el; }}
-            className="settings-panel relative order-[3]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['platforms']} message={savedSections['platforms'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🎯 Configure Platforms</h2>
@@ -2248,7 +2183,7 @@ export default function SettingsPage() {
           <div 
             id="docker" 
             ref={(el) => { sectionRefs.current['docker'] = el; }}
-            className="settings-panel relative order-[1]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['docker']} message={savedSections['docker'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🐳 Docker Settings</h2>
@@ -2291,7 +2226,7 @@ export default function SettingsPage() {
           <div 
             id="gpu" 
             ref={(el) => { sectionRefs.current['gpu'] = el; }}
-            className="settings-panel relative order-[5]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['gpu']} message={savedSections['gpu'] || ''} />
             <h2 className="text-xl font-semibold mb-4">💻 GPU Settings</h2>
@@ -2333,7 +2268,7 @@ export default function SettingsPage() {
           <div 
             id="streaming" 
             ref={(el) => { sectionRefs.current['streaming'] = el; }}
-            className="settings-panel relative order-[7]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['streaming']} message={savedSections['streaming'] || ''} />
             <h2 className="text-xl font-semibold mb-4">📺 Streaming Settings</h2>
@@ -2472,12 +2407,12 @@ export default function SettingsPage() {
                       </button>
                       <button
                         onClick={() => {
-                          const profile = streamingProfiles.find((item) => item.id === streamingDefaultProfileId);
+                          const profile = swayProfiles.find((item) => item.id === streamingDefaultProfileId);
                           if (profile) {
                             openProfileModal(profile);
                           }
                         }}
-                        disabled={!streamingProfiles.find((item) => item.id === streamingDefaultProfileId)}
+                        disabled={!swayProfiles.find((item) => item.id === streamingDefaultProfileId)}
                         className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs rounded-lg transition-colors disabled:opacity-50"
                       >
                         Edit Profile
@@ -2491,7 +2426,7 @@ export default function SettingsPage() {
                       onChange={(e) => setStreamingDefaultProfileId(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
                     >
-                      {streamingProfiles.map((profile) => (
+                      {swayProfiles.map((profile) => (
                         <option key={profile.id} value={profile.id}>
                           {profile.name} ({profile.width}×{profile.height} @ {profile.refreshRate}Hz)
                         </option>
@@ -2573,23 +2508,45 @@ export default function SettingsPage() {
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                 <h3 className="text-lg font-medium mb-4">Test Streaming</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                  Verify your streaming setup with a lightweight GStreamer test pattern before launching games.
+                  Verify your streaming setup with a test pattern before launching games.
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <div>
-                    <label htmlFor="testApp" className="block text-sm font-medium mb-2">
-                      Test App
+                    <label htmlFor="testProfile" className="block text-sm font-medium mb-2">
+                      Profile
                     </label>
                     <select
-                      id="testApp"
-                      value={testApp}
-                      onChange={(e) => setTestApp(e.target.value as TestApp)}
+                      id="testProfile"
+                      value={testProfileId}
+                      onChange={(e) => setTestProfileId(e.target.value)}
                       disabled={testStreamStatus.running}
                       className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                     >
-                      <option value="gst-video-test">GStreamer Video Test (SMPTE)</option>
-                      <option value="gst-av-test">GStreamer AV Test (SMPTE + Sine)</option>
+                      {swayProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="testPattern" className="block text-sm font-medium mb-2">
+                      Test Pattern
+                    </label>
+                    <select
+                      id="testPattern"
+                      value={testPattern}
+                      onChange={(e) => setTestPattern(e.target.value as TestPattern)}
+                      disabled={testStreamStatus.running}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    >
+                      <option value="smpte">SMPTE Bars (Standard TV Test)</option>
+                      <option value="bar">Color Bars</option>
+                      <option value="checkerboard">Checkerboard (Motion Test)</option>
+                      <option value="ball">Bouncing Ball</option>
+                      <option value="snow">Snow (Random Noise)</option>
                     </select>
                   </div>
                 </div>
@@ -2604,71 +2561,41 @@ export default function SettingsPage() {
                       {testStreamStatus.instructions}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                      Mode: Moonlight Stream • 
-                      App: {testStreamStatus.app || testApp}
-                    </p>
-                  </div>
-                ) : testStreamStatus.waiting ? (
-                  <div className={`mb-4 p-4 border rounded-lg ${testStreamStatus.pairingRequired ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'}`}>
-                    <div className={`flex items-center gap-2 font-medium mb-2 ${testStreamStatus.pairingRequired ? 'text-amber-700 dark:text-amber-300' : 'text-blue-700 dark:text-blue-300'}`}>
-                      <span className="animate-spin">◌</span>
-                      {testStreamStatus.pairingRequired ? 'Waiting for Pairing' : 'Waiting for Moonlight'}
-                    </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {testStreamStatus.pairingRequired
-                        ? 'Pair your Moonlight client first, then the test app will launch automatically.'
-                        : 'Connect in Moonlight to start the test app automatically.'}
+                      Mode: {testStreamStatus.mode === 'x11' ? 'Host Display' : 'Moonlight Stream'} • 
+                      Pattern: {testStreamStatus.pattern} • 
+                      Profile: {testStreamStatus.profileId}
                     </p>
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                    Launches a GStreamer test pattern inside the sidecar.
+                    Audio: 440Hz sine wave tone
                   </p>
                 )}
 
                 <div className="flex gap-3">
                   {testStreamStatus.running ? (
-                    <>
-                      <button
-                        onClick={stopTestStream}
-                        disabled={testLoading}
-                        className="flex-1 bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                      >
-                        {testLoading ? 'Stopping...' : '■ Stop Test'}
-                      </button>
-                      <button
-                        onClick={() => startTestStream()}
-                        disabled={testLoading}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                      >
-                        {testLoading ? 'Restarting...' : '↻ Restart Test'}
-                      </button>
-                    </>
-                  ) : testStreamStatus.waiting ? (
-                    <>
-                      <button
-                        onClick={stopTestStream}
-                        disabled={testLoading}
-                        className="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                      >
-                        {testLoading ? 'Cancelling...' : 'Cancel Queue'}
-                      </button>
-                      <button
-                        onClick={() => startTestStream()}
-                        disabled={testLoading}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-                      >
-                        {testLoading ? 'Updating...' : 'Update Queue'}
-                      </button>
-                    </>
+                    <button
+                      onClick={stopTestStream}
+                      disabled={testLoading}
+                      className="flex-1 bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
+                    >
+                      {testLoading ? 'Stopping...' : '■ Stop Test'}
+                    </button>
                   ) : (
                     <>
                       <button
-                        onClick={() => startTestStream()}
+                        onClick={() => startTestStream('stream')}
                         disabled={testLoading}
                         className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
                       >
                         {testLoading ? 'Starting...' : '▶ Test to Moonlight'}
+                      </button>
+                      <button
+                        onClick={() => startTestStream('x11')}
+                        disabled={testLoading}
+                        className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400"
+                      >
+                        {testLoading ? 'Starting...' : '▶ Test to Host Display'}
                       </button>
                     </>
                   )}
@@ -2690,17 +2617,12 @@ export default function SettingsPage() {
                       disabled={pairingStatusLoading}
                       className="text-xs px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
                     >
-                      {pairingStatusLoading ? 'Checking...' : 'Check Requests'}
+                      {pairingStatusLoading ? 'Checking...' : 'Check Ready'}
                     </button>
                   </div>
                   {pairingStatus && (
                     <div className={`mb-3 text-xs ${pairingStatus.ready ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
                       {pairingStatus.message || (pairingStatus.ready ? 'Sidecar is ready for pairing.' : 'Sidecar is not ready for pairing.')}
-                    </div>
-                  )}
-                  {pairingSecret && (
-                    <div className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-                      Pending request {pairingClientIp ? `from ${pairingClientIp}` : 'detected'}.
                     </div>
                   )}
                   <div className="flex flex-wrap items-center gap-3">
@@ -3386,7 +3308,7 @@ export default function SettingsPage() {
                     Cancel
                   </button>
                   <button
-                    onClick={editingProfile ? updateStreamingProfile : createStreamingProfile}
+                    onClick={editingProfile ? updateSwayProfile : createSwayProfile}
                     disabled={saving || (!editingProfile && !profileFormData.id) || !profileFormData.name}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:bg-gray-400"
                   >
@@ -3401,7 +3323,7 @@ export default function SettingsPage() {
           <div 
             id="downloads" 
             ref={(el) => { sectionRefs.current['downloads'] = el; }}
-            className="settings-panel relative order-[9]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['downloads']} message={savedSections['downloads'] || ''} />
             <h2 className="text-xl font-semibold mb-4">📥 Download Settings</h2>
@@ -3430,23 +3352,6 @@ export default function SettingsPage() {
 
               {/* Installer Cache Location */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                <label className="flex items-start gap-3 mb-4 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={autoCheckCompatibilityDatabases}
-                    onChange={(e) => setAutoCheckCompatibilityDatabases(e.target.checked)}
-                    className="mt-1 h-4 w-4 text-blue-600"
-                  />
-                  <div>
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Auto-check compatibility databases
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Automatically query community databases (protonfixes, Lutris, ProtonDB) when installing a Wine game. Disable this if you prefer to check manually or have limited internet.
-                    </div>
-                  </div>
-                </label>
-
                 <label className="block text-sm font-medium mb-2">
                   Downloaded Installer Storage
                 </label>
@@ -3467,7 +3372,7 @@ export default function SettingsPage() {
                     <div className="flex-1">
                       <div className="font-medium text-gray-900 dark:text-gray-100">Store with game data</div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Installers are stored in <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">dillinger_core/storage/games/&lt;game-id&gt;/installers/</code>
+                        Installers are stored in <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">dillinger_root/storage/games/&lt;game-id&gt;/installers/</code>
                       </div>
                       <div className="text-xs text-green-600 dark:text-green-400 mt-1">
                         ✓ Recommended - Automatically found during installation
@@ -3512,7 +3417,7 @@ export default function SettingsPage() {
                       </select>
                       {availableVolumes.length === 0 && (
                         <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                          No paths configured. Use the Paths section to configure installer storage first.
+                          No volumes configured. Use the Volume Manager to add volumes first.
                         </p>
                       )}
                     </div>
@@ -3522,8 +3427,8 @@ export default function SettingsPage() {
 
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  💡 <strong>Tip:</strong> Default install/download paths follow first-class volume conventions.
-                  Use the Paths section to register ROM libraries, installer folders, and Wine install roots.
+                  💡 <strong>Tip:</strong> Default install locations for games are configured per-volume.
+                  Use the Volume Manager in the left sidebar and click the pencil icon to configure a volume as the default for each purpose.
                 </p>
               </div>
 
@@ -3541,7 +3446,7 @@ export default function SettingsPage() {
           <div 
             id="maintenance" 
             ref={(el) => { sectionRefs.current['maintenance'] = el; }}
-            className="settings-panel relative order-[10]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <h2 className="text-xl font-semibold mb-4">🔧 Maintenance</h2>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
@@ -3572,7 +3477,7 @@ export default function SettingsPage() {
               </button>
 
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                ⚠️ System volumes (dillinger_core, dillinger_cache) are protected and will not be removed.
+                ⚠️ System volumes (dillinger_root, dillinger_installers) are protected and will not be removed.
               </p>
             </div>
           </div>
@@ -3581,7 +3486,7 @@ export default function SettingsPage() {
           <div 
             id="ui" 
             ref={(el) => { sectionRefs.current['ui'] = el; }}
-            className="settings-panel relative order-[11]"
+            className="relative border border-gray-200 dark:border-gray-700 p-6 rounded-lg"
           >
             <SaveIndicator show={!!savedSections['ui']} message={savedSections['ui'] || ''} />
             <h2 className="text-xl font-semibold mb-4">🎨 UI Settings</h2>
@@ -3628,7 +3533,7 @@ export default function SettingsPage() {
           <div 
             id="danger" 
             ref={(el) => { sectionRefs.current['danger'] = el; }}
-            className="settings-panel settings-panel-danger relative order-[12]"
+            className="relative p-6 rounded-lg border-2 border-red-500"
           >
             <h2 className="text-xl font-semibold mb-4 text-red-600 dark:text-red-400">⚠️ Danger Zone</h2>
             
@@ -3695,7 +3600,7 @@ export default function SettingsPage() {
           </div>
         </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }

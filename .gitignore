@@ -89,6 +89,13 @@ tmp/
 temp/
 .pnpm-store/
 
+# Rust build artifacts
+/target/
+**/target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
 # Editor directories and files
 .vscode/settings.json
 .vscode/launch.json

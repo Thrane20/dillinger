@@ -1,7 +1,15 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
+
 const nextConfig = {
   // Enable standalone output for Docker deployments
   output: 'standalone',
+
+  // Anchor Turbopack's workspace root to the monorepo root so it doesn't
+  // incorrectly infer the root as packages/dillinger-core/app/.
+  turbopack: {
+    root: path.resolve(__dirname, '../..'),
+  },
 
   logging: {
     incomingRequests: {

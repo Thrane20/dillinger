@@ -130,7 +130,7 @@ export default function StreamingPage() {
             <li>Open <a href="https://moonlight-stream.org/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Moonlight</a> on your client device (PC, phone, tablet, TV)</li>
             <li>Add this server&apos;s IP address in Moonlight</li>
             <li>When Moonlight shows a PIN, approve it in Dillinger</li>
-            <li>Select the Dillinger app in Moonlight to start streaming (games are swapped from Dillinger)</li>
+            <li>Select the game to start streaming</li>
           </ol>
           
           <div className="mt-6 p-4 bg-gray-700 rounded">

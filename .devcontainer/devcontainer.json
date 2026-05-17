@@ -3,7 +3,9 @@
   "build": {
     "dockerfile": "Dockerfile", 
     "context": "..",
-    "network": "host"
+    "options": [
+      "--network=host"
+    ]
   },
   "features": {
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
@@ -29,6 +31,7 @@
     "source=dillinger_cache,target=/cache,type=volume",
     "source=dillinger_installed_dev,target=/installed/dev,type=volume",
     "source=dillinger-pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume",
+    "source=dillinger-verdaccio-storage,target=/home/node/.local/state/dillinger-verdaccio,type=volume",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
     "source=/run/user/1000,type=bind,target=/run/user/1000",
@@ -36,9 +39,10 @@
     "source=${localEnv:HOME}/.Xauthority,target=/home/node/.Xauthority,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.config/pulse,target=/home/node/.config/pulse,type=bind"
   ],
-  "forwardPorts": [8080],
+  "forwardPorts": [8080, 4873],
   "portsAttributes": {
-    "8080": { "label": "Streaming/WebRTC" }
+    "8080": { "label": "Streaming/WebRTC" },
+    "4873": { "label": "Verdaccio local npm registry" }
   },
   "customizations": {
     "vscode": {
@@ -56,7 +60,7 @@
     }
   },
   "postCreateCommand": "pnpm install",
-  "postStartCommand": "sudo chown -R $(id -u):$(id -g) /data /cache /installed /home/node/.local/share/pnpm/store 2>/dev/null || true && sudo chown root:docker /var/run/docker.sock && pnpm run build:shared",
+  "postStartCommand": "sudo chown -R $(id -u):$(id -g) /data /cache /installed /home/node/.local/share/pnpm/store 2>/dev/null || true && sudo chown root:docker /var/run/docker.sock && sudo mkdir -p /home/node/.local/state/dillinger-verdaccio/storage && sudo chown -R $(id -u):$(id -g) /home/node/.local/state/dillinger-verdaccio && pnpm run build:shared && verdaccio --config /workspaces/dillinger/scripts/verdaccio.yaml >>/tmp/verdaccio.log 2>&1 &",
   "containerEnv": {
     "PNPM_HOME": "/home/node/.local/share/pnpm",
     "DILLINGER_CORE_PATH": "/data",

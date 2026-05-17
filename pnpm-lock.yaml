@@ -41,9 +41,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@types/blessed':
-        specifier: ^0.1.27
-        version: 0.1.27
       blessed:
         specifier: ^0.1.81
         version: 0.1.81
@@ -72,6 +69,9 @@ importers:
         specifier: ^7.3.1
         version: 7.3.1
     devDependencies:
+      '@types/blessed':
+        specifier: ^0.1.27
+        version: 0.1.27
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.24

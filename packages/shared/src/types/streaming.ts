@@ -16,14 +16,14 @@ export type StreamingCodec = 'h264' | 'h265' | 'av1';
 export type StreamingQuality = 'low' | 'medium' | 'high' | 'ultra';
 
 /**
- * Test apps for streaming test mode (GStreamer pipelines)
+ * Test pattern types for streaming test mode
  */
-export type TestApp = 'gst-video-test' | 'gst-av-test';
+export type TestPattern = 'smpte' | 'bar' | 'checkerboard' | 'ball' | 'snow';
 
 /**
  * Sidecar operating mode
  */
-export type SidecarMode = 'game' | 'test';
+export type SidecarMode = 'game' | 'test-stream' | 'test-x11';
 
 /**
  * Job specification passed to the streaming sidecar
@@ -225,8 +225,14 @@ export interface SidecarStatus {
  * Request to start streaming test
  */
 export interface StartTestStreamRequest {
-  /** Test app to launch inside the sidecar */
-  app: TestApp;
+  /** Test mode: stream to Moonlight or display on host X11 */
+  mode: 'stream' | 'x11';
+  
+  /** Streaming profile to use */
+  profileId: string;
+  
+  /** Test pattern to display */
+  pattern: TestPattern;
 }
 
 /**
@@ -237,16 +243,13 @@ export interface TestStreamStatus {
   running: boolean;
   
   /** Test mode */
-  mode?: 'stream';
+  mode?: 'stream' | 'x11';
   
-  /** Active test app */
-  app?: TestApp;
-
-  /** Waiting for Moonlight connection */
-  waiting?: boolean;
-
-  /** Pairing required before launch */
-  pairingRequired?: boolean;
+  /** Active profile */
+  profileId?: string;
+  
+  /** Active pattern */
+  pattern?: TestPattern;
   
   /** Container ID */
   containerId?: string;

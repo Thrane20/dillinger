@@ -1,0 +1,60 @@
+# Verdaccio local npm registry configuration
+# Used during development to publish and test the dillinger-gaming CLI
+# before releasing to npmjs.com.
+#
+# Storage is in a Docker-volume-backed directory so published packages
+# survive devcontainer restarts without a full rebuild.
+#
+# Usage:
+#   verdaccio --config /workspaces/dillinger/scripts/verdaccio.yaml
+#   (started automatically by the devcontainer postStartCommand)
+#
+# Publish:  pnpm cli:publish:local
+# Install:  npm install -g dillinger-gaming --registry http://localhost:4873
+
+storage: /home/node/.local/state/dillinger-verdaccio/storage
+plugins: /home/node/.local/state/dillinger-verdaccio/plugins
+
+auth:
+  htpasswd:
+    file: /home/node/.local/state/dillinger-verdaccio/htpasswd
+    # New registrations disabled; dillinger-gaming packages use $all so no
+    # authentication is required to publish locally.
+    max_users: 0
+
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+    # Cache remote tarballs to avoid repeated network fetches.
+    cache: true
+    maxage: 10m
+
+packages:
+  # dillinger-gaming: local package – anonymous publish, proxy disabled.
+  'dillinger-gaming':
+    access: $all
+    publish: $all
+    unpublish: $authenticated
+
+  # All scoped packages (@dillinger/*) proxy through to npmjs.com.
+  '@dillinger/*':
+    access: $all
+    publish: $authenticated
+    proxy: npmjs
+
+  # Everything else: read-only proxy from npmjs.com.
+  '**':
+    access: $all
+    publish: $authenticated
+    proxy: npmjs
+
+server:
+  keepAliveTimeout: 60
+
+web:
+  title: Dillinger Local Registry
+  primary_color: '#1E90FF'
+
+logs: { type: stdout, format: pretty-timestamped, level: http }
+
+listen: localhost:4873

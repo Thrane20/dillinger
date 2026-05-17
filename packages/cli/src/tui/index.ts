@@ -10,7 +10,6 @@ import {
   type CoreGame,
   type CoreHealthStatus,
 } from '../utils/core-api.js';
-import { getNativeStatus, type NativeRuntimeStatus } from '../utils/native.js';
 import {
   buildExtraRunnerMountPath,
   createManagedBindVolume,
@@ -25,7 +24,6 @@ import {
 type TabName = 'dashboard' | 'volumes' | 'games';
 
 type RuntimeSnapshot = {
-  native: NativeRuntimeStatus | null;
   container: Awaited<ReturnType<typeof getContainerStatus>> | null;
   bootstrap: CoreBootstrapStatus | null;
   health: CoreHealthStatus | null;
@@ -227,7 +225,6 @@ class DillingerTui {
   private selectedGameIndex = 0;
   private query = '';
   private snapshot: RuntimeSnapshot = {
-    native: null,
     container: null,
     bootstrap: null,
     health: null,
@@ -369,11 +366,9 @@ class DillingerTui {
   }
 
   private renderHeader(): void {
-    const runtimeLabel = this.snapshot.native?.running
-      ? 'native'
-      : this.snapshot.container?.running
-        ? 'container'
-        : 'stopped';
+    const runtimeLabel = this.snapshot.container?.running
+      ? 'container'
+      : 'stopped';
 
     const gameCount = this.snapshot.games.length || this.snapshot.health?.counts?.games || 0;
     const managedVolumeCount = this.snapshot.managedVolumes.length;
@@ -413,11 +408,10 @@ class DillingerTui {
   private renderDashboard(): void {
     const runtimeLines = [
       '{bold}Runtime{/bold}',
-      `- Native core: ${this.snapshot.native?.running ? `running (PID ${this.snapshot.native.pid ?? 'unknown'})` : 'not running'}`,
       `- Container core: ${this.snapshot.container?.running ? `${this.snapshot.container.image ?? 'running'} (${this.snapshot.container.status ?? 'running'})` : 'not running'}`,
       `- Core API: ${this.snapshot.bootstrap ? `reachable (${this.snapshot.bootstrap.runtime})` : 'unreachable'}`,
-      `- Started: ${formatTimestamp(this.snapshot.native?.startedAt ?? this.snapshot.container?.uptime)}`,
-      `- Data path: ${this.snapshot.bootstrap?.hostDataPath ?? this.snapshot.native?.dataPath ?? this.snapshot.bootstrap?.dillingerCorePath ?? 'n/a'}`,
+      `- Started: ${formatTimestamp(this.snapshot.container?.uptime)}`,
+      `- Data path: ${this.snapshot.bootstrap?.hostDataPath ?? this.snapshot.bootstrap?.dillingerCorePath ?? 'n/a'}`,
       '',
       '{bold}Counts{/bold}',
       `- Games registered: ${this.snapshot.games.length || this.snapshot.health?.counts?.games || 0}`,
@@ -568,9 +562,8 @@ class DillingerTui {
     }
 
     const { containerName } = getConfig();
-    const [nativeResult, containerResult, bootstrapResult, healthResult, gamesResult, managedVolumesResult, dockerVolumesResult, hintResult] =
+    const [containerResult, bootstrapResult, healthResult, gamesResult, managedVolumesResult, dockerVolumesResult, hintResult] =
       await Promise.allSettled([
-        getNativeStatus(),
         getContainerStatus(containerName),
         getCoreBootstrapStatus(),
         getCoreHealthStatus(),
@@ -581,7 +574,6 @@ class DillingerTui {
       ]);
 
     this.snapshot = {
-      native: nativeResult.status === 'fulfilled' ? nativeResult.value : null,
       container: containerResult.status === 'fulfilled' ? containerResult.value : null,
       bootstrap: bootstrapResult.status === 'fulfilled' ? bootstrapResult.value : null,
       health: healthResult.status === 'fulfilled' ? healthResult.value : null,

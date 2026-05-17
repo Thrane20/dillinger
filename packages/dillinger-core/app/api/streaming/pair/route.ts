@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { logger } from '@/lib/services/logger';
-import { DockerService } from '@/lib/services/docker-service';
 
-const dockerService = DockerService.getInstance();
+const SIDECAR_API_BASE = process.env.DILLINGER_SIDECAR_API_BASE || 'http://localhost:9999';
+
+async function fetchSidecar(endpoint: string, init?: RequestInit): Promise<any | null> {
+  try {
+    const response = await fetch(`${SIDECAR_API_BASE}${endpoint}`, {
+      ...init,
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function getPairStatus(): Promise<any | null> {
+  return await fetchSidecar('/pair/status', { method: 'GET' });
+}
+
+async function getHealth(): Promise<any | null> {
+  return await fetchSidecar('/health', { method: 'GET' });
+}
 
 /**
  * GET /api/streaming/pair
@@ -10,7 +32,7 @@ const dockerService = DockerService.getInstance();
  */
 export async function GET() {
   try {
-    const pairStatus = await dockerService.getPairStatus();
+    const pairStatus = await getPairStatus();
     const clients = Array.isArray(pairStatus?.paired)
       ? pairStatus.paired.map((client: any) => ({
           id: client.client_id,
@@ -63,9 +85,9 @@ export async function POST(request: NextRequest) {
     if (action === 'pair') {
       const { pin, pair_secret } = body;
 
-      if (!pin) {
+      if (!pin || !pair_secret) {
         return NextResponse.json(
-          { success: false, error: 'Missing pin' },
+          { success: false, error: 'Missing pin or pair_secret' },
           { status: 400 }
         );
       }
@@ -77,23 +99,12 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      let pairSecretToUse = pair_secret as string | undefined;
-
-      if (!pairSecretToUse) {
-        const pairStatus = await dockerService.getPairStatus();
-        const pending = Array.isArray(pairStatus?.pending) ? pairStatus.pending : [];
-        pairSecretToUse = pending[0]?.pair_secret;
-      }
-
-      if (!pairSecretToUse) {
-        return NextResponse.json(
-          { success: false, error: 'No pending pairing request found. Trigger pairing in Moonlight first.' },
-          { status: 400 }
-        );
-      }
-
-      logger.info(`Attempting Wolf pairing for secret ${pairSecretToUse}`);
-      const result = await dockerService.acceptPairing(pairSecretToUse, pin);
+      logger.info(`Attempting Wolf pairing for secret ${pair_secret}`);
+      const result = await fetchSidecar('/pair/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pair_secret, pin }),
+      });
 
       if (result?.success) {
         logger.info('Wolf pairing successful');
@@ -107,7 +118,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'status') {
-      const ready = await dockerService.getSidecarHealth();
+      const ready = await getHealth();
 
       if (!ready) {
         return NextResponse.json({

@@ -1,0 +1,72 @@
+# nfpm package spec for dillinger-gaming CLI
+#
+# Builds .deb (and optionally .rpm / Arch) packages from the pre-built
+# tsup bundle in packages/cli/dist/.
+#
+# The tsup build bundles ALL npm dependencies into dist/index.js, so the
+# only system requirement is a compatible Node.js runtime (>=18).
+#
+# Usage (via root script):
+#   pnpm cli:package:deb      → release_assets/dillinger-gaming_<ver>_amd64.deb
+#   pnpm cli:package:rpm      → release_assets/dillinger-gaming_<ver>_amd64.rpm
+#   pnpm cli:package:arch     → release_assets/dillinger-gaming_<ver>_amd64.pkg.tar.zst
+#
+# Or directly:
+#   nfpm package -f scripts/nfpm-cli.yaml --packager deb --target release_assets/
+#
+# NOTE: Run `pnpm cli:prepublish` first to ensure dist/ is up to date.
+
+name: dillinger-gaming
+arch: amd64
+platform: linux
+
+# Version is read from the $DILLINGER_CLI_VERSION env var injected by
+# package-cli.sh (sourced from packages/cli/package.json at build time).
+version: ${DILLINGER_CLI_VERSION}
+
+section: utils
+priority: optional
+maintainer: Dillinger Team <hello@dillinger.gg>
+description: |
+  CLI tool for managing and launching the Dillinger game library.
+  Pulls and starts the Dillinger Docker container, manages volumes,
+  and provides a terminal UI for monitoring status.
+homepage: https://github.com/thrane20/dillinger
+license: MIT
+
+# ── Deb-specific ───────────────────────────────────────────────────────────
+deb:
+  depends:
+    # Node.js >=18 required to run the bundle; Docker is required at runtime.
+    - nodejs (>= 18)
+    - docker.io | docker-ce
+
+# ── Arch (PKGBUILD / pacman) ───────────────────────────────────────────────
+archlinux:
+  depends:
+    - nodejs
+    - docker
+
+# ── Files to install ──────────────────────────────────────────────────────
+contents:
+  # The bundled CLI entry point (tsup bundles all deps; no node_modules needed)
+  - src: packages/cli/dist/index.js
+    dst: /usr/lib/dillinger-gaming/index.js
+    file_info:
+      mode: 0644
+
+  # Minimal package.json so Node.js treats the lib dir as ESM
+  - src: scripts/_nfpm_lib_pkg.json
+    dst: /usr/lib/dillinger-gaming/package.json
+    file_info:
+      mode: 0644
+
+  # Shell wrapper that ends up on PATH
+  - src: scripts/_nfpm_bin_wrapper.sh
+    dst: /usr/bin/dillinger-gaming
+    file_info:
+      mode: 0755
+
+scripts:
+  # Reload shell PATH cache after install (bash/zsh users)
+  postinstall: scripts/_nfpm_postinstall.sh

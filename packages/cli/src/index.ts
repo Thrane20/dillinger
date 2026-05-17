@@ -45,7 +45,6 @@ async function main(): Promise<void> {
   program
     .command('start')
     .option('--port <number>', 'Web UI host port')
-    .option('--native', 'Run Dillinger Core as a native host daemon')
     .option('--detach', 'Run container in detached mode', true)
     .option('--no-update-check', 'Skip update checks')
     .option('--no-gpu', 'Disable GPU passthrough')
@@ -54,14 +53,13 @@ async function main(): Promise<void> {
     .option('--no-input', 'Disable input device passthrough')
     .action(startCommand);
 
-  program.command('stop').option('--remove', 'Remove container after stopping').option('--native', 'Stop native Dillinger Core').action(stopCommand);
-  program.command('restart').option('--native', 'Restart native Dillinger Core').action(restartCommand);
-  program.command('status').option('--native', 'Show native Dillinger Core status').action(statusCommand);
+  program.command('stop').option('--remove', 'Remove container after stopping').action(stopCommand);
+  program.command('restart').action(restartCommand);
+  program.command('status').action(statusCommand);
   program
     .command('logs')
     .option('-f, --follow', 'Follow logs')
     .option('--tail <lines>', 'Tail lines', '100')
-    .option('--native', 'Show native Dillinger Core logs')
     .action(logsCommand);
 
   const update = program.command('update').description('Check and apply updates');

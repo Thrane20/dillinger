@@ -1,0 +1,35 @@
+[package]
+name = "dillinger-gaming"
+version = "0.1.0"
+edition = "2021"
+description = "Dillinger Gaming CLI (native Rust port)"
+
+[[bin]]
+name = "dillinger-gaming"
+path = "src/main.rs"
+
+[lib]
+name = "dillinger_gaming"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow       = "1"
+clap         = { version = "4", features = ["derive"] }
+colored      = "2"
+crossterm    = { version = "0.27", features = ["event-stream"] }
+dialoguer    = "0.11"
+dirs         = "5"
+directories  = "5"
+futures      = "0.3"
+indicatif    = "0.17"
+ratatui      = "0.26"
+reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+semver       = "1"
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+tokio        = { version = "1", features = ["full"] }
+uuid         = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio    = { version = "1", features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"

@@ -11,9 +11,8 @@ import {
 import { getConfig } from '../utils/config.js';
 import { compareVersions, fetchRemoteVersions, getLocalImageVersion } from '../utils/version.js';
 import { confirm } from '../utils/prompts.js';
-import { createDockerVolume, volumeExists } from '../utils/volume.js';
+import { createDockerVolume, listVolumes, volumeExists } from '../utils/volume.js';
 import { hasUdevRulesInstalled, installUdevRules } from '../utils/udev.js';
-import { startNativeCore } from '../utils/native.js';
 
 export type StartOptions = {
   port?: string;
@@ -24,15 +23,24 @@ export type StartOptions = {
   display?: boolean;
   input?: boolean;
   yes?: boolean;
-  native?: boolean;
 };
+
+/** Volumes to always ensure exist and mount into the container. */
+const STANDARD_VOLUMES: Array<{ name: string; mount: string }> = [
+  { name: 'dillinger_roms', mount: '/roms' },
+  { name: 'dillinger_cache', mount: '/cache' },
+];
+
+/** Prefix for Wine install-root volumes. */
+const INSTALLED_VOLUME_PREFIX = 'dillinger_installed_';
 
 export function buildStartDockerArgs(
   containerName: string,
-  volumeName: string,
+  coreVolumeName: string,
   selectedImage: string,
   hostPort: number,
   options: StartOptions,
+  extraVolumes: Array<{ name: string; mount: string }> = [],
 ): string[] {
   const dockerArgs = [
     'run',
@@ -43,10 +51,14 @@ export function buildStartDockerArgs(
     '-v',
     '/var/run/docker.sock:/var/run/docker.sock',
     '-v',
-    `${volumeName}:/data`,
+    `${coreVolumeName}:/data`,
     '--restart',
     'unless-stopped',
   ];
+
+  for (const vol of extraVolumes) {
+    dockerArgs.push('-v', `${vol.name}:${vol.mount}`);
+  }
 
   if (options.gpu !== false) {
     dockerArgs.push('--device', '/dev/dri:/dev/dri');
@@ -79,39 +91,30 @@ export function buildStartDockerArgs(
   return dockerArgs;
 }
 
+/** Ensure a standard volume exists, creating it if necessary. */
+async function ensureStandardVolume(name: string): Promise<void> {
+  if (!(await volumeExists(name))) {
+    const spinner = createSpinner(`Creating volume ${name}...`);
+    await createDockerVolume(name);
+    spinner.succeed(`Created volume ${name}`);
+  }
+}
+
+/** Discover all dillinger_installed_* volumes and return mount descriptors. */
+async function discoverInstalledVolumes(): Promise<Array<{ name: string; mount: string }>> {
+  const names = await listVolumes(INSTALLED_VOLUME_PREFIX);
+  return names.map((name) => ({
+    name,
+    mount: `/installed/${name.slice(INSTALLED_VOLUME_PREFIX.length)}`,
+  }));
+}
+
 export async function startCommand(options: StartOptions): Promise<void> {
   const config = getConfig();
   const containerName = config.containerName;
   const volumeName = config.volumeName;
   const imageName = config.imageName;
   const hostPort = Number(options.port ?? config.port);
-
-  if (options.native) {
-    if (!Number.isInteger(hostPort) || hostPort <= 0) {
-      log.error(`Invalid port: ${options.port ?? config.port}`);
-      process.exit(1);
-    }
-
-    try {
-      const status = await startNativeCore({ port: hostPort, volumeName });
-      if (status.started) {
-        log.success('Dillinger Core native runtime started');
-      } else {
-        log.warn('Dillinger Core native runtime was already running.');
-      }
-      log.info(`Data: ${status.dataPath ?? 'unknown'}`);
-      log.info(`PID: ${status.pid ?? 'unknown'}`);
-      log.info(`Logs: ${status.logFile}`);
-      log.info(`Open http://localhost:${status.port ?? hostPort}`);
-      if (status.runtime && !status.runtime.hasBundledNode) {
-        log.warn('Using the current Node.js runtime because the native artifact does not include node/bin/node.');
-      }
-      return;
-    } catch (error) {
-      log.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    }
-  }
 
   if (!(await isDockerInstalled())) {
     log.error('Docker is not installed.');
@@ -135,10 +138,24 @@ export async function startCommand(options: StartOptions): Promise<void> {
     }
   }
 
+  // Ensure the core volume exists.
   if (!(await volumeExists(volumeName))) {
     const volumeSpinner = createSpinner(`Creating volume ${volumeName}...`);
     await createDockerVolume(volumeName);
     volumeSpinner.succeed(`Created volume ${volumeName}`);
+  }
+
+  // Ensure standard volumes (roms, cache) exist.
+  for (const vol of STANDARD_VOLUMES) {
+    await ensureStandardVolume(vol.name);
+  }
+
+  // Collect all volumes to mount: standard + any existing installed roots.
+  const installedVolumes = await discoverInstalledVolumes();
+  const extraVolumes = [...STANDARD_VOLUMES, ...installedVolumes];
+
+  if (installedVolumes.length > 0) {
+    log.info(`Mounting ${installedVolumes.length} Wine install volume(s): ${installedVolumes.map((v) => v.name).join(', ')}`);
   }
 
   const status = await getContainerStatus(containerName);
@@ -177,7 +194,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   await ensureImage(selectedImage);
   pullSpinner.succeed(`Pulled ${selectedImage}`);
 
-  const dockerArgs = buildStartDockerArgs(containerName, volumeName, selectedImage, hostPort, options);
+  const dockerArgs = buildStartDockerArgs(containerName, volumeName, selectedImage, hostPort, options, extraVolumes);
 
   const runSpinner = createSpinner('Starting Dillinger container...');
   await runContainer(dockerArgs);

@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { getConfig } from './config.js';
 import { createBindVolume, volumeExists } from './volume.js';
 import { getCoreBootstrapStatus, isCoreReachable } from './core-api.js';
-import { resolveNativeCoreDataPath } from './native.js';
 
 export type ManagedVolumeStorageType = 'ssd' | 'platter' | 'archive';
 export type ManagedVolumePurpose = 'core' | 'roms' | 'cache' | 'installed' | 'downloads' | 'installers';
@@ -73,16 +73,20 @@ export function buildExtraRunnerMountPath(dockerVolumeName: string): string {
   return path.posix.join(EXTRA_RUNNER_VOLUME_ROOT, safeSegment);
 }
 
+function getCliStateDir(): string {
+  return path.join(homedir(), '.local', 'state', 'dillinger-gaming');
+}
+
 async function getLocalStorageRoot(): Promise<string> {
-  const { volumeName } = getConfig();
-  const dataPath = await resolveNativeCoreDataPath(volumeName);
-  return path.join(dataPath, 'storage', 'volumes');
+  const dir = path.join(getCliStateDir(), 'volumes');
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
 }
 
 async function getLocalVolumeMetadataPath(): Promise<string> {
-  const { volumeName } = getConfig();
-  const dataPath = await resolveNativeCoreDataPath(volumeName);
-  return path.join(dataPath, 'storage', 'volume-metadata.json');
+  const dir = getCliStateDir();
+  await fs.mkdir(dir, { recursive: true });
+  return path.join(dir, 'volume-metadata.json');
 }
 
 async function updateLocalVolumeIndex(storageRoot: string, volumes: ManagedVolumeRecord[]): Promise<void> {

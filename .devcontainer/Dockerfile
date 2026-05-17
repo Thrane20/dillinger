@@ -28,6 +28,16 @@ RUN apt-get update \
         pulseaudio-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# nfpm – universal package builder for deb, rpm, Arch packages
+RUN echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' \
+        | tee /etc/apt/sources.list.d/goreleaser.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nfpm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verdaccio – local npm registry for offline / pre-release publishing
+RUN npm install -g --no-fund --no-audit verdaccio
+
 # Enable pnpm via Corepack at the requested version
 RUN if ! command -v corepack >/dev/null 2>&1; then \
         npm install -g --force --no-fund --no-audit corepack; \
