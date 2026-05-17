@@ -56,6 +56,7 @@ export class DockerService {
   private readonly SESSION_VOLUME = 'dillinger_current_session';
   private readonly STREAMING_RUNTIME_VOLUME = 'dillinger_streaming_runtime';
   private readonly EXTRA_RUNNER_VOLUME_ROOT = '/mnt/dillinger-volumes';
+  private readonly WINE_INSTALLED_VOLUME_MOUNT = '/mnt/dillinger-installed';
   
   // Host path mapping for devcontainer
   // When running in a devcontainer, /workspaces/dillinger maps to a host path
@@ -1572,6 +1573,21 @@ export class DockerService {
     env.push(...displayConfig.env);
     
     logger.info(`  Display mode: ${displayConfig.mode}`);
+
+    if (platform.type === 'wine' && displayConfig.mode === 'wayland' && !env.some(entry => entry === 'USE_GAMESCOPE=true')) {
+      const resolution = game.settings?.launch?.resolution || '1920x1080';
+      const [width = '1920', height = '1080'] = resolution.split('x');
+
+      env.push(
+        'USE_GAMESCOPE=true',
+        `GAMESCOPE_WIDTH=${width}`,
+        `GAMESCOPE_HEIGHT=${height}`,
+        'GAMESCOPE_REFRESH=60',
+        'GAMESCOPE_FULLSCREEN=false',
+        'GAMESCOPE_UPSCALER=auto'
+      );
+      logger.info(`  Gamescope auto-enabled for Wine on Wayland: ${width}x${height}@60Hz`);
+    }
     
     // Determine Wine prefix path if this is a Wine game
     // Wine prefix == installation directory (contains drive_c/)
@@ -1724,8 +1740,8 @@ export class DockerService {
         const volumeMatch = await this.findVolumeForPath(winePrefixPath);
         if (volumeMatch) {
           // Mount the entire volume and use a subpath for WINEPREFIX
-          binds.push(`${winePrefixVolume.dockerVolumeName}:/mnt/game_volume:rw`);
-          const containerPrefixPath = `/mnt/game_volume${volumeMatch.relativePath}`;
+          binds.push(`${winePrefixVolume.dockerVolumeName}:${this.WINE_INSTALLED_VOLUME_MOUNT}:rw`);
+          const containerPrefixPath = `${this.WINE_INSTALLED_VOLUME_MOUNT}${volumeMatch.relativePath}`;
           
           // Update WINEPREFIX to point to the container path
           for (let i = 0; i < env.length; i++) {
@@ -1737,13 +1753,13 @@ export class DockerService {
               continue;
             }
             if (entry.startsWith('GAME_EXECUTABLE=/wineprefix/')) {
-              // Transform /wineprefix/drive_c/... to /mnt/game_volume/<rel>/drive_c/...
+              // Transform /wineprefix/drive_c/... to /mnt/dillinger-installed/<rel>/drive_c/...
               const rel = entry.substring('GAME_EXECUTABLE=/wineprefix'.length);
               env[i] = `GAME_EXECUTABLE=${containerPrefixPath}${rel}`;
             }
           }
           
-          logger.info(`  Mounted volume ${winePrefixVolume.dockerVolumeName} at /mnt/game_volume`);
+          logger.info(`  Mounted installed volume ${winePrefixVolume.dockerVolumeName} at ${this.WINE_INSTALLED_VOLUME_MOUNT}`);
           logger.info(`  WINEPREFIX set to: ${containerPrefixPath}`);
         }
       } else {
@@ -1772,8 +1788,8 @@ export class DockerService {
           const gameExecutable = maybeGameExecutable.substring('GAME_EXECUTABLE='.length);
           
           // Check if the executable path is under our mounted volume
-          if (gameExecutable.startsWith('/mnt/game_volume/')) {
-            const relPath = gameExecutable.substring('/mnt/game_volume/'.length);
+          if (gameExecutable.startsWith(`${this.WINE_INSTALLED_VOLUME_MOUNT}/`)) {
+            const relPath = gameExecutable.substring(`${this.WINE_INSTALLED_VOLUME_MOUNT}/`.length);
             const { exists, actualPath } = await this.checkPathCaseInsensitiveInVolume(
               winePrefixVolume.dockerVolumeName,
               relPath
@@ -1788,7 +1804,7 @@ export class DockerService {
             
             // If the actual path differs from requested (case mismatch), update the env
             if (actualPath && actualPath !== relPath) {
-              const correctedPath = `/mnt/game_volume/${actualPath}`;
+              const correctedPath = `${this.WINE_INSTALLED_VOLUME_MOUNT}/${actualPath}`;
               logger.info(`  ℹ️ Corrected executable path case: "${gameExecutable}" -> "${correctedPath}"`);
               env[execEnvIndex] = `GAME_EXECUTABLE=${correctedPath}`;
             }
@@ -1811,7 +1827,9 @@ export class DockerService {
         containerWorkingDir = path.posix.dirname(rewrittenExec);
       } else if (winePrefixVolume) {
         const volumeMatch = await this.findVolumeForPath(winePrefixPath!);
-        containerWorkingDir = volumeMatch ? `/mnt/game_volume${volumeMatch.relativePath}` : '/mnt/game_volume';
+        containerWorkingDir = volumeMatch
+          ? `${this.WINE_INSTALLED_VOLUME_MOUNT}${volumeMatch.relativePath}`
+          : this.WINE_INSTALLED_VOLUME_MOUNT;
       } else {
         containerWorkingDir = '/wineprefix';
       }
@@ -2459,9 +2477,9 @@ export class DockerService {
     let containerPrefixPath: string;
 
     const volumeMatch = await this.findVolumeForPath(configuredInstallPath);
-    if ((volumeMatch?.volume as any)?.type === 'docker') {
-      bindSource = (volumeMatch!.volume as any).dockerVolumeName;
-      containerPrefixPath = `/mnt/game_volume${volumeMatch!.relativePath}`;
+    if (volumeMatch?.volume?.dockerVolumeName) {
+      bindSource = volumeMatch.volume.dockerVolumeName;
+      containerPrefixPath = `${this.WINE_INSTALLED_VOLUME_MOUNT}${volumeMatch.relativePath}`;
     } else {
       bindSource = this.getHostPath(configuredInstallPath);
       containerPrefixPath = configuredInstallPath;
@@ -2474,8 +2492,8 @@ export class DockerService {
     const baseImage = platform.configuration.containerImage?.replace(/:.*$/, '') || 'ghcr.io/thrane20/dillinger/runner-wine';
     const resolvedImage = await this.resolveInstalledRunnerImage(baseImage);
 
-    const binds = (volumeMatch?.volume as any)?.type === 'docker'
-      ? [`${bindSource}:/mnt/game_volume:rw`, ...displayConfig.volumes]
+    const binds = volumeMatch?.volume?.dockerVolumeName
+      ? [`${bindSource}:${this.WINE_INSTALLED_VOLUME_MOUNT}:rw`, ...displayConfig.volumes]
       : [`${bindSource}:${containerPrefixPath}:rw`, ...displayConfig.volumes];
     const env = [
       `WINEPREFIX=${containerPrefixPath}`,
@@ -3846,7 +3864,9 @@ export class DockerService {
         logger.info(`  ✓ Sound device available`);
       }
       
-      const volumes = [`${this.resolveHostPath(waylandSocket)}:/run/user/1000/${waylandDisplay}:rw`];
+      const hostRuntimeDir = this.resolveHostPath(xdgRuntimeDir);
+      const volumes = [`${hostRuntimeDir}:/run/user/1000:rw`];
+      logger.info(`  ✓ Runtime dir: ${xdgRuntimeDir} → host: ${hostRuntimeDir}`);
 
       // Add input devices for keyboard, mouse, and joystick support
       if (existsSync('/dev/input')) {
@@ -3899,7 +3919,10 @@ export class DockerService {
       }
 
       if (pulseSocketPath) {
-        volumes.push(`${this.resolveHostPath(pulseSocketPath)}:/run/user/1000/pulse:rw`);
+        const hostPulseSocketPath = this.resolveHostPath(pulseSocketPath);
+        if (!hostPulseSocketPath.startsWith(`${hostRuntimeDir}/`)) {
+          volumes.push(`${hostPulseSocketPath}:/run/user/1000/pulse:rw`);
+        }
         logger.info(`  ✓ PulseAudio socket available`);
 
         const pulseCookie = this.findReadableFile([

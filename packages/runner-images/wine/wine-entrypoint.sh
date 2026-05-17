@@ -1276,6 +1276,11 @@ echo ""
 
 USE_GAMESCOPE="${USE_GAMESCOPE:-false}"
 
+if [ "$USE_GAMESCOPE" != "true" ] && [ -n "$WAYLAND_DISPLAY" ] && [ "${DILLINGER_AUTO_GAMESCOPE:-true}" = "true" ]; then
+    echo -e "${YELLOW}⚠ Wayland-only Wine launch detected; enabling Gamescope bridge${NC}"
+    USE_GAMESCOPE="true"
+fi
+
 if [ "$USE_GAMESCOPE" = "true" ]; then
     echo -e "${BLUE}Setting up Gamescope compositor...${NC}"
     
@@ -1357,6 +1362,9 @@ if [ "$USE_GAMESCOPE" = "true" ]; then
         echo "  Gamescope upscaler: $GAMESCOPE_UPSCALER"
         if [ -n "$GAMESCOPE_FPS_LIMIT" ]; then
             echo "  Gamescope FPS limit: $GAMESCOPE_FPS_LIMIT"
+        fi
+        if [ -n "$WAYLAND_DISPLAY" ]; then
+            echo "  Wine child display: Gamescope XWayland"
         fi
         echo "  Gamescope command: $GAMESCOPE_CMD"
     else
@@ -1600,11 +1608,19 @@ if [ "$#" -gt 0 ]; then
         if [ "$ENABLE_MANGOHUD" = "true" ]; then
             echo -e "${BLUE}Executing with Gamescope + MangoHUD: mangohud $GAMESCOPE_CMD -- $@${NC}"
             echo ""
-            gosu ${UNAME:-gameuser} mangohud $GAMESCOPE_CMD -- "$@" &
+            if [ -n "$WAYLAND_DISPLAY" ]; then
+                gosu ${UNAME:-gameuser} mangohud $GAMESCOPE_CMD -- env -u WAYLAND_DISPLAY -u QT_QPA_PLATFORM -u GDK_BACKEND -u SDL_VIDEODRIVER "$@" &
+            else
+                gosu ${UNAME:-gameuser} mangohud $GAMESCOPE_CMD -- "$@" &
+            fi
         else
             echo -e "${BLUE}Executing with Gamescope: $GAMESCOPE_CMD -- $@${NC}"
             echo ""
-            gosu ${UNAME:-gameuser} $GAMESCOPE_CMD -- "$@" &
+            if [ -n "$WAYLAND_DISPLAY" ]; then
+                gosu ${UNAME:-gameuser} $GAMESCOPE_CMD -- env -u WAYLAND_DISPLAY -u QT_QPA_PLATFORM -u GDK_BACKEND -u SDL_VIDEODRIVER "$@" &
+            else
+                gosu ${UNAME:-gameuser} $GAMESCOPE_CMD -- "$@" &
+            fi
         fi
     else
         if [ "$ENABLE_MANGOHUD" = "true" ]; then
